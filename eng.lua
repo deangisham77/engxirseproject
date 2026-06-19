@@ -8791,12 +8791,32 @@ end
 function ShoppingMartMock:Toggle()
     pcall(function()
         local PlayerGui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
-        local shopGui = PlayerGui:FindFirstChild("ShopUI") or PlayerGui:FindFirstChild("Shop") or PlayerGui:FindFirstChild("Marketplace") or PlayerGui:FindFirstChild("Amazong")
-        if shopGui then
-            if shopGui:IsA("ScreenGui") then
-                shopGui.Enabled = not shopGui.Enabled
-            elseif shopGui:IsA("Frame") then
-                shopGui.Visible = not shopGui.Visible
+        -- Cari GUI dengan nama yang mengandung kata kunci shop/market
+        local keywords = {"shop", "market", "amazong", "store", "buy", "merchant", "vendor", "toko", "mall"}
+        local found = nil
+        for _, gui in ipairs(PlayerGui:GetChildren()) do
+            local nameLower = gui.Name:lower()
+            for _, kw in ipairs(keywords) do
+                if nameLower:find(kw) then
+                    found = gui
+                    break
+                end
+            end
+            if found then break end
+        end
+        if found then
+            if found:IsA("ScreenGui") then
+                found.Enabled = not found.Enabled
+            elseif found:IsA("Frame") then
+                found.Visible = not found.Visible
+            end
+        else
+            -- Fallback: toggle semua ScreenGui non-CoreGui yang hidden
+            for _, gui in ipairs(PlayerGui:GetChildren()) do
+                if gui:IsA("ScreenGui") and not gui.Enabled then
+                    gui.Enabled = true
+                    return
+                end
             end
         end
     end)
@@ -15494,10 +15514,53 @@ local function initializeShopTab()
 
     EngProject:CreateSection(page, "Marketplace")
 
-    EngProject:CreateParagraph(page, "Marketplace Access", {"Browse and purchase items from the amazong marketplace."})
+    EngProject:CreateParagraph(page, "Marketplace Access", {"Browse and purchase items from the amazong marketplace.",
+        "Klik Open Marketplace untuk membuka/menutup toko.",
+        "Jika tidak berhasil, klik 'Cari GUI Marketplace' untuk debug."})
 
     EngProject:CreateButton(page, "Open Marketplace", function()
         amazong:Toggle()
+    end)
+
+    EngProject:CreateButton(page, "Cari GUI Marketplace (Debug)", function()
+        local PlayerGui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+        local names = {}
+        for _, gui in ipairs(PlayerGui:GetChildren()) do
+            if gui:IsA("ScreenGui") then
+                table.insert(names, gui.Name .. " [" .. (gui.Enabled and "ON" or "OFF") .. "]")
+            end
+        end
+        EngProject:CreateNotification({
+            Type = "Info",
+            Title = "Daftar GUI di PlayerGui:",
+            Description = table.concat(names, ", "),
+            Duration = 15
+        })
+    end)
+
+    EngProject:CreateButton(page, "Toggle GUI by Name (Manual)", function()
+        local PlayerGui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+        -- Coba toggle semua ScreenGui yang bukan HUD utama
+        local skipList = {"EngProjectUI", "RobloxGui", "TopBarApp", "BillboardGui"}
+        local function isSkipped(name)
+            for _, s in ipairs(skipList) do
+                if name:find(s) then return true end
+            end
+            return false
+        end
+        local count = 0
+        for _, gui in ipairs(PlayerGui:GetChildren()) do
+            if gui:IsA("ScreenGui") and not isSkipped(gui.Name) then
+                gui.Enabled = not gui.Enabled
+                count = count + 1
+            end
+        end
+        EngProject:CreateNotification({
+            Type = "Info",
+            Title = "Toggle GUI",
+            Description = count .. " ScreenGui di-toggle",
+            Duration = 5
+        })
     end)
 end
 
