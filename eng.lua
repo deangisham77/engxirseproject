@@ -14839,18 +14839,33 @@ local function initializeFavouriteTab()
     if State.Favourite.connection and State.Favourite.connection.Connected then
         State.Favourite.connection:Disconnect()
     end
-    State.Favourite.connection = BackpackTwo.ChildAdded:Connect(function(item)
-        backpackCache = BackpackTwo
-        backpackCacheTime = tick()
-        if not autoFavEnabled then
-            return
-        end
-        if not FavouriteModule.isValuable(item) then
-            return
-        end
+    if BackpackTwo then
+        State.Favourite.connection = BackpackTwo.ChildAdded:Connect(function(item)
+            backpackCache = BackpackTwo
+            backpackCacheTime = tick()
+            if not autoFavEnabled then
+                return
+            end
+            if not FavouriteModule.isValuable(item) then
+                return
+            end
 
-        if selectedOre and #selectedModifiers > 0 then
-            if FavouriteModule.matchesOre(item, selectedOre) then
+            if selectedOre and #selectedModifiers > 0 then
+                if FavouriteModule.matchesOre(item, selectedOre) then
+                    for _, modifier in ipairs(selectedModifiers) do
+                        if FavouriteModule.matchesModifier(item, modifier) then
+                            task.wait(0.1)
+                            FavouriteModule.favourite(item)
+                            break
+                        end
+                    end
+                end
+            elseif selectedOre then
+                if FavouriteModule.matchesOre(item, selectedOre) then
+                    task.wait(0.1)
+                    FavouriteModule.favourite(item)
+                end
+            elseif #selectedModifiers > 0 then
                 for _, modifier in ipairs(selectedModifiers) do
                     if FavouriteModule.matchesModifier(item, modifier) then
                         task.wait(0.1)
@@ -14859,32 +14874,21 @@ local function initializeFavouriteTab()
                     end
                 end
             end
-        elseif selectedOre then
-            if FavouriteModule.matchesOre(item, selectedOre) then
-                task.wait(0.1)
-                FavouriteModule.favourite(item)
-            end
-        elseif #selectedModifiers > 0 then
-            for _, modifier in ipairs(selectedModifiers) do
-                if FavouriteModule.matchesModifier(item, modifier) then
-                    task.wait(0.1)
-                    FavouriteModule.favourite(item)
-                    break
-                end
-            end
-        end
-    end)
+        end)
+    end
 
     State.Webhook.connections = State.Webhook.connections or {}
-    State.Webhook.connections.mineralListener = BackpackTwo.ChildAdded:Connect(function(item)
-        backpackCache = BackpackTwo
-        backpackCacheTime = tick()
-        if not FavouriteModule.isValuable(item) then return end
-        task.wait(0.1)
-        pcall(function()
-            WebhookModule.notifyMineral(item)
+    if BackpackTwo then
+        State.Webhook.connections.mineralListener = BackpackTwo.ChildAdded:Connect(function(item)
+            backpackCache = BackpackTwo
+            backpackCacheTime = tick()
+            if not FavouriteModule.isValuable(item) then return end
+            task.wait(0.1)
+            pcall(function()
+                WebhookModule.notifyMineral(item)
+            end)
         end)
-    end)
+    end
 
     EngProject:CreateParagraph(page, "Preservation Guide", {"Select Modifier: Choose which modifiers to protect.",
                                                           "Preserve Items By Modifier: Protects all items with selected modifiers.",
