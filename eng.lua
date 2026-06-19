@@ -3305,35 +3305,35 @@ do
 
         function EngProject.WindowBuilder:CreateContentAreas(MainContainer, MainFrame, TopBar, Options)
             local Const = EngProject.Constants.Window
-            local TabsWidth = Const.TabsWidthOpen
-            local ContentWidth = Const.ContentWidthOpen
             local IsCollapsed = Options.IsCollapsed
             local HorizontalPadding = IsCollapsed and 4 or Options.HorizontalPadding or Const.HorizontalPadding
             local HasBrand = Options.Brand ~= nil
+            local TabBarHeight = 36
 
             local TabsContainer = EngProject.Utility:CreateInstance("ScrollingFrame", {
                 Name = "TabsContainer",
                 Position = UDim2.new(0, HorizontalPadding, 0, 0),
-                Size = UDim2.new(TabsWidth, -(HorizontalPadding * 1.5), 1, 0),
+                Size = UDim2.new(1, -(HorizontalPadding * 2), 0, TabBarHeight),
                 BackgroundTransparency = 1,
                 BorderSizePixel = 0,
                 ZIndex = EngProject.Constants.ZIndex.Content,
                 ClipsDescendants = true,
-                ScrollingDirection = Enum.ScrollingDirection.Y,
+                ScrollingDirection = Enum.ScrollingDirection.X,
                 ScrollBarThickness = 0,
                 CanvasSize = UDim2.new(0, 0, 0, 0),
-                AutomaticCanvasSize = Enum.AutomaticSize.Y
+                AutomaticCanvasSize = Enum.AutomaticSize.X
             }, MainContainer)
             EngProject.Utility:CreateInstance("UIListLayout", {
+                FillDirection = Enum.FillDirection.Horizontal,
                 SortOrder = Enum.SortOrder.LayoutOrder,
-                HorizontalAlignment = Enum.HorizontalAlignment.Center,
-                Padding = UDim.new(0, EngProject.Constants.Padding.Large)
+                VerticalAlignment = Enum.VerticalAlignment.Center,
+                Padding = UDim.new(0, 8)
             }, TabsContainer)
             EngProject.Utility:CreateInstance("UIPadding", {
                 PaddingTop = UDim.new(0, 0),
                 PaddingBottom = UDim.new(0, 0),
-                PaddingLeft = UDim.new(0, 2),
-                PaddingRight = UDim.new(0, 1)
+                PaddingLeft = UDim.new(0, 4),
+                PaddingRight = UDim.new(0, 4)
             }, TabsContainer)
             local Theme = EngProject.ThemeManager:GetCurrentTheme({
                 ThemeData = {
@@ -3342,8 +3342,8 @@ do
             })
             local TabsSeparatorProperties, TabsSeparatorBindings = EngProject.Utility:ApplyTheme({
                 Name = "TabsSeparator",
-                Position = UDim2.new(TabsWidth, Const.TabSeparatorGap, 0, HasBrand and 0 or Const.TopBarHeight),
-                Size = UDim2.new(0, 1, 1, HasBrand and 0 or -Const.TopBarHeight),
+                Position = UDim2.new(0, 0, 0, HasBrand and TabBarHeight or Const.TopBarHeight + TabBarHeight),
+                Size = UDim2.new(1, 0, 0, 1),
                 BorderSizePixel = 0,
                 ZIndex = EngProject.Constants.ZIndex.Content
             }, {
@@ -3353,8 +3353,8 @@ do
             local TabsSeparator = EngProject.Utility:CreateInstance("Frame", TabsSeparatorProperties, MainFrame)
             local ContentsContainer = EngProject.Utility:CreateInstance("Frame", {
                 Name = "ContentsContainer",
-                Position = UDim2.new(TabsWidth, HorizontalPadding, 0, 0),
-                Size = UDim2.new(ContentWidth, -(HorizontalPadding * 2), 1, 0),
+                Position = UDim2.new(0, HorizontalPadding, 0, TabBarHeight + 6),
+                Size = UDim2.new(1, -(HorizontalPadding * 2), 1, -(TabBarHeight + 6)),
                 BorderSizePixel = 0,
                 BackgroundTransparency = 1,
                 ZIndex = EngProject.Constants.ZIndex.Content,
@@ -5156,116 +5156,11 @@ function EngProject:CreateWindow(options)
 
             local function setExpanded(expanded, tweenDuration)
                 self.TabsExpanded = expanded
-                tweenDuration = tweenDuration and duration or 0
-
-                updateTopBarLayout(expanded, tweenDuration)
-
-                local hPad = const.HorizontalPadding
-                local tabsSize, tabsPos, contentsPos, contentsSize
-
-                if expanded then
-                    tabsSize = UDim2.new(const.TabsWidthOpen, -(hPad * 0.5), 1, 0)
-                    tabsPos = UDim2.new(0, hPad * 0.5, 0, 0)
-                    contentsPos = UDim2.new(const.TabsWidthOpen, hPad, 0, 0)
-                    contentsSize = UDim2.new(const.ContentWidthOpen, -(hPad * 2), 1, 0)
-                else
-                    local contentLeft = const.ContentLeftOffsetClosed
-                    tabsSize = UDim2.new(0, const.TabsWidthClosed, 1, 0)
-                    tabsPos = UDim2.new(0, const.ClosedTabHorizontalPadding, 0, 0)
-                    contentsPos = UDim2.new(0, contentLeft, 0, 0)
-                    contentsSize = UDim2.new(1, -(contentLeft + hPad), 1, 0)
-                end
-
-                TweenService:Create(tabsContainer,
-                    TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                        Size = tabsSize,
-                        Position = tabsPos
-                    }):Play()
-
-                TweenService:Create(contentsContainer,
-                    TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-                        Position = contentsPos,
-                        Size = contentsSize
-                    }):Play()
-
                 for _, tabData in pairs(self.Elements.Tabs) do
-                    if type(tabData) == "table" and tabData.Container then
-
-                        local isActive = tabData.Container == self.ActiveTab
-
-                        if not isActive then
-                            local currentTheme = EngProject.ThemeManager:GetCurrentTheme(self)
-                            local targetColor = expanded and currentTheme.Secondary or currentTheme.Secondary
-                            local targetTransparency = expanded and (currentTheme.TransparencySecondary or 0.8) or 1
-
-                            TweenService:Create(tabData.Container, TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad),
-                                {
-                                    BackgroundColor3 = targetColor,
-                                    BackgroundTransparency = targetTransparency
-                                }):Play()
-                        end
-
-                        TweenService:Create(tabData.Container, TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad), {
-                            Size = UDim2.new(1, -8, 0, expanded and 32 or 44)
-                        }):Play()
-
-                        if tabData.Icon then
-                            local iconSize = expanded and const.TabIconSizeExpanded or 24
-                            TweenService:Create(tabData.Icon, TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad), {
-                                Size = UDim2.new(0, iconSize, 0, iconSize)
-                            }):Play()
-                        end
-
-                        if tabData.TextLabel then
-                            if expanded then
-                                tabData.TextLabel.Visible = true
-                                TweenService:Create(tabData.TextLabel,
-                                    TweenInfo.new(tweenDuration * 0.5, Enum.EasingStyle.Quad), {
-                                        TextTransparency = 0
-                                    }):Play()
-                            else
-                                TweenService:Create(tabData.TextLabel,
-                                    TweenInfo.new(tweenDuration * 0.5, Enum.EasingStyle.Quad), {
-                                        TextTransparency = 1
-                                    }):Play()
-                                task.delay(tweenDuration * 0.5, function()
-                                    if not self.TabsExpanded then
-                                        tabData.TextLabel.Visible = false
-                                    end
-                                end)
-                            end
-                        end
-
-                        if tabData.ContentContainer then
-                            TweenService:Create(tabData.ContentContainer,
-                                TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad), expanded and {
-                                    Position = UDim2.new(0, 0, 0, 0),
-                                    AnchorPoint = Vector2.new(0, 0)
-                                } or {
-                                    Position = UDim2.new(0.5, 0, 0.5, 0),
-                                    AnchorPoint = Vector2.new(0.5, 0.5)
-                                }):Play()
-                        end
-
-                        if tabData.AccentLine then
-                            local isActive = tabData.Container == self.ActiveTab
-                            if isActive then
-                                TweenService:Create(tabData.AccentLine,
-                                    TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad), {
-                                        BackgroundTransparency = expanded and 1 or 0
-                                    }):Play()
-                            end
-                        end
+                    if type(tabData) == "table" and tabData.RefreshVisuals then
+                        tabData.RefreshVisuals()
                     end
                 end
-
-                task.delay(tweenDuration, function()
-                    for _, tabData in pairs(self.Elements.Tabs) do
-                        if type(tabData) == "table" and tabData.RefreshVisuals then
-                            tabData.RefreshVisuals()
-                        end
-                    end
-                end)
             end
 
             if mode == modes.Fixed then
@@ -5600,7 +5495,8 @@ function EngProject:CreateTab(Window, Name, Options)
 
     local Tab = self.Utility:CreateInstance("TextButton", {
         Name = Name,
-        Size = UDim2.new(1, -8, 0, Window.TabsExpanded and 32 or 44),
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X,
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         Text = "",
@@ -5614,9 +5510,9 @@ function EngProject:CreateTab(Window, Name, Options)
 
     local AccentLine = self.Utility:CreateInstance("Frame", {
         Name = "AccentLine",
-        Size = UDim2.new(0, 2, 0, 24),
-        Position = UDim2.new(0, -4, 0.5, 0),
-        AnchorPoint = Vector2.new(0, 0.5),
+        Size = UDim2.new(1, 0, 0, 2),
+        Position = UDim2.new(0, 0, 1, -2),
+        AnchorPoint = Vector2.new(0, 0),
         BackgroundColor3 = Theme.TabAccent or Theme.Accent,
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
@@ -5628,7 +5524,8 @@ function EngProject:CreateTab(Window, Name, Options)
 
     local ContentContainer = self.Utility:CreateInstance("Frame", {
         Name = "ContentContainer",
-        Size = UDim2.new(1, 0, 1, 0),
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X,
         Position = UDim2.new(0, 0, 0, 0),
         AnchorPoint = Vector2.new(0, 0),
         BackgroundTransparency = 1,
@@ -5650,7 +5547,7 @@ function EngProject:CreateTab(Window, Name, Options)
     local IconSize = 0
 
     if Options.Icon and type(Options.Icon) == "table" and Options.Icon.Image then
-        IconSize = Window.TabsExpanded and self.Constants.Window.TabIconSizeExpanded or 24
+        IconSize = 18
         local IconData = self.IconManager:WrapIcon(Options.Icon)
 
         Icon = self.Utility:CreateInstance("ImageLabel", {
@@ -5674,9 +5571,9 @@ function EngProject:CreateTab(Window, Name, Options)
         TextXAlignment = Enum.TextXAlignment.Left,
         TextYAlignment = Enum.TextYAlignment.Center,
         BackgroundTransparency = 1,
-        Size = UDim2.new(1, -(IconSize > 0 and (IconSize + 8) or 0), 1, 0),
-        AutomaticSize = Enum.AutomaticSize.None,
-        TextTruncate = Enum.TextTruncate.AtEnd,
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X,
+        TextTruncate = Enum.TextTruncate.None,
         Font = Theme.FontSecondary,
         TextColor3 = Theme.TextInactive,
         LayoutOrder = 2,
@@ -5713,11 +5610,7 @@ function EngProject:CreateTab(Window, Name, Options)
             if Icon then
                 Icon.ImageColor3 = CurrentTheme.TabIconActive or CurrentTheme.TextActive
             end
-            if IsCollapsed then
-                AccentLine.BackgroundTransparency = 0
-            else
-                AccentLine.BackgroundTransparency = 1
-            end
+            AccentLine.BackgroundTransparency = 0
             UpdateActiveBrandDisplay(Name, Options)
         elseif TabState.IsHovering then
             Tab.BackgroundColor3 = CurrentTheme.Secondary
@@ -5728,13 +5621,8 @@ function EngProject:CreateTab(Window, Name, Options)
             end
             AccentLine.BackgroundTransparency = 1
         else
-            if IsCollapsed then
-                Tab.BackgroundColor3 = CurrentTheme.Secondary
-                Tab.BackgroundTransparency = 1
-            else
-                Tab.BackgroundColor3 = CurrentTheme.Secondary
-                Tab.BackgroundTransparency = CurrentTheme.TransparencySecondary or 0.8
-            end
+            Tab.BackgroundColor3 = CurrentTheme.Secondary
+            Tab.BackgroundTransparency = CurrentTheme.TransparencySecondary or 0.8
             TextLabel.TextColor3 = CurrentTheme.TextInactive
             if Icon then
                 Icon.ImageColor3 = CurrentTheme.TabIconInactive or CurrentTheme.TextInactive
@@ -5866,6 +5754,140 @@ function EngProject:CreateTab(Window, Name, Options)
         Icon = Icon,
         AccentLine = AccentLine
     }
+end
+
+function EngProject:CreateSocialTab(Window, Name, Options)
+    if not Window or not Window.Elements or not Window.Elements.TabsContainer then
+        return
+    end
+    Options = Options or {}
+    local Theme = self.ThemeManager:GetCurrentTheme(Window)
+    local IsMobile = self.Utility:IsMobile()
+
+    local Tab = self.Utility:CreateInstance("TextButton", {
+        Name = Name,
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundTransparency = 1,
+        BorderSizePixel = 0,
+        Text = "",
+        AutoButtonColor = false,
+        ZIndex = self.Constants.ZIndex.Content,
+        LayoutOrder = #Window.Elements.Tabs + 100
+    }, Window.Elements.TabsContainer)
+    
+    self.Utility:CreateInstance("UICorner", {
+        CornerRadius = UDim.new(0, self.Constants.Corner.Medium)
+    }, Tab)
+
+    local ContentContainer = self.Utility:CreateInstance("Frame", {
+        Name = "ContentContainer",
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X,
+        BackgroundTransparency = 1,
+        ZIndex = self.Constants.ZIndex.Content + 1
+    }, Tab)
+    self.Utility:CreateInstance("UIListLayout", {
+        FillDirection = Enum.FillDirection.Horizontal,
+        VerticalAlignment = Enum.VerticalAlignment.Center,
+        HorizontalAlignment = Enum.HorizontalAlignment.Left,
+        SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0, 8)
+    }, ContentContainer)
+    self.Utility:CreateInstance("UIPadding", {
+        PaddingLeft = UDim.new(0, self.Constants.Padding.Large),
+        PaddingRight = UDim.new(0, self.Constants.Padding.Large)
+    }, ContentContainer)
+
+    local Icon = nil
+    local IconSize = 18
+
+    if Options.Icon and type(Options.Icon) == "table" and Options.Icon.Image then
+        local IconData = self.IconManager:WrapIcon(Options.Icon)
+        Icon = self.Utility:CreateInstance("ImageLabel", {
+            Name = "TabIcon",
+            Image = IconData.Url,
+            ImageColor3 = Theme.TextInactive,
+            Size = UDim2.new(0, IconSize, 0, IconSize),
+            BackgroundTransparency = 1,
+            LayoutOrder = 1,
+            ZIndex = self.Constants.ZIndex.Control
+        }, ContentContainer)
+    end
+
+    local TextLabel = self.Utility:CreateInstance("TextLabel", {
+        Name = "TabText",
+        Text = Name,
+        TextSize = 15,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        TextYAlignment = Enum.TextYAlignment.Center,
+        BackgroundTransparency = 1,
+        Size = UDim2.new(0, 0, 1, 0),
+        AutomaticSize = Enum.AutomaticSize.X,
+        Font = Theme.FontSecondary,
+        TextColor3 = Theme.TextInactive,
+        LayoutOrder = 2,
+        ZIndex = self.Constants.ZIndex.Control
+    }, ContentContainer)
+
+    local TabState = { IsHovering = false }
+
+    local function RefreshTabVisuals()
+        local CurrentTheme = self.ThemeManager:GetCurrentTheme(Window)
+        if TabState.IsHovering then
+            Tab.BackgroundColor3 = CurrentTheme.Secondary
+            Tab.BackgroundTransparency = 0
+            TextLabel.TextColor3 = CurrentTheme.TextPrimary
+            if Icon then
+                Icon.ImageColor3 = CurrentTheme.TabIconHover or CurrentTheme.TextPrimary
+            end
+        else
+            Tab.BackgroundColor3 = CurrentTheme.Secondary
+            Tab.BackgroundTransparency = CurrentTheme.TransparencySecondary or 0.8
+            TextLabel.TextColor3 = CurrentTheme.TextInactive
+            if Icon then
+                Icon.ImageColor3 = CurrentTheme.TabIconInactive or CurrentTheme.TextInactive
+            end
+        end
+    end
+
+    if not IsMobile then
+        Tab.MouseEnter:Connect(function()
+            TabState.IsHovering = true
+            RefreshTabVisuals()
+        end)
+        Tab.MouseLeave:Connect(function()
+            TabState.IsHovering = false
+            RefreshTabVisuals()
+        end)
+    end
+
+    Tab.Activated:Connect(function()
+        if Options.Url then
+            local setclip = setclipboard or toclipboard or (Clipboard and Clipboard.set)
+            if setclip then
+                pcall(function()
+                    setclip(Options.Url)
+                end)
+                self:CreateNotification({
+                    Type = "Success",
+                    Title = "Link Copied",
+                    Description = "Copied " .. Name .. " link to clipboard!",
+                    Duration = 5
+                })
+            else
+                self:CreateNotification({
+                    Type = "Error",
+                    Title = "Not Supported",
+                    Description = "Clipboard operations are not supported on your executor.",
+                    Duration = 5
+                })
+            end
+        end
+    end)
+
+    RefreshTabVisuals()
+    return Tab
 end
 
 function EngProject:CreatePage(Window, Name, Options)
@@ -13379,6 +13401,30 @@ local Tabs = {
         }
     })
 }
+
+local DiscordTab = EngProject:CreateSocialTab(window, "Discord", {
+    Icon = {
+        Image = "rbxassetid://10734950309",
+        ImageColor3 = Color3.fromRGB(255, 255, 255)
+    },
+    Url = "https://discord.gg/fmHk8ZbM"
+})
+
+local TikTokTab1 = EngProject:CreateSocialTab(window, "TikTok iTrick01", {
+    Icon = {
+        Image = "rbxassetid://10734963191",
+        ImageColor3 = Color3.fromRGB(255, 255, 255)
+    },
+    Url = "https://www.tiktok.com/@itrick01"
+})
+
+local TikTokTab2 = EngProject:CreateSocialTab(window, "TikTok Irse", {
+    Icon = {
+        Image = "rbxassetid://10734963191",
+        ImageColor3 = Color3.fromRGB(255, 255, 255)
+    },
+    Url = "https://www.tiktok.com/@irse.roblox"
+})
 
 local function initializeMainTab()
     local page = Tabs.Main.Page
