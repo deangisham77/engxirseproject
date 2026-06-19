@@ -8791,15 +8791,20 @@ end
 function ShoppingMartMock:Toggle()
     pcall(function()
         local PlayerGui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
-        -- Cari GUI dengan nama yang mengandung kata kunci shop/market
         local keywords = {"shop", "market", "amazong", "store", "buy", "merchant", "vendor", "toko", "mall"}
         local found = nil
-        for _, gui in ipairs(PlayerGui:GetChildren()) do
-            local nameLower = gui.Name:lower()
-            for _, kw in ipairs(keywords) do
-                if nameLower:find(kw) then
-                    found = gui
-                    break
+        -- Scan all descendants of PlayerGui (not just direct children)
+        for _, gui in ipairs(PlayerGui:GetDescendants()) do
+            if gui:IsA("ScreenGui") or gui:IsA("Frame") or gui:IsA("ScrollingFrame") then
+                local nameLower = gui.Name:lower()
+                for _, kw in ipairs(keywords) do
+                    if nameLower:find(kw) then
+                        -- Hindari mencocokkan tombol atau template kecil
+                        if not nameLower:find("button") and not nameLower:find("icon") and not nameLower:find("template") and not nameLower:find("item") then
+                            found = gui
+                            break
+                        end
+                    end
                 end
             end
             if found then break end
@@ -8807,13 +8812,13 @@ function ShoppingMartMock:Toggle()
         if found then
             if found:IsA("ScreenGui") then
                 found.Enabled = not found.Enabled
-            elseif found:IsA("Frame") then
+            else
                 found.Visible = not found.Visible
             end
         else
-            -- Fallback: toggle semua ScreenGui non-CoreGui yang hidden
-            for _, gui in ipairs(PlayerGui:GetChildren()) do
-                if gui:IsA("ScreenGui") and not gui.Enabled then
+            -- Fallback: toggle ScreenGui yang tersembunyi
+            for _, gui in ipairs(PlayerGui:GetDescendants()) do
+                if gui:IsA("ScreenGui") and not gui.Enabled and not gui.Name:find("EngProject") and not gui.Name:find("Roblox") then
                     gui.Enabled = true
                     return
                 end
@@ -8897,10 +8902,10 @@ local Services = {
 
 local Player = Services.Players.LocalPlayer
 local Camera = Services.Workspace.CurrentCamera
-local Characters = Services.Workspace:WaitForChild("Characters")
-local PlayerGui = Player:WaitForChild("PlayerGui")
-local BackpackTwo = Player:WaitForChild("BackpackTwo")
-local Map = Services.Workspace:WaitForChild("Map")
+local Characters = Services.Workspace:WaitForChild("Characters", 15)
+local PlayerGui = Player:WaitForChild("PlayerGui", 15)
+local BackpackTwo = Player:WaitForChild("BackpackTwo", 15)
+local Map = Services.Workspace:WaitForChild("Map", 15)
 
 local ReplicatedStorage = Services.ReplicatedStorage
 local PanningAnimations = ReplicatedStorage.Assets.Animations.Panning
@@ -13563,57 +13568,75 @@ do
     end
 
     TravelMerchantModule.KnownItems = {
+        "Blessed Enchant Book",
+        "Boosting Enchant Book",
+        "Cosmic Enchant Book",
+        "Destructive Enchant Book",
+        "Gigantic Enchant Book",
         "Glowing Enchant Book",
-        "Instability Potion",
-        "Quake Potion",
+        "Greedy Enchant Book",
+        "Infernal Enchant Book",
+        "Midas Enchant Book",
+        "Prismatic Enchant Book",
+        "Titanic Enchant Book",
+        "Unstable Enchant Book",
+        "Meteor Shower Token",
+        "Rapid Rivers Token",
         "Solar Token",
+        "Perfect Reforge Ticket",
+        "Perfect Reforge Token",
         "Traveler's Backpack",
         "Warp Device",
+        "Meteor Fragment",
+        "Instability Potion",
+        "Quake Potion",
     }
 
-    -- HARDCODE: Robust shop item finder — scans all children of Purchasable,
-    -- matches by Name AND by searching for a ShopItem descendant with matching ItemName attribute
+    -- Robust shop item finder — scans all descendants of Workspace (all map scanner method)
     function TravelMerchantModule.getShopItem(itemName)
-        local purchasable = Services.Workspace:FindFirstChild("Purchasable")
-        if not purchasable then return nil end
+        local lowerItemName = itemName:lower()
+        -- Scan all descendants of Workspace
+        for _, desc in ipairs(Services.Workspace:GetDescendants()) do
+            local isMatch = false
+            if desc.Name:lower() == lowerItemName then
+                isMatch = true
+            elseif desc:GetAttribute("ItemName") and desc:GetAttribute("ItemName"):lower() == lowerItemName then
+                isMatch = true
+            end
 
-        -- Method 1: Direct child by name with ShopItem child
-        local item = purchasable:FindFirstChild(itemName)
-        if item then
-            local si = item:FindFirstChild("ShopItem")
-            if si then return si end
-            -- ShopItem might be a descendant
-            local siDeep = item:FindFirstChildWhichIsA("Configuration", true)
-                or item:FindFirstChildWhichIsA("StringValue", true)
-            -- Try to find any child that has the buy attributes
-            for _, ch in ipairs(item:GetChildren()) do
-                if ch:GetAttribute("Price") ~= nil or ch:GetAttribute("ShardPrice") ~= nil
-                    or ch:GetAttribute("MerchantBaseStock") ~= nil then
-                    return ch
+            if isMatch then
+                -- Check if it is the shop item itself or has the purchase attributes
+                if desc:GetAttribute("Price") ~= nil or desc:GetAttribute("ShardPrice") ~= nil or desc:GetAttribute("MerchantBaseStock") ~= nil then
+                    return desc
+                end
+
+                -- Check if it has a ShopItem child
+                local si = desc:FindFirstChild("ShopItem")
+                if si then return si end
+
+                -- Check descendants of this matched object for buy attributes
+                for _, ch in ipairs(desc:GetChildren()) do
+                    if ch:GetAttribute("Price") ~= nil or ch:GetAttribute("ShardPrice") ~= nil or ch:GetAttribute("MerchantBaseStock") ~= nil then
+                        return ch
+                    end
+                end
+            end
+
+            -- Also check if the object is named "ShopItem" and its parent matches or it has attribute matching itemName
+            if desc.Name == "ShopItem" then
+                if desc:GetAttribute("ItemName") and desc:GetAttribute("ItemName"):lower() == lowerItemName then
+                    return desc
+                elseif desc.Parent and desc.Parent.Name:lower() == lowerItemName then
+                    return desc
                 end
             end
         end
 
-        -- Method 2: Scan all children of Purchasable for a matching ShopItem
-        for _, child in ipairs(purchasable:GetChildren()) do
-            -- Check direct child attributes
-            if child:GetAttribute("ItemName") == itemName
-                or child:GetAttribute("Name") == itemName
-                or child.Name == itemName then
-                -- Look for ShopItem inside
-                local si = child:FindFirstChild("ShopItem")
-                if si then return si end
-                -- Or if this child itself has buy attributes, return it
-                if child:GetAttribute("Price") ~= nil or child:GetAttribute("ShardPrice") ~= nil
-                    or child:GetAttribute("MerchantBaseStock") ~= nil then
-                    return child
-                end
-            end
-            -- Also check if a ShopItem child has matching ItemName
-            local si = child:FindFirstChild("ShopItem")
-            if si and (si:GetAttribute("ItemName") == itemName or child.Name:lower():find(itemName:lower(), 1, true)) then
-                return si
-            end
+        -- Fallback: check if we can find any child of Workspace.Purchasable
+        local purchasable = Services.Workspace:FindFirstChild("Purchasable")
+        if purchasable then
+            local item = purchasable:FindFirstChild(itemName)
+            if item then return item:FindFirstChild("ShopItem") or item end
         end
 
         return nil
@@ -13720,22 +13743,23 @@ do
             end
         end
 
-        -- HARDCODE: Also watch Purchasable for new children (merchant restocked/spawned)
-        local purchasable = Services.Workspace:FindFirstChild("Purchasable")
-        if purchasable then
-            local childConn = purchasable.ChildAdded:Connect(function(newChild)
+        -- Watch Workspace for new shop items/descendants (merchant spawned/restocked)
+        local descConn = Services.Workspace.DescendantAdded:Connect(function(desc)
+            local nameLower = desc.Name:lower()
+            if nameLower:find("shop") or nameLower:find("merchant") then
                 task.wait(0.5)
                 onRestock()
-            end)
-            table.insert(connections, childConn)
-            -- Also watch ChildRemoved + ChildAdded cycle
-            local removeConn = purchasable.ChildRemoved:Connect(function()
-                -- When items are removed and re-added, it's a restock
-                task.wait(2)
-                onRestock()
-            end)
-            table.insert(connections, removeConn)
-        end
+            else
+                for _, itemName in ipairs(TravelMerchantModule.selectedItems) do
+                    if nameLower:find(itemName:lower(), 1, true) then
+                        task.wait(0.5)
+                        onRestock()
+                        break
+                    end
+                end
+            end
+        end)
+        table.insert(connections, descConn)
 
         -- HARDCODE: Timeout after 5 minutes regardless (don't wait forever)
         task.spawn(function()
