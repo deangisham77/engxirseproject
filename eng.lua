@@ -1,5 +1,11 @@
 -- ============================================================
---  SCRIPT BY ENG & IRSE
+--  HUNTING MODULE — RAYFIELD SAFE FINAL (v3)
+--  UI Rayfield | Geode Opener | Treasure Hunt | Sand Dollar
+--
+--  Fix v3:
+--  - Auto Treasure Hunt dikembalikan (Tab Treasure)
+--  - Sand Dollar: bypass anti-teleport via Tween smooth move
+--    + Repeat proximity sampai server acknowledge collect
 -- ============================================================
 
 --// Executor compatibility
@@ -23,7 +29,7 @@ local ReplicatedStorage = Services.ReplicatedStorage
 local BackpackTwo     = Player:WaitForChild("BackpackTwo", 15)
 
 --// Character binding
-local Character, HumanoidRootPart, Humanoid
+local Character, HumanoidRootPart, Humanoid, Movement
 
 local function bindCharacter(char)
     Character        = char
@@ -71,14 +77,24 @@ end
 -- ============================================================
 
 local State = {
-    cleanupRequested = false,
-
     -- Settings (speed dari simple source.txt)
     Speed         = 16,
     StopDistance  = 5,
     CruiseHeight  = 3,
     WalkSpeed     = 100,   -- WalkSpeed saat Auto Collect Sand Dollar aktif
     OrigWalkSpeed = 16,    -- Simpan WalkSpeed asli untuk restore
+
+    -- Geode (hunting)
+    GeodeRunning  = false,
+    GeodeStartAt  = nil,
+    GeodeCount    = 0,
+
+    -- Treasure (hunting)
+    TreasureRunning  = false,
+    TreasureStartAt  = nil,
+    TreasureMapCount = 0,
+    TreasureCurrent  = "—",
+    TreasureCompleted = 0,
 
     -- Sand Dollar
     SandRunning   = false,
@@ -181,15 +197,6 @@ local State = {
         totalBought = 0
     },
 
-    Webhook = {
-        enabled = false,
-        url = "",
-        notifyRarity = true,
-        notifyTravelMerchant = true,
-        selectedRarities = {},
-        rateLimit = 2
-    },
-
     Summer = {
         progress = 0,
         quality = 0,
@@ -204,20 +211,350 @@ local State = {
 --  BACKPACK HELPERS
 -- ============================================================
 
-local backpackCache = nil
-local backpackCacheTime = 0
-local BACKPACK_CACHE_TTL = 2
-
 local function getBackpack()
-    local now = tick()
-    if backpackCache and (now - backpackCacheTime) < BACKPACK_CACHE_TTL then
-        if backpackCache.Parent == Player then
-            return backpackCache
+    return Player:FindFirstChild("BackpackTwo")
+        or Player:FindFirstChild("Backpack")
+end
+
+-- ============================================================
+--  INVENTORY COUNTERS
+-- ============================================================
+
+local function isGeodeItem(item)
+    if not item then return false end
+    return item.Name == "Geode" or item:GetAttribute("ItemType") == "Geode"
+end
+
+local function isTreasureItem(item)
+    if not item then return false end
+    local t = item:GetAttribute("ItemType")
+    return t == "TreasureMap" or t == "Treasure Map"
+        or (item.Name:lower():find("treasure") and item.Name:lower():find("map"))
+end
+
+local function countIn(pred)
+    local n = 0
+    local containers = {}
+    local bp = getBackpack()
+    if bp then table.insert(containers, bp) end
+    if Character then table.insert(containers, Character) end
+    for _, c in ipairs(containers) do
+        for _, it in ipairs(safeChildren(c)) do
+            if pred(it) then n += 1 end
         end
     end
-    backpackCache = Player:FindFirstChild("BackpackTwo") or Player:FindFirstChild("Backpack")
-    backpackCacheTime = now
-    return backpackCache
+    return n
+end
+
+-- ============================================================
+--  GEODE OPENER LOGIC
+-- ============================================================
+
+local function getInventoryCount()
+    local n = 0
+    for _, item in ipairs(safeChildren(BackpackTwo)) do
+        local t = item:GetAttribute("ItemType")
+        if t == "Valuable" or t == "Equipment" then n += 1 end
+    end
+    if Character then
+        local eq = Character:FindFirstChildOfClass("Tool")
+        if eq then
+            local t = eq:GetAttribute("ItemType")
+            if t == "Valuable" or t == "Equipment" then n += 1 end
+        end
+    end
+    return n
+end
+
+local function getMaxCapacity()
+    return Player:GetAttribute("InventorySize") or 100
+end
+
+local function findGeodeInBP()
+    for _, item in ipairs(safeChildren(BackpackTwo)) do
+        if item.Name == "Geode" then return item end
+    end
+    return nil
+end
+
+local function isGeodeInChar()
+    if not Character then return false end
+    for _, item in ipairs(safeChildren(Character)) do
+        if item:GetAttribute("ItemType") == "Geode" then return true end
+    end
+    return false
+end
+
+local function waitGeodeInChar(timeout)
+    timeout = timeout or 50
+    local t = 0
+    while t < timeout do
+        if isGeodeInChar() then return true end
+        task.wait(0.01); t += 1
+    end
+    return false
+end
+
+local function isGeodeDepleted()
+    if not Character then return true end
+    for _, item in ipairs(safeChildren(Character)) do
+        if item:GetAttribute("ItemType") == "Geode" then
+            local s = item:GetAttribute("Stacks")
+            if s and s > 0 then return false end
+        end
+    end
+    return true
+end
+
+local function startGeodeOpener()
+    if State.GeodeRunning then return false end
+    local g = findGeodeInBP()
+    if not g and not isGeodeInChar() then return false end
+
+    State.GeodeRunning = true
+    State.GeodeStartAt = tick()
+
+    task.spawn(function()
+        while State.GeodeRunning do
+            if getInventoryCount() >= getMaxCapacity() then break end
+
+            local geode = findGeodeInBP()
+            if not geode then break end
+
+            pcall(function()
+                ReplicatedStorage.Remotes.CustomBackpack.EquipRemote:FireServer(geode)
+            end)
+
+            if not waitGeodeInChar() then break end
+
+            local clicks = 0
+            while State.GeodeRunning do
+                if isGeodeDepleted() or getInventoryCount() >= getMaxCapacity() then break end
+                VirtualUser:ClickButton1(Vector2.new(math.random(100,900), math.random(100,700)))
+                clicks += 1
+                task.wait(0.01)
+            end
+        end
+        State.GeodeRunning = false
+    end)
+
+    return true
+end
+
+local function stopGeodeOpener()
+    State.GeodeRunning = false
+end
+
+-- ============================================================
+--  TREASURE HUNT LOGIC
+-- ============================================================
+
+local function findTool(pred)
+    local containers = {}
+    if Character then table.insert(containers, Character) end
+    local bp = getBackpack()
+    if bp then table.insert(containers, bp) end
+    for _, c in ipairs(containers) do
+        if c then
+            for _, it in ipairs(safeChildren(c)) do
+                if it:IsA("Tool") and pred(it) then return it end
+            end
+        end
+    end
+    return nil
+end
+
+local function equipTool(tool)
+    if not tool then return false end
+    if tool.Parent == Character then return true end
+    pcall(function()
+        ReplicatedStorage.Remotes.CustomBackpack.EquipRemote:FireServer(tool)
+    end)
+    local start = tick()
+    while tool.Parent ~= Character and (tick() - start) < 2.5 do
+        task.wait(0.05)
+    end
+    return tool.Parent == Character
+end
+
+local function getPan()
+    if Character then
+        local eq = Character:FindFirstChildOfClass("Tool")
+        if eq and eq:GetAttribute("ItemType") == "Pan" then return eq end
+    end
+    for _, v in ipairs(safeChildren(BackpackTwo)) do
+        if v:GetAttribute("ItemType") == "Pan" then
+            ReplicatedStorage.Remotes.CustomBackpack.EquipRemote:FireServer(v)
+            task.wait(0.5)
+            return v
+        end
+    end
+    return nil
+end
+
+local function getTreasureCollect()
+    if not Character then return nil end
+    local eq = Character:FindFirstChildOfClass("Tool")
+    if not eq then return nil end
+    local sc = eq:FindFirstChild("Scripts")
+    return sc and sc:FindFirstChild("Collect") or nil
+end
+
+local function prepareTreasureTool()
+    local shovel = findTool(function(t)
+        return t:GetAttribute("ItemType") == "Shovel" or t.Name:find("Shovel")
+    end)
+    if shovel then equipTool(shovel); return shovel end
+    return getPan()
+end
+
+local function findTreasureMaps()
+    local out = {}
+    local containers = {}
+    local bp = getBackpack()
+    if bp then table.insert(containers, bp) end
+    if Character then table.insert(containers, Character) end
+    for _, container in ipairs(containers) do
+        if container then
+            for _, item in ipairs(safeChildren(container)) do
+                local name = item.Name:lower()
+                if item:GetAttribute("ItemType") == "TreasureMap" or (name:find("treasure") and name:find("map")) then
+                    table.insert(out, item)
+                end
+            end
+        end
+    end
+    return out
+end
+
+local function huntSingleMap(map)
+    if not map or not map.Parent then return false end
+    local location = map:GetAttribute("Location")
+    local mapGUID = map:GetAttribute("GUID")
+
+    if not location or not mapGUID then
+        local bp = getBackpack()
+        if bp then
+            for _, v in ipairs(bp:GetChildren()) do
+                local name = v.Name:lower()
+                if v:GetAttribute("ItemType") == "TreasureMap" or (name:find("treasure") and name:find("map")) then
+                    local loc = v:GetAttribute("Location")
+                    local guid = v:GetAttribute("GUID")
+                    if loc and guid then
+                        location = loc
+                        mapGUID = guid
+                        map = v
+                        break
+                    end
+                end
+            end
+        end
+    end
+
+    if not location or not mapGUID then return false end
+
+    local targetCF = typeof(location) == "CFrame" and location or CFrame.new(location)
+    local startT   = tick()
+    local timeout  = 120
+    local lastCol  = 0
+
+    local function findMapInContainers(mapName, guid)
+        local containers = {}
+        if Character then table.insert(containers, Character) end
+        local bp = getBackpack()
+        if bp then table.insert(containers, bp) end
+        for _, container in ipairs(containers) do
+            if container then
+                for _, v in ipairs(container:GetChildren()) do
+                    local name = v.Name:lower()
+                    local isMap = v:GetAttribute("ItemType") == "TreasureMap" or (name:find("treasure") and name:find("map"))
+                    if isMap then
+                        local vGUID = v:GetAttribute("GUID")
+                        if guid and vGUID and vGUID == guid then
+                            return v
+                        end
+                        if not guid or not vGUID then
+                            return v
+                        end
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
+    local attempts = 0
+    while State.TreasureRunning and (tick()-startT) < timeout do
+        local currentMap = findMapInContainers(map.Name, mapGUID)
+        if not currentMap or currentMap:GetAttribute("GUID") ~= mapGUID then
+            task.wait(0.3)
+            return true
+        end
+        if not Character or not Character:FindFirstChild("HumanoidRootPart") then break end
+
+        Character.HumanoidRootPart.CFrame = targetCF
+
+        if tick() - lastCol > 0.02 then
+            local col = getTreasureCollect()
+            if col then pcall(function() col:InvokeServer(0) end) end
+            lastCol = tick()
+            attempts = attempts + 1
+            if attempts > 150 then
+                local mapNameDisplay = map.Name:gsub(" Treasure Map", "")
+                pcall(function()
+                    EngProject:CreateNotification({
+                        Type = "Warning",
+                        Title = "Wrong Map / Region",
+                        Description = "This treasure map belongs to another region. Please travel to " .. mapNameDisplay .. " to hunt it!",
+                        Duration = 8
+                    })
+                end)
+                break
+            end
+        end
+        task.wait(0.01)
+    end
+    return false
+end
+
+local function startTreasureHunting()
+    if State.TreasureRunning then return false end
+    local maps = findTreasureMaps()
+    if #maps == 0 then return false end
+
+    State.TreasureRunning   = true
+    State.TreasureCompleted = 0
+    State.TreasureStartAt   = tick()
+
+    task.spawn(function()
+        prepareTreasureTool()
+
+        while State.TreasureRunning do
+            local ms = findTreasureMaps()
+            if #ms == 0 then break end
+            State.TreasureMapCount = #ms
+
+            for _, map in ipairs(ms) do
+                if not State.TreasureRunning then break end
+                State.TreasureCurrent = map.Name or "?"
+                local ok = huntSingleMap(map)
+                if ok then
+                    State.TreasureCompleted += 1
+                    task.wait(0.5)
+                end
+            end
+            task.wait(1)
+        end
+
+        State.TreasureRunning  = false
+        State.TreasureCurrent  = "—"
+    end)
+    return true
+end
+
+local function stopTreasureHunting()
+    State.TreasureRunning = false
+    State.TreasureCurrent = "—"
 end
 
 -- ============================================================
@@ -362,17 +699,116 @@ local function refreshESP()
     end
 end
 
--- ============================================================
+-- ==================================================-- ============================================================
 --  AUTO COLLECT SAND DOLLAR
---  Identik 100% dengan engkol.txt:
---
---  collectOneTarget("SandDollar", ...) menggunakan:
---    collectMoveTo(pos, "Walk", runningRef, stuckEnabled)
---  → Humanoid:MoveTo(pos)   ← ini yang BERHASIL bypass anti-tp
---  → Stuck Detection: 5 detik tidak bergerak → Tween fallback
---
---  BUKAN hrp.CFrame = target (itu yang di-rubber-band server)!
+--  Anti-Rubber-Band Technique:
+--  → WalkSpeed di-set sangat tinggi (500+) sehingga server
+--    menganggap movement cepat sebagai VALID
+--  → Humanoid:MoveTo() dalam loop ketat (0.05s) — ini yang
+--    mengirim posisi ke server (bukan TweenService!)
+--  → Noclip via Stepped.CanCollide=false agar tembus terrain
+--  → setelah sampai, fire semua metode collect yang tersedia
 -- ============================================================
+
+local function enableNoclip(char)
+    if not char then return end
+    for _, v in ipairs(char:GetDescendants()) do
+        if v:IsA("BasePart") then
+            pcall(function() v.CanCollide = false end)
+        end
+    end
+end
+
+local function disableNoclip(char)
+    if not char then return end
+    for _, v in ipairs(char:GetDescendants()) do
+        if v:IsA("BasePart") then
+            pcall(function() v.CanCollide = true end)
+        end
+    end
+end
+
+-- Ambil remote Collect dari Pan tool yang di-equip (seperti Prospecting.lua)
+local function getSandCollectRemote()
+    local char = Player.Character
+    if not char then return nil end
+    for _, tool in ipairs(char:GetChildren()) do
+        if tool:IsA("Tool") then
+            local scripts = tool:FindFirstChild("Scripts")
+            if scripts then
+                local c = scripts:FindFirstChild("Collect")
+                if c then return c end
+            end
+            local c = tool:FindFirstChild("Collect", true)
+            if c and (c:IsA("RemoteFunction") or c:IsA("RemoteEvent")) then
+                return c
+            end
+        end
+    end
+    return nil
+end
+
+-- Coba semua metode collect di Sand Dollar
+local function tryCollectSandDollar(obj, hrp)
+    if not obj or not obj.Parent then return end
+
+    -- Method 1: fireproximityprompt (exploit API)
+    if type(fireproximityprompt) == "function" then
+        pcall(function()
+            for _, v in ipairs(obj:GetDescendants()) do
+                if v:IsA("ProximityPrompt") then
+                    v.HoldDuration = 0
+                    fireproximityprompt(v)
+                end
+            end
+        end)
+    end
+
+    -- Method 2: fireclickdetector (exploit API)
+    if type(fireclickdetector) == "function" then
+        pcall(function()
+            for _, v in ipairs(obj:GetDescendants()) do
+                if v:IsA("ClickDetector") then
+                    fireclickdetector(v)
+                end
+            end
+        end)
+    end
+
+    -- Method 3: Collect:InvokeServer dari Pan tool
+    local collectRemote = getSandCollectRemote()
+    if collectRemote then
+        if collectRemote:IsA("RemoteFunction") then
+            pcall(function() collectRemote:InvokeServer() end)
+            task.wait(0.02)
+            pcall(function() collectRemote:InvokeServer(0) end)
+        elseif collectRemote:IsA("RemoteEvent") then
+            pcall(function() collectRemote:FireServer() end)
+        end
+    end
+end
+
+-- INTI: MoveTo dengan WalkSpeed tinggi agar server terima posisi
+-- Server Roblox memvalidasi: "apakah kecepatan ≤ WalkSpeed?" 
+-- Jika WalkSpeed = 500 → movement 500 studs/s dianggap SAH
+local SAND_BOOST_SPEED = 500  -- studs/s (cukup tinggi untuk anti-rubber-band)
+local SAND_COLLECT_DIST = 4   -- jarak minimum untuk collect
+
+local function moveToSandDollar(hrp, hum, targetPos, runningRef)
+    if not hrp or not hum then return false end
+
+    local speed = State.Speed or 45
+    local success = Movement.pathfindTween(targetPos, {
+        Speed = speed,
+        StopDistance = SAND_COLLECT_DIST,
+        ShouldContinue = runningRef,
+        OnUpdate = function(remainingDist)
+            State.SandDist = math.floor(remainingDist)
+        end
+    })
+
+    return success
+end
 
 local function startSandCollect()
     if State.SandRunning then return false end
@@ -380,35 +816,20 @@ local function startSandCollect()
     State.SandCollected = 0
     State.SandStartAt   = tick()
 
-    -- Boost WalkSpeed saat mulai collect
-    pcall(function()
-        local char = Player.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            State.OrigWalkSpeed    = hum.WalkSpeed
-            hum.WalkSpeed          = State.WalkSpeed
-        end
-    end)
-
     task.spawn(function()
         while State.SandRunning do
-
             local char = Player.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            local hum = char and char:FindFirstChildOfClass("Humanoid")
-            if not hrp or not char or not hum then
-                task.wait(1)
-                continue
-            end
+            local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+            local hum  = char and char:FindFirstChildOfClass("Humanoid")
+            if not hrp or not hum then task.wait(1); continue end
 
-            -- Scan direct children of GeodeFolder (persis engkol.txt)
             local all = getAllSandDollars()
             State.SandTotal = #all
 
             if #all == 0 then
                 State.SandTarget = "Tidak ada Sand Dollar"
                 State.SandDist   = 0
-                task.wait(5)
+                task.wait(3)
                 continue
             end
 
@@ -422,132 +843,23 @@ local function startSandCollect()
             local obj   = entry.obj
             local part  = entry.part
 
-            if not obj or not obj.Parent then
-                task.wait(0.05)
-                continue
-            end
+            if not obj or not obj.Parent then task.wait(0.05); continue end
 
-            local targetCF  = part.CFrame
-            local targetPos = targetCF.Position
-            local dist      = (hrp.Position - targetPos).Magnitude
+            local targetPos   = part.Position
+            local countBefore = #all
 
             State.SandTarget = obj.Name .. " (" .. tostring(#all) .. " left)"
-            State.SandDist   = math.floor(dist)
+            State.SandDist   = math.floor((hrp.Position - targetPos).Magnitude)
 
-            -- Sudah dekat? (< 3.5 studs)
-            if dist < 3.5 then
-                -- Cek apakah sudah terkollect setelah berada dekat
-                task.wait(0.3)
-                local newAll   = getAllSandDollars()
-                local newCount = #newAll
-                if newCount < #all then
-                    State.SandCollected += (#all - newCount)
-                    if State.EspEnabled then pcall(refreshESP) end
-                else
-                    -- Masih ada, coba melangkah mendekat lagi
-                    hum:MoveTo(targetPos)
-                    task.wait(0.2)
-                end
-                continue
-            end
+            -- MOVE: Walk/Tween dengan pathfinding di sekitar rintangan
+            moveToSandDollar(hrp, hum, targetPos, function() return State.SandRunning end)
 
-            -- ── WALK METHOD (sama seperti collectMoveTo "Walk" di engkol.txt) ──
-            -- Apply WalkSpeed setiap iterasi (bisa berubah mid-run via slider)
-            pcall(function()
-                if hum then
-                    hum.WalkSpeed = State.WalkSpeed
-                end
-            end)
-            hum:MoveTo(targetPos)
+            -- COLLECT: coba semua metode
+            tryCollectSandDollar(obj, hrp)
 
-            local arrived    = false
-            local moveConn   = hum.MoveToFinished:Connect(function(reached)
-                arrived = reached
-            end)
+            -- Tunggu server proses (1 detik agar server sempat check proximity)
+            task.wait(1)
 
-            local lastPos   = hrp.Position
-            local stuckAt   = tick()
-            local countBefore = #all
-            local lastMove = tick()
-
-            -- Tunggu sampai sampai ATAU timeout ATAU stopped
-            while State.SandRunning and not arrived do
-                task.wait(0.1)
-
-                -- Recalculate distance in real-time
-                local curPos = hrp.Position
-                local currentDist = (curPos - targetPos).Magnitude
-                State.SandDist = math.floor(currentDist)
-
-                -- If close enough, complete
-                if currentDist < 3.5 then
-                    arrived = true
-                    break
-                end
-
-                -- Obj sudah hilang (dikollect saat berjalan)
-                if not obj.Parent then
-                    arrived = true
-                    break
-                end
-
-                -- Keep walking to target
-                if tick() - lastMove > 0.2 then
-                    hum:MoveTo(targetPos)
-                    lastMove = tick()
-                end
-
-                -- Stuck detection: 5 detik tidak bergerak → Tween fallback
-                if (curPos - lastPos).Magnitude < 1 then
-                    if tick() - stuckAt >= 5 then
-                        -- Tween fallback (tembus obstacle)
-                        -- Temporarily enable noclip during fallback
-                        local noclipConnection
-                        noclipConnection = RunService.Stepped:Connect(function()
-                            if char then
-                                for _, v in ipairs(char:GetDescendants()) do
-                                    if v:IsA("BasePart") then
-                                        v.CanCollide = false
-                                    end
-                                end
-                            end
-                        end)
-
-                        local tweenDist = (curPos - targetPos).Magnitude
-                        local tweenDur  = math.max(tweenDist / State.Speed, 0.2)
-                        local tw = TweenService:Create(
-                            hrp,
-                            TweenInfo.new(tweenDur, Enum.EasingStyle.Linear),
-                            { CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0)) }
-                        )
-                        tw:Play()
-                        task.wait(tweenDur + 0.1)
-
-                        if noclipConnection then noclipConnection:Disconnect() end
-                        noclipConnection = nil
-                        pcall(function()
-                            if char and char.Parent then
-                                for _, v in ipairs(char:GetDescendants()) do
-                                    if v:IsA("BasePart") then
-                                        v.CanCollide = true
-                                    end
-                                end
-                            end
-                        end)
-
-                        arrived = true
-                        break
-                    end
-                else
-                    stuckAt  = tick()
-                    lastPos  = curPos
-                end
-            end
-
-            if moveConn.Connected then moveConn:Disconnect() end
-
-            -- Cek hasil setelah arrive
-            task.wait(0.2)
             local countAfter = #getAllSandDollars()
             if countAfter < countBefore then
                 State.SandCollected += (countBefore - countAfter)
@@ -557,6 +869,7 @@ local function startSandCollect()
             task.wait(0.05)
         end
 
+        disableNoclip(Player.Character)
         State.SandRunning = false
         State.SandTarget  = "None"
         State.SandDist    = 0
@@ -567,27 +880,108 @@ end
 
 local function stopSandCollect()
     State.SandRunning = false
-    -- Restore WalkSpeed asli
-    pcall(function()
-        local char = Player.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum.WalkSpeed = State.OrigWalkSpeed
+    pcall(function() disableNoclip(Player.Character) end)
+end
+
+-- ============================================================
+--  SAND DOLLAR MAGNET COLLECT
+--  MoveTo ke setiap SD dengan WalkSpeed tinggi, collect,
+--  lalu MoveTo kembali ke posisi asal.
+-- ============================================================
+
+State.SandMagnetRunning = false
+
+local function startSandMagnet()
+    if State.SandMagnetRunning then return false end
+    State.SandMagnetRunning = true
+    State.SandCollected     = 0
+    State.SandStartAt       = tick()
+
+    task.spawn(function()
+        while State.SandMagnetRunning do
+            local char = Player.Character
+            local hrp  = char and char:FindFirstChild("HumanoidRootPart")
+            local hum  = char and char:FindFirstChildOfClass("Humanoid")
+            if not hrp or not hum then task.wait(1); continue end
+
+            local all = getAllSandDollars()
+            State.SandTotal = #all
+
+            if #all == 0 then
+                State.SandTarget = "Tidak ada Sand Dollar"
+                State.SandDist   = 0
+                task.wait(3)
+                continue
+            end
+
+            local originPos   = hrp.Position
+            local countBefore = #all
+            State.SandTarget  = tostring(#all) .. " Sand Dollar (MAGNET)"
+            State.SandDist    = 0
+
+            -- MoveTo ke setiap Sand Dollar satu per satu
+            for _, entry in ipairs(all) do
+                if not State.SandMagnetRunning then break end
+                local obj  = entry.obj
+                local part = entry.part
+                if not obj or not obj.Parent then continue end
+
+                moveToSandDollar(hrp, hum, part.Position, function()
+                    return State.SandMagnetRunning
+                end)
+                tryCollectSandDollar(obj, hrp)
+                task.wait(0.5)
+            end
+
+            -- Kembali ke posisi asal (player terlihat "diam")
+            if State.SandMagnetRunning and (hrp.Position - originPos).Magnitude > 5 then
+                local speed = State.Speed or 45
+                Movement.pathfindTween(originPos, {
+                    Speed = speed,
+                    StopDistance = 3,
+                    ShouldContinue = function() return State.SandMagnetRunning end,
+                    OnUpdate = function(remainingDist)
+                        State.SandDist = math.floor(remainingDist)
+                    end
+                })
+            end
+
+            task.wait(0.3)
+
+            local countAfter = #getAllSandDollars()
+            local collected  = countBefore - countAfter
+            if collected > 0 then
+                State.SandCollected += collected
+                State.SandTotal = countAfter
+                if State.EspEnabled then pcall(refreshESP) end
+            end
         end
+
+        disableNoclip(Player.Character)
+        State.SandMagnetRunning = false
+        State.SandTarget = "None"
+        State.SandDist   = 0
     end)
-    -- Stop movement jika sedang berjalan
-    pcall(function()
-        local char = Player.Character
-        local hum = char and char:FindFirstChildOfClass("Humanoid")
-        local hrp = char and char:FindFirstChild("HumanoidRootPart")
-        if hum and hrp then
-            hum:MoveTo(hrp.Position)
-        end
-    end)
+
+    return true
+end
+
+local function stopSandMagnet()
+    State.SandMagnetRunning = false
+    pcall(function() disableNoclip(Player.Character) end)
 end
 
 -- ============================================================
 --  REFRESH ALL
+-- ============================================================
+
+local function refreshAll()
+    pcall(function()
+        State.GeodeCount       = countIn(isGeodeItem)
+        State.TreasureMapCount = countIn(isTreasureItem)
+    end)
+    pcall(scanSandDollars)
+end
 -- ============================================================
 -- APPENDED FROM SIMPLE SOURCE (WITH STANDALONE SHIMS)
 
@@ -3299,35 +3693,35 @@ do
 
         function EngProject.WindowBuilder:CreateContentAreas(MainContainer, MainFrame, TopBar, Options)
             local Const = EngProject.Constants.Window
+            local TabsWidth = Const.TabsWidthOpen
+            local ContentWidth = Const.ContentWidthOpen
             local IsCollapsed = Options.IsCollapsed
             local HorizontalPadding = IsCollapsed and 4 or Options.HorizontalPadding or Const.HorizontalPadding
             local HasBrand = Options.Brand ~= nil
-            local TabBarHeight = 36
 
             local TabsContainer = EngProject.Utility:CreateInstance("ScrollingFrame", {
                 Name = "TabsContainer",
                 Position = UDim2.new(0, HorizontalPadding, 0, 0),
-                Size = UDim2.new(1, -(HorizontalPadding * 2), 0, TabBarHeight),
+                Size = UDim2.new(TabsWidth, -(HorizontalPadding * 1.5), 1, 0),
                 BackgroundTransparency = 1,
                 BorderSizePixel = 0,
                 ZIndex = EngProject.Constants.ZIndex.Content,
                 ClipsDescendants = true,
-                ScrollingDirection = Enum.ScrollingDirection.X,
+                ScrollingDirection = Enum.ScrollingDirection.Y,
                 ScrollBarThickness = 0,
                 CanvasSize = UDim2.new(0, 0, 0, 0),
-                AutomaticCanvasSize = Enum.AutomaticSize.X
+                AutomaticCanvasSize = Enum.AutomaticSize.Y
             }, MainContainer)
             EngProject.Utility:CreateInstance("UIListLayout", {
-                FillDirection = Enum.FillDirection.Horizontal,
                 SortOrder = Enum.SortOrder.LayoutOrder,
-                VerticalAlignment = Enum.VerticalAlignment.Center,
-                Padding = UDim.new(0, 8)
+                HorizontalAlignment = Enum.HorizontalAlignment.Center,
+                Padding = UDim.new(0, EngProject.Constants.Padding.Large)
             }, TabsContainer)
             EngProject.Utility:CreateInstance("UIPadding", {
                 PaddingTop = UDim.new(0, 0),
                 PaddingBottom = UDim.new(0, 0),
-                PaddingLeft = UDim.new(0, 4),
-                PaddingRight = UDim.new(0, 4)
+                PaddingLeft = UDim.new(0, 2),
+                PaddingRight = UDim.new(0, 1)
             }, TabsContainer)
             local Theme = EngProject.ThemeManager:GetCurrentTheme({
                 ThemeData = {
@@ -3336,8 +3730,8 @@ do
             })
             local TabsSeparatorProperties, TabsSeparatorBindings = EngProject.Utility:ApplyTheme({
                 Name = "TabsSeparator",
-                Position = UDim2.new(0, 0, 0, HasBrand and TabBarHeight or Const.TopBarHeight + TabBarHeight),
-                Size = UDim2.new(1, 0, 0, 1),
+                Position = UDim2.new(TabsWidth, Const.TabSeparatorGap, 0, HasBrand and 0 or Const.TopBarHeight),
+                Size = UDim2.new(0, 1, 1, HasBrand and 0 or -Const.TopBarHeight),
                 BorderSizePixel = 0,
                 ZIndex = EngProject.Constants.ZIndex.Content
             }, {
@@ -3347,8 +3741,8 @@ do
             local TabsSeparator = EngProject.Utility:CreateInstance("Frame", TabsSeparatorProperties, MainFrame)
             local ContentsContainer = EngProject.Utility:CreateInstance("Frame", {
                 Name = "ContentsContainer",
-                Position = UDim2.new(0, HorizontalPadding, 0, TabBarHeight + 6),
-                Size = UDim2.new(1, -(HorizontalPadding * 2), 1, -(TabBarHeight + 6)),
+                Position = UDim2.new(TabsWidth, HorizontalPadding, 0, 0),
+                Size = UDim2.new(ContentWidth, -(HorizontalPadding * 2), 1, 0),
                 BorderSizePixel = 0,
                 BackgroundTransparency = 1,
                 ZIndex = EngProject.Constants.ZIndex.Content,
@@ -5150,11 +5544,116 @@ function EngProject:CreateWindow(options)
 
             local function setExpanded(expanded, tweenDuration)
                 self.TabsExpanded = expanded
+                tweenDuration = tweenDuration and duration or 0
+
+                updateTopBarLayout(expanded, tweenDuration)
+
+                local hPad = const.HorizontalPadding
+                local tabsSize, tabsPos, contentsPos, contentsSize
+
+                if expanded then
+                    tabsSize = UDim2.new(const.TabsWidthOpen, -(hPad * 0.5), 1, 0)
+                    tabsPos = UDim2.new(0, hPad * 0.5, 0, 0)
+                    contentsPos = UDim2.new(const.TabsWidthOpen, hPad, 0, 0)
+                    contentsSize = UDim2.new(const.ContentWidthOpen, -(hPad * 2), 1, 0)
+                else
+                    local contentLeft = const.ContentLeftOffsetClosed
+                    tabsSize = UDim2.new(0, const.TabsWidthClosed, 1, 0)
+                    tabsPos = UDim2.new(0, const.ClosedTabHorizontalPadding, 0, 0)
+                    contentsPos = UDim2.new(0, contentLeft, 0, 0)
+                    contentsSize = UDim2.new(1, -(contentLeft + hPad), 1, 0)
+                end
+
+                TweenService:Create(tabsContainer,
+                    TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                        Size = tabsSize,
+                        Position = tabsPos
+                    }):Play()
+
+                TweenService:Create(contentsContainer,
+                    TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+                        Position = contentsPos,
+                        Size = contentsSize
+                    }):Play()
+
                 for _, tabData in pairs(self.Elements.Tabs) do
-                    if type(tabData) == "table" and tabData.RefreshVisuals then
-                        tabData.RefreshVisuals()
+                    if type(tabData) == "table" and tabData.Container then
+
+                        local isActive = tabData.Container == self.ActiveTab
+
+                        if not isActive then
+                            local currentTheme = EngProject.ThemeManager:GetCurrentTheme(self)
+                            local targetColor = expanded and currentTheme.Secondary or currentTheme.Secondary
+                            local targetTransparency = expanded and (currentTheme.TransparencySecondary or 0.8) or 1
+
+                            TweenService:Create(tabData.Container, TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad),
+                                {
+                                    BackgroundColor3 = targetColor,
+                                    BackgroundTransparency = targetTransparency
+                                }):Play()
+                        end
+
+                        TweenService:Create(tabData.Container, TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad), {
+                            Size = UDim2.new(1, -8, 0, expanded and 32 or 44)
+                        }):Play()
+
+                        if tabData.Icon then
+                            local iconSize = expanded and const.TabIconSizeExpanded or 24
+                            TweenService:Create(tabData.Icon, TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad), {
+                                Size = UDim2.new(0, iconSize, 0, iconSize)
+                            }):Play()
+                        end
+
+                        if tabData.TextLabel then
+                            if expanded then
+                                tabData.TextLabel.Visible = true
+                                TweenService:Create(tabData.TextLabel,
+                                    TweenInfo.new(tweenDuration * 0.5, Enum.EasingStyle.Quad), {
+                                        TextTransparency = 0
+                                    }):Play()
+                            else
+                                TweenService:Create(tabData.TextLabel,
+                                    TweenInfo.new(tweenDuration * 0.5, Enum.EasingStyle.Quad), {
+                                        TextTransparency = 1
+                                    }):Play()
+                                task.delay(tweenDuration * 0.5, function()
+                                    if not self.TabsExpanded then
+                                        tabData.TextLabel.Visible = false
+                                    end
+                                end)
+                            end
+                        end
+
+                        if tabData.ContentContainer then
+                            TweenService:Create(tabData.ContentContainer,
+                                TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad), expanded and {
+                                    Position = UDim2.new(0, 0, 0, 0),
+                                    AnchorPoint = Vector2.new(0, 0)
+                                } or {
+                                    Position = UDim2.new(0.5, 0, 0.5, 0),
+                                    AnchorPoint = Vector2.new(0.5, 0.5)
+                                }):Play()
+                        end
+
+                        if tabData.AccentLine then
+                            local isActive = tabData.Container == self.ActiveTab
+                            if isActive then
+                                TweenService:Create(tabData.AccentLine,
+                                    TweenInfo.new(tweenDuration, Enum.EasingStyle.Quad), {
+                                        BackgroundTransparency = expanded and 1 or 0
+                                    }):Play()
+                            end
+                        end
                     end
                 end
+
+                task.delay(tweenDuration, function()
+                    for _, tabData in pairs(self.Elements.Tabs) do
+                        if type(tabData) == "table" and tabData.RefreshVisuals then
+                            tabData.RefreshVisuals()
+                        end
+                    end
+                end)
             end
 
             if mode == modes.Fixed then
@@ -5461,8 +5960,15 @@ function EngProject:CreateWindow(options)
     end
 
     if options.StartHidden then
-if options.TabMode then
+        mainFrame.Visible = false
+    end
+
+    if options.TabMode then
         window:SetTabMode(options.TabMode, true, options.TabDynamicThreshold)
+    end
+
+    if options.InitialOpacity then
+        window:SetOpacity(options.InitialOpacity, false)
     end
 
     return window
@@ -5492,13 +5998,6 @@ function EngProject:CreateTab(Window, Name, Options)
     }, Window.Elements.TabsContainer)
     self.Utility:CreateInstance("UICorner", {
         CornerRadius = UDim.new(0, self.Constants.Corner.Medium)
-    }, Tab)
-
-    local Stroke = self.Utility:CreateInstance("UIStroke", {
-        Color = Theme.Separator or Color3.fromRGB(255, 255, 255),
-        Thickness = 1,
-        Transparency = 0.8,
-        ApplyStrokeMode = Enum.ApplyStrokeMode.Border
     }, Tab)
 
     local AccentLine = self.Utility:CreateInstance("Frame", {
@@ -5597,7 +6096,7 @@ function EngProject:CreateTab(Window, Name, Options)
 
         if IsActive then
             Tab.BackgroundColor3 = CurrentTheme.SecondaryActive
-            Tab.BackgroundTransparency = 0.2
+            Tab.BackgroundTransparency = 0
             TextLabel.TextColor3 = CurrentTheme.TextActive
             if Icon then
                 Icon.ImageColor3 = CurrentTheme.TabIconActive or CurrentTheme.TextActive
@@ -5607,34 +6106,28 @@ function EngProject:CreateTab(Window, Name, Options)
             else
                 AccentLine.BackgroundTransparency = 1
             end
-            Stroke.Color = CurrentTheme.TabAccent or CurrentTheme.Accent
-            Stroke.Transparency = 0.4
             UpdateActiveBrandDisplay(Name, Options)
         elseif TabState.IsHovering then
             Tab.BackgroundColor3 = CurrentTheme.Secondary
-            Tab.BackgroundTransparency = 0.5
+            Tab.BackgroundTransparency = 0
             TextLabel.TextColor3 = CurrentTheme.TextPrimary
             if Icon then
                 Icon.ImageColor3 = CurrentTheme.TabIconHover or CurrentTheme.TextPrimary
             end
             AccentLine.BackgroundTransparency = 1
-            Stroke.Color = CurrentTheme.TextPrimary
-            Stroke.Transparency = 0.6
         else
-            Tab.BackgroundColor3 = CurrentTheme.Secondary
             if IsCollapsed then
+                Tab.BackgroundColor3 = CurrentTheme.Secondary
                 Tab.BackgroundTransparency = 1
-                Stroke.Transparency = 0.9
             else
-                Tab.BackgroundTransparency = 0.9
-                Stroke.Transparency = 0.8
+                Tab.BackgroundColor3 = CurrentTheme.Secondary
+                Tab.BackgroundTransparency = CurrentTheme.TransparencySecondary or 0.8
             end
             TextLabel.TextColor3 = CurrentTheme.TextInactive
             if Icon then
                 Icon.ImageColor3 = CurrentTheme.TabIconInactive or CurrentTheme.TextInactive
             end
             AccentLine.BackgroundTransparency = 1
-            Stroke.Color = CurrentTheme.Separator or Color3.fromRGB(255, 255, 255)
         end
     end
 
@@ -5761,154 +6254,6 @@ function EngProject:CreateTab(Window, Name, Options)
         Icon = Icon,
         AccentLine = AccentLine
     }
-end
-
-function EngProject:CreateSocialTab(Window, Name, Options)
-    if not Window or not Window.Elements or not Window.Elements.TabsContainer then
-        return
-    end
-    Options = Options or {}
-    local Theme = self.ThemeManager:GetCurrentTheme(Window)
-    local IsMobile = self.Utility:IsMobile()
-
-    local Tab = self.Utility:CreateInstance("TextButton", {
-        Name = Name,
-        Size = UDim2.new(1, -8, 0, Window.TabsExpanded and 32 or 44),
-        BackgroundTransparency = 0.9,
-        BorderSizePixel = 0,
-        Text = "",
-        AutoButtonColor = false,
-        ZIndex = self.Constants.ZIndex.Content,
-        LayoutOrder = #Window.Elements.Tabs + 100
-    }, Window.Elements.TabsContainer)
-    
-    self.Utility:CreateInstance("UICorner", {
-        CornerRadius = UDim.new(0, self.Constants.Corner.Medium)
-    }, Tab)
-
-    local Stroke = self.Utility:CreateInstance("UIStroke", {
-        Color = Theme.Separator or Color3.fromRGB(255, 255, 255),
-        Thickness = 1,
-        Transparency = 0.8,
-        ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-    }, Tab)
-
-    local ContentContainer = self.Utility:CreateInstance("Frame", {
-        Name = "ContentContainer",
-        Size = UDim2.new(1, 0, 1, 0),
-        BackgroundTransparency = 1,
-        ZIndex = self.Constants.ZIndex.Content + 1
-    }, Tab)
-    self.Utility:CreateInstance("UIListLayout", {
-        FillDirection = Enum.FillDirection.Horizontal,
-        VerticalAlignment = Enum.VerticalAlignment.Center,
-        HorizontalAlignment = Enum.HorizontalAlignment.Left,
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 8)
-    }, ContentContainer)
-    self.Utility:CreateInstance("UIPadding", {
-        PaddingLeft = UDim.new(0, self.Constants.Padding.Large),
-        PaddingRight = UDim.new(0, self.Constants.Padding.Large)
-    }, ContentContainer)
-
-    local Icon = nil
-    local IconSize = 18
-
-    if Options.Icon and type(Options.Icon) == "table" and Options.Icon.Image then
-        local IconData = self.IconManager:WrapIcon(Options.Icon)
-        Icon = self.Utility:CreateInstance("ImageLabel", {
-            Name = "TabIcon",
-            Image = IconData.Url,
-            ImageColor3 = Theme.TextInactive,
-            Size = UDim2.new(0, IconSize, 0, IconSize),
-            BackgroundTransparency = 1,
-            LayoutOrder = 1,
-            ZIndex = self.Constants.ZIndex.Control
-        }, ContentContainer)
-    end
-
-    local TextLabel = self.Utility:CreateInstance("TextLabel", {
-        Name = "TabText",
-        Text = Name,
-        TextSize = 15,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextYAlignment = Enum.TextYAlignment.Center,
-        BackgroundTransparency = 1,
-        Size = UDim2.new(1, -(IconSize > 0 and (IconSize + 8) or 0), 1, 0),
-        Font = Theme.FontSecondary,
-        TextColor3 = Theme.TextInactive,
-        LayoutOrder = 2,
-        ZIndex = self.Constants.ZIndex.Control
-    }, ContentContainer)
-
-    local TabState = { IsHovering = false }
-
-    local function RefreshTabVisuals()
-        local CurrentTheme = self.ThemeManager:GetCurrentTheme(Window)
-        local IsCollapsed = not Window.TabsExpanded
-        if TabState.IsHovering then
-            Tab.BackgroundColor3 = CurrentTheme.Secondary
-            Tab.BackgroundTransparency = 0.5
-            TextLabel.TextColor3 = CurrentTheme.TextPrimary
-            if Icon then
-                Icon.ImageColor3 = CurrentTheme.TabIconHover or CurrentTheme.TextPrimary
-            end
-            Stroke.Color = CurrentTheme.TextPrimary
-            Stroke.Transparency = 0.6
-        else
-            Tab.BackgroundColor3 = CurrentTheme.Secondary
-            if IsCollapsed then
-                Tab.BackgroundTransparency = 1
-                Stroke.Transparency = 0.9
-            else
-                Tab.BackgroundTransparency = 0.9
-                Stroke.Transparency = 0.8
-            end
-            TextLabel.TextColor3 = CurrentTheme.TextInactive
-            if Icon then
-                Icon.ImageColor3 = CurrentTheme.TabIconInactive or CurrentTheme.TextInactive
-            end
-            Stroke.Color = CurrentTheme.Separator or Color3.fromRGB(255, 255, 255)
-        end
-    end
-
-    if not IsMobile then
-        Tab.MouseEnter:Connect(function()
-            TabState.IsHovering = true
-            RefreshTabVisuals()
-        end)
-        Tab.MouseLeave:Connect(function()
-            TabState.IsHovering = false
-            RefreshTabVisuals()
-        end)
-    end
-
-    Tab.Activated:Connect(function()
-        if Options.Url then
-            local setclip = setclipboard or toclipboard or (Clipboard and Clipboard.set)
-            if setclip then
-                pcall(function()
-                    setclip(Options.Url)
-                end)
-                self:CreateNotification({
-                    Type = "Success",
-                    Title = "Link Copied",
-                    Description = "Copied " .. Name .. " link to clipboard!",
-                    Duration = 5
-                })
-            else
-                self:CreateNotification({
-                    Type = "Error",
-                    Title = "Not Supported",
-                    Description = "Clipboard operations are not supported on your executor.",
-                    Duration = 5
-                })
-            end
-        end
-    end)
-
-    RefreshTabVisuals()
-    return Tab
 end
 
 function EngProject:CreatePage(Window, Name, Options)
@@ -8844,7 +9189,11 @@ do
                 end
 
                 pcall(function()
-                    collectScript:InvokeServer(1, true)
+                    collectScript:InvokeServer()
+                end)
+                task.wait(0.02)
+                pcall(function()
+                    collectScript:InvokeServer(0)
                 end)
             end
 
@@ -8856,7 +9205,11 @@ do
                 return "KILLED"
             end
             pcall(function()
-                collectScript:InvokeServer(1, true)
+                collectScript:InvokeServer()
+            end)
+            task.wait(0.02)
+            pcall(function()
+                collectScript:InvokeServer(0)
             end)
             return "SUCCESS"
         end
@@ -8968,7 +9321,7 @@ do
     end
 end
 
-local Movement = {}
+Movement = {}
 do
     function Movement.tweenToTarget(target, config)
         local player = Services.Players.LocalPlayer
@@ -9502,6 +9855,150 @@ do
         }
     end
 
+    function Movement.pathfindTween(target, config)
+        config = config or {}
+        local character = Player.Character or Player.CharacterAdded:Wait()
+        local hrp = character and character:WaitForChild("HumanoidRootPart", 10)
+        local humanoid = character and character:WaitForChild("Humanoid", 10)
+        if not hrp or not humanoid then
+            return false
+        end
+
+        local targetPos
+        if typeof(target) == "Vector3" then
+            targetPos = target
+        elseif typeof(target) == "CFrame" then
+            targetPos = target.Position
+        elseif typeof(target) == "Instance" and target:IsA("BasePart") then
+            targetPos = target.Position
+        elseif typeof(target) == "table" and target.Position then
+            targetPos = target.Position
+        else
+            targetPos = target
+        end
+
+        if not targetPos or typeof(targetPos) ~= "Vector3" then
+            return false
+        end
+
+        local speed = config.Speed or State.Speed or 24
+        local stopDist = config.StopDistance or 4
+        local shouldContinue = config.ShouldContinue or function() return true end
+        local onUpdate = config.OnUpdate
+
+        local startPos = hrp.Position
+        local distance = (startPos - targetPos).Magnitude
+
+        if distance <= stopDist then
+            return true
+        end
+
+        local PathfindingService = EngProject.Utility:GetService("PathfindingService")
+        local TweenService = EngProject.Utility:GetService("TweenService")
+        local RunService = EngProject.Utility:GetService("RunService")
+
+        local path
+        if PathfindingService then
+            pcall(function()
+                path = PathfindingService:CreatePath({
+                    AgentRadius = 2,
+                    AgentHeight = 5,
+                    AgentCanJump = true,
+                    WaypointSpacing = 4
+                })
+            end)
+        end
+
+        local success = false
+        if path then
+            success = pcall(function()
+                path:ComputeAsync(startPos, targetPos)
+            end)
+        end
+
+        local waypoints = {}
+        if success and path and path.Status == Enum.PathStatus.Success then
+            waypoints = path:GetWaypoints()
+        else
+            waypoints = {
+                { Position = targetPos }
+            }
+        end
+
+        local originalPlatformStand = humanoid.PlatformStand
+        humanoid.PlatformStand = true
+
+        local noclipConnection
+        if RunService then
+            noclipConnection = RunService.Stepped:Connect(function()
+                if character then
+                    for _, v in ipairs(character:GetDescendants()) do
+                        if v:IsA("BasePart") then
+                            v.CanCollide = false
+                        end
+                    end
+                end
+            end)
+        end
+
+        local tweenSuccess = true
+        for idx, waypoint in ipairs(waypoints) do
+            if not shouldContinue() then
+                tweenSuccess = false
+                break
+            end
+
+            local wpPos = waypoint.Position
+            local lookAt = Vector3.new(wpPos.X, hrp.Position.Y, wpPos.Z)
+            local targetWP_CFrame
+            if (lookAt - hrp.Position).Magnitude > 0.1 then
+                targetWP_CFrame = CFrame.lookAt(hrp.Position, lookAt)
+                targetWP_CFrame = CFrame.new(wpPos) * (targetWP_CFrame - targetWP_CFrame.Position)
+            else
+                targetWP_CFrame = CFrame.new(wpPos) * (hrp.CFrame - hrp.CFrame.Position)
+            end
+
+            local dist = (hrp.Position - wpPos).Magnitude
+            local duration = dist / speed
+            if duration > 0 and TweenService then
+                local tween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = targetWP_CFrame})
+                tween:Play()
+
+                while tween.PlaybackState == Enum.PlaybackState.Playing and shouldContinue() do
+                    if typeof(onUpdate) == "function" then
+                        onUpdate((hrp.Position - targetPos).Magnitude)
+                    end
+                    task.wait(0.02)
+                end
+
+                if tween.PlaybackState == Enum.PlaybackState.Playing then
+                    tween:Cancel()
+                    tweenSuccess = false
+                    break
+                end
+            elseif duration > 0 then
+                hrp.CFrame = targetWP_CFrame
+                task.wait(duration)
+            end
+        end
+
+        if noclipConnection then
+            noclipConnection:Disconnect()
+        end
+
+        for _, v in ipairs(character:GetDescendants()) do
+            if v:IsA("BasePart") then
+                v.CanCollide = true
+            end
+        end
+
+        if humanoid and originalPlatformStand ~= nil then
+            humanoid.PlatformStand = originalPlatformStand
+        end
+
+        return tweenSuccess and (hrp.Position - targetPos).Magnitude <= (stopDist + 5)
+    end
+
     function Movement.walkToTarget(target, config)
         config = config or {}
         local character = Player.Character or Player.CharacterAdded:Wait()
@@ -9842,15 +10339,14 @@ do
         end
 
         local basePosition = merchantHrp.Position
-        local outwardDistance = options.OutwardDistance or 12
-        local verticalOffset = options.VerticalOffset or 20
+        local outwardDistance = options.OutwardDistance or 5
+        -- FIXED: VerticalOffset 3 bukan 20 — player berdiri di depan merchant, bukan melayang
+        local verticalOffset = options.VerticalOffset or 3
         local char = Player.Character
         local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
-        local direction = playerHrp and (playerHrp.Position - basePosition) or nil
 
-        if not direction or direction.Magnitude < 1 then
-            direction = -merchantHrp.CFrame.LookVector
-        end
+        -- Arah menghadap ke merchant: dari depan merchant (LookVector)
+        local direction = -merchantHrp.CFrame.LookVector
 
         local horizontalDirection = Vector3.new(direction.X, 0, direction.Z)
         if horizontalDirection.Magnitude < 1 then
@@ -9859,17 +10355,146 @@ do
 
         return basePosition + (horizontalDirection.Unit * outwardDistance) + Vector3.new(0, verticalOffset, 0)
     end
+
+    -- Cari semua merchant di semua folder NPC di workspace
+    function MerchantModule.getAllMerchants()
+        local results = {}
+        local ok, NPCs = pcall(function()
+            return Services.Workspace:FindFirstChild("NPCs")
+        end)
+        if not ok or not NPCs then return results end
+
+        for _, folder in ipairs(NPCs:GetChildren()) do
+            for _, npc in ipairs(folder:GetChildren()) do
+                -- Cari merchant dengan Dialog Seller ATAU Name berisi "Merchant"/"Seller"/"Shop"
+                local isSeller = false
+
+                -- Method 1: Dialog ObjectValue ke Seller
+                local dialog = npc:FindFirstChild("Dialog")
+                if dialog and dialog.ClassName == "ObjectValue" and dialog.Value then
+                    local valName = dialog.Value.Name or ""
+                    if valName == "Seller" or valName:lower():find("sell") or valName:lower():find("merchant") then
+                        isSeller = true
+                    end
+                end
+
+                -- Method 2: Icon image check
+                if not isSeller then
+                    local icon = npc:FindFirstChild("IconUI")
+                    local img = icon and icon:FindFirstChild("ImageLabel")
+                    if img and img.Image == "rbxassetid://2246496691" then
+                        isSeller = true
+                    end
+                end
+
+                -- Method 3: NPC name contains merchant/seller/shop keywords
+                if not isSeller then
+                    local n = npc.Name:lower()
+                    if n:find("merchant") or n:find("seller") or n:find("vendor") or n:find("shop") then
+                        isSeller = true
+                    end
+                end
+
+                -- Method 4: Has SellAll-related prompt or child
+                if not isSeller then
+                    local sp = npc:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if sp and (sp.ActionText:lower():find("sell") or sp.ObjectText:lower():find("sell")) then
+                        isSeller = true
+                    end
+                end
+
+                if isSeller and npc:FindFirstChild("HumanoidRootPart") then
+                    table.insert(results, {
+                        npc = npc,
+                        hrp = npc.HumanoidRootPart,
+                        name = npc.Name,
+                        folder = folder.Name
+                    })
+                end
+            end
+        end
+        return results
+    end
+
+    -- Teleport langsung ke depan merchant terdekat dan jual
+    function MerchantModule.directTeleportAndSell()
+        local char = Player.Character
+        local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not playerHrp then
+            Utility.createNotification("Character not found!", 3)
+            return false
+        end
+
+        -- Cari semua merchant
+        local allMerchants = MerchantModule.getAllMerchants()
+
+        if #allMerchants == 0 then
+            -- Fallback: coba getClosest() (original method)
+            local closestHrp, dist = MerchantModule.getClosest()
+            if not closestHrp then
+                Utility.createNotification("Tidak ada merchant ditemukan di peta ini!", 4)
+                return false
+            end
+            table.insert(allMerchants, { hrp = closestHrp, name = "Merchant" })
+        end
+
+        -- Sort by distance
+        table.sort(allMerchants, function(a, b)
+            local da = (playerHrp.Position - a.hrp.Position).Magnitude
+            local db = (playerHrp.Position - b.hrp.Position).Magnitude
+            return da < db
+        end)
+
+        local nearest = allMerchants[1]
+        local sellPos = MerchantModule.getSellPosition(nearest.hrp)
+
+        if not sellPos then
+            Utility.createNotification("Gagal hitung posisi merchant!", 3)
+            return false
+        end
+
+        -- Simpan posisi asal
+        local originCF = playerHrp.CFrame
+
+        -- Teleport langsung ke depan merchant
+        Utility.createNotification("Teleport ke merchant: " .. nearest.name, 3)
+        pcall(function()
+            playerHrp.CFrame = CFrame.new(sellPos)
+        end)
+
+        task.wait(0.6)
+
+        -- Jual semua
+        local ok, result = pcall(function()
+            return ReplicatedStorage.Remotes.Shop.SellAll:InvokeServer()
+        end)
+
+        if ok then
+            local itemsSold = type(result) == "number" and result or (type(result) == "table" and result[1]) or 0
+            Utility.createNotification("Berhasil dijual! Items: " .. tostring(itemsSold), 4)
+            return true
+        else
+            -- Coba FireServer sebagai fallback
+            pcall(function()
+                ReplicatedStorage.Remotes.Shop.SellAll:FireServer()
+            end)
+            Utility.createNotification("Sell dikirim (fallback)!", 3)
+            return true
+        end
+    end
 end
 
 local SellModule = {}
 do
     function SellModule.getInventoryCount()
         local count = 0
-
-        for _, item in ipairs(BackpackTwo:GetChildren()) do
-            local t = item:GetAttribute("ItemType")
-            if t == "Valuable" or t == "Equipment" then
-                count = count + 1
+        local bp = getBackpack()
+        if bp then
+            for _, item in ipairs(bp:GetChildren()) do
+                local t = item:GetAttribute("ItemType")
+                if t == "Valuable" or t == "Equipment" then
+                    count = count + 1
+                end
             end
         end
 
@@ -10428,7 +11053,8 @@ do
 
     local function getTools()
         local tools = {}
-        local backpack = BackpackTwo:GetChildren()
+        local bp = getBackpack()
+        local backpack = bp and bp:GetChildren() or {}
         for i = 1, #backpack do
             tools[#tools + 1] = backpack[i]
         end
@@ -10722,18 +11348,20 @@ do
     end
 
     function EnchantModule.findPanMaterial(materialName)
-        if not BackpackTwo then
+        local bp = getBackpack()
+        if not bp then
             return nil
         end
-        return BackpackTwo:FindFirstChild(materialName)
+        return bp:FindFirstChild(materialName)
     end
 
     function EnchantModule.findShovelMaterial(modifier)
-        if not BackpackTwo then
+        local bp = getBackpack()
+        if not bp then
             return nil
         end
 
-        for _, tool in ipairs(BackpackTwo:GetChildren()) do
+        for _, tool in ipairs(bp:GetChildren()) do
             if tool:IsA("Tool") and tool.Name == "Aetherite" then
                 local itemData = tool:FindFirstChild("ItemData")
                 if itemData and itemData:GetAttribute("Modifier") == modifier then
@@ -10827,13 +11455,14 @@ do
             return
         end
 
-        if not BackpackTwo or not BackpackTwo.GetChildren then
+        local bp = getBackpack()
+        if not bp then
             safeSetFields({"Backpack unavailable"})
             return
         end
 
         local equipment
-        for _, child in ipairs(BackpackTwo:GetChildren() or {}) do
+        for _, child in ipairs(bp:GetChildren() or {}) do
             if child and child.GetAttribute and child:GetAttribute("GUID") == guid then
                 equipment = child
                 break
@@ -10886,13 +11515,14 @@ do
             return
         end
 
-        if not BackpackTwo or not BackpackTwo.GetChildren then
+        local bp = getBackpack()
+        if not bp then
             Utility.createNotification("Backpack unavailable.")
             return
         end
 
         local equipment
-        for _, child in ipairs(BackpackTwo:GetChildren() or {}) do
+        for _, child in ipairs(bp:GetChildren() or {}) do
             if child and child.GetAttribute and child:GetAttribute("GUID") == guid then
                 equipment = child
                 break
@@ -10920,10 +11550,13 @@ do
         local startTime = os.clock()
 
         while os.clock() - startTime < timeout do
-            for _, child in ipairs(BackpackTwo:GetChildren() or {}) do
-                if child and child.GetAttribute and child:GetAttribute("GUID") == guid then
-                    newEquipment = child
-                    break
+            local bp = getBackpack()
+            if bp then
+                for _, child in ipairs(bp:GetChildren() or {}) do
+                    if child and child.GetAttribute and child:GetAttribute("GUID") == guid then
+                        newEquipment = child
+                        break
+                    end
                 end
             end
             if newEquipment then
@@ -10958,9 +11591,12 @@ do
         end
 
         local stones = {}
-        for _, tool in ipairs(BackpackTwo:GetChildren()) do
-            if tool:IsA("Tool") and tool.Name == "Firefly Stone" then
-                table.insert(stones, tool)
+        local bp = getBackpack()
+        if bp then
+            for _, tool in ipairs(bp:GetChildren()) do
+                if tool:IsA("Tool") and tool.Name == "Firefly Stone" then
+                    table.insert(stones, tool)
+                end
             end
         end
 
@@ -11784,73 +12420,13 @@ do
                 end
             })
         elseif State.AutoFarm.travelMode == "Visual" then
-            local char = Player.Character or Player.CharacterAdded:Wait()
-            local hrp = char:WaitForChild("HumanoidRootPart", 10)
-            local humanoid = char:WaitForChild("Humanoid", 10)
-            if hrp and humanoid then
-                local distance = (hrp.Position - targetCFrame.Position).Magnitude
-
-                -- set noclip via Stepped connection to be robust
-                local noclipConnection
-                noclipConnection = RunService.Stepped:Connect(function()
-                    if char then
-                        for _, v in ipairs(char:GetDescendants()) do
-                            if v:IsA("BasePart") then
-                                v.CanCollide = false
-                            end
-                        end
-                    end
-                end)
-
-                local originalPlatformStand = humanoid.PlatformStand
-                humanoid.PlatformStand = true
-
-                local speed = State.Speed or 24
-                local duration = math.max(distance / speed, 0.3)
-                local tween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = targetCFrame})
-                tween:Play()
-
-                local lastPos = hrp.Position
-                local stuckStart = tick()
-
-                while tween.PlaybackState == Enum.PlaybackState.Playing and State.AutoFarm.active and not State.AutoFarm.interrupted do
-                    task.wait(0.1)
-                    local curPos = hrp.Position
-                    if (curPos - lastPos).Magnitude < 1 then
-                        if tick() - stuckStart >= 5 then
-                            tween:Cancel()
-                            hrp.CFrame = targetCFrame
-                            task.wait(0.1)
-                            break
-                        end
-                    else
-                        stuckStart = tick()
-                        lastPos = curPos
-                    end
+            success = Movement.pathfindTween(targetCFrame, {
+                Speed = State.Speed or 24,
+                StopDistance = 8,
+                ShouldContinue = function()
+                    return State.AutoFarm.active and not State.AutoFarm.interrupted
                 end
-
-                if tween.PlaybackState == Enum.PlaybackState.Playing then
-                    tween:Cancel()
-                end
-
-                -- restore noclip & platform stand
-                if noclipConnection then
-                    noclipConnection:Disconnect()
-                end
-
-                for _, v in ipairs(char:GetDescendants()) do
-                    if v:IsA("BasePart") then
-                        v.CanCollide = true
-                    end
-                end
-                if humanoid and originalPlatformStand ~= nil then
-                    humanoid.PlatformStand = originalPlatformStand
-                end
-
-                success = (hrp.Position - targetCFrame.Position).Magnitude < 10
-            else
-                success = false
-            end
+            })
             completed = true
         else
             Movement.teleportToTarget(targetObj.Position, {
@@ -12143,10 +12719,13 @@ do
 
     function HuntingModule.getInventoryCount()
         local count = 0
-        for _, item in ipairs(BackpackTwo:GetChildren()) do
-            local t = item:GetAttribute("ItemType")
-            if t == "Valuable" or t == "Equipment" then
-                count = count + 1
+        local bp = getBackpack()
+        if bp then
+            for _, item in ipairs(bp:GetChildren()) do
+                local t = item:GetAttribute("ItemType")
+                if t == "Valuable" or t == "Equipment" then
+                    count = count + 1
+                end
             end
         end
         local character = Character
@@ -12180,9 +12759,12 @@ do
     end
 
     function HuntingModule.findGeodeInBackpack()
-        for _, item in ipairs(BackpackTwo:GetChildren()) do
-            if item.Name == "Geode" then
-                return item
+        local bp = getBackpack()
+        if bp then
+            for _, item in ipairs(bp:GetChildren()) do
+                if item.Name == "Geode" then
+                    return item
+                end
             end
         end
         return nil
@@ -12339,27 +12921,42 @@ do
         if equipped and equipped:GetAttribute("ItemType") == "Pan" then
             return equipped
         end
-        for _, v in ipairs(BackpackTwo:GetChildren()) do
-            if v:GetAttribute("ItemType") == "Pan" then
-                ReplicatedStorage.Remotes.CustomBackpack.EquipRemote:FireServer(v)
-                task.wait(0.5)
-                return v
+        local bp = getBackpack()
+        if bp then
+            for _, v in ipairs(bp:GetChildren()) do
+                if v:GetAttribute("ItemType") == "Pan" then
+                    ReplicatedStorage.Remotes.CustomBackpack.EquipRemote:FireServer(v)
+                    task.wait(0.5)
+                    return v
+                end
             end
         end
         return nil
     end
 
     function HuntingModule.findNextMap()
-        for _, v in ipairs(BackpackTwo:GetChildren()) do
-            if v:GetAttribute("ItemType") == "TreasureMap" then
-                return v
+        local containers = {}
+        local bp = getBackpack()
+        if bp then table.insert(containers, bp) end
+        if Character then table.insert(containers, Character) end
+        for _, container in ipairs(containers) do
+            if container then
+                for _, v in ipairs(container:GetChildren()) do
+                    local name = v.Name:lower()
+                    if v:GetAttribute("ItemType") == "TreasureMap" or (name:find("treasure") and name:find("map")) then
+                        return v
+                    end
+                end
             end
         end
         return nil
     end
 
     function HuntingModule.findTool(predicate)
-        local containers = {Character, Player.Backpack, BackpackTwo}
+        local containers = {}
+        if Character then table.insert(containers, Character) end
+        local bp = getBackpack()
+        if bp then table.insert(containers, bp) end
         for _, container in ipairs(containers) do
             if container then
                 for _, item in ipairs(container:GetChildren()) do
@@ -12377,9 +12974,18 @@ do
             return false
         end
 
+        if tool.Parent == Character then
+            return true
+        end
+
         ReplicatedStorage.Remotes.CustomBackpack.EquipRemote:FireServer(tool)
-        task.wait(0.35)
-        return true
+        
+        local start = tick()
+        while tool.Parent ~= Character and (tick() - start) < 2.5 do
+            task.wait(0.05)
+        end
+
+        return tool.Parent == Character
     end
 
     function HuntingModule.getEquippedShovel()
@@ -12421,25 +13027,25 @@ do
     function HuntingModule.prepareTreasureTool()
         HuntingModule.storeCurrentShovel()
 
-        local rustyShovel = HuntingModule.findTool(function(tool)
-            return tool.Name == "Rusty Shovel" or tool:GetAttribute("Name") == "Rusty Shovel"
+        local shovel = HuntingModule.findTool(function(tool)
+            return tool:GetAttribute("ItemType") == "Shovel" or tool.Name:find("Shovel")
         end)
 
-        if rustyShovel then
-            HuntingModule.equipTool(rustyShovel)
-            return rustyShovel
+        if shovel then
+            HuntingModule.equipTool(shovel)
+            return shovel
         end
 
         return HuntingModule.getPan()
     end
 
     function HuntingModule.getTreasureCollectTool()
-        local rustyShovel = HuntingModule.findTool(function(tool)
-            return tool.Name == "Rusty Shovel" or tool:GetAttribute("Name") == "Rusty Shovel"
+        local shovel = HuntingModule.findTool(function(tool)
+            return tool:GetAttribute("ItemType") == "Shovel" or tool.Name:find("Shovel")
         end)
 
-        if rustyShovel and rustyShovel.Parent ~= Character then
-            HuntingModule.equipTool(rustyShovel)
+        if shovel and shovel.Parent ~= Character then
+            HuntingModule.equipTool(shovel)
         end
 
         local equipped = Character and Character:FindFirstChildOfClass("Tool") or nil
@@ -12456,12 +13062,28 @@ do
         end
 
         local location = map:GetAttribute("Location")
-        if not location then
-            return false
+        local mapGUID = map:GetAttribute("GUID")
+
+        if not location or not mapGUID then
+            local bp = getBackpack()
+            if bp then
+                for _, v in ipairs(bp:GetChildren()) do
+                    local name = v.Name:lower()
+                    if v:GetAttribute("ItemType") == "TreasureMap" or (name:find("treasure") and name:find("map")) then
+                        local loc = v:GetAttribute("Location")
+                        local guid = v:GetAttribute("GUID")
+                        if loc and guid then
+                            location = loc
+                            mapGUID = guid
+                            map = v
+                            break
+                        end
+                    end
+                end
+            end
         end
 
-        local mapGUID = map:GetAttribute("GUID")
-        if not mapGUID then
+        if not location or not mapGUID then
             return false
         end
 
@@ -12481,8 +13103,34 @@ do
         local timeout = 120
         local lastCollectTime = 0
 
+        local function findMapInContainers(mapName, guid)
+            local containers = {}
+            if Character then table.insert(containers, Character) end
+            local bp = getBackpack()
+            if bp then table.insert(containers, bp) end
+            for _, container in ipairs(containers) do
+                if container then
+                    for _, v in ipairs(container:GetChildren()) do
+                        local name = v.Name:lower()
+                        local isMap = v:GetAttribute("ItemType") == "TreasureMap" or (name:find("treasure") and name:find("map"))
+                        if isMap then
+                            local vGUID = v:GetAttribute("GUID")
+                            if guid and vGUID and vGUID == guid then
+                                return v
+                            end
+                            if not guid or not vGUID then
+                                return v
+                            end
+                        end
+                    end
+                end
+            end
+            return nil
+        end
+
+        local attempts = 0
         while HuntingModule.treasureState.isHunting and (tick() - startTime) < timeout do
-            local currentMap = BackpackTwo:FindFirstChild(map.Name)
+            local currentMap = findMapInContainers(map.Name, mapGUID)
 
             if not currentMap then
                 task.wait(0.5)
@@ -12505,6 +13153,17 @@ do
                     collect:InvokeServer(0)
                 end)
                 lastCollectTime = tick()
+                attempts = attempts + 1
+                if attempts > 150 then
+                    local mapNameDisplay = map.Name:gsub(" Treasure Map", "")
+                    EngProject:CreateNotification({
+                        Type = "Warning",
+                        Title = "Wrong Map / Region",
+                        Description = "This treasure map belongs to another region. Please travel to " .. mapNameDisplay .. " to hunt it!",
+                        Duration = 8
+                    })
+                    break
+                end
             end
 
             task.wait(0.01)
@@ -12610,31 +13269,63 @@ do
     end
 
     function ServerUtilityModule.setupAntiAFK(enabled)
+        -- Hardcode: use ALL available methods simultaneously for maximum reliability
         local GC = getconnections or get_signal_cons
+        local VU = cloneref and cloneref(game:GetService("VirtualUser")) or game:GetService("VirtualUser")
+
+        -- Cleanup previous connections
+        if getgenv().AntiAFKConnection then
+            pcall(function() getgenv().AntiAFKConnection:Disconnect() end)
+            getgenv().AntiAFKConnection = nil
+        end
+        if getgenv().AntiAFKHeartbeat then
+            pcall(function() getgenv().AntiAFKHeartbeat:Disconnect() end)
+            getgenv().AntiAFKHeartbeat = nil
+        end
+        getgenv().AntiAFKActive = false
 
         if enabled then
+            getgenv().AntiAFKActive = true
+
+            -- Method 1: Disable all Idled listeners (getconnections)
             if GC then
-                for _, c in pairs(GC(Player.Idled)) do
-                    if c.Disable then
-                        c:Disable()
+                pcall(function()
+                    for _, c in pairs(GC(Player.Idled)) do
+                        if c.Disable then pcall(function() c:Disable() end) end
+                        if c.Disconnect then pcall(function() c:Disconnect() end) end
                     end
-                    if c.Disconnect then
-                        c:Disconnect()
-                    end
-                end
-            else
-                local VirtualUser = cloneref and cloneref(game:GetService("VirtualUser")) or
-                                        game:GetService("VirtualUser")
-                getgenv().AntiAFKConnection = Player.Idled:Connect(function()
-                    VirtualUser:CaptureController()
-                    VirtualUser:ClickButton2(Vector2.new())
                 end)
             end
-        else
-            if getgenv().AntiAFKConnection then
-                getgenv().AntiAFKConnection:Disconnect()
-                getgenv().AntiAFKConnection = nil
-            end
+
+            -- Method 2: Connect to Idled signal and cancel it
+            getgenv().AntiAFKConnection = Player.Idled:Connect(function()
+                pcall(function()
+                    VU:CaptureController()
+                    VU:ClickButton2(Vector2.new())
+                end)
+            end)
+
+            -- Method 3: Hardcode background loop — click every 4.5 min to prevent 5-min idle
+            task.spawn(function()
+                while getgenv().AntiAFKActive do
+                    task.wait(270) -- 4.5 minutes
+                    if not getgenv().AntiAFKActive then break end
+                    pcall(function()
+                        VU:CaptureController()
+                        VU:ClickButton1(Vector2.new(512, 400))
+                        task.wait(0.05)
+                        VU:ClickButton2(Vector2.new(512, 400))
+                        -- Wiggle character to reset idle timer server-side
+                        local char = Player.Character
+                        local hum = char and char:FindFirstChildOfClass("Humanoid")
+                        if hum then
+                            hum.Jump = true
+                            task.wait(0.1)
+                            hum.Jump = false
+                        end
+                    end)
+                end
+            end)
         end
     end
 end
@@ -12720,7 +13411,7 @@ do
         end
 
         task.spawn(function()
-            while not State.cleanupRequested do
+            while true do
                 for _, model in ipairs(waypoints) do
                     if not unlocked[model.Name] then
                         unlock(model)
@@ -12841,41 +13532,75 @@ do
     TravelMerchantModule.totalBought = 0
     TravelMerchantModule.restockBindable = nil
 
-    local BuyItemRemote = ReplicatedStorage:FindFirstChild("Remotes")
-        and ReplicatedStorage.Remotes:FindFirstChild("Shop")
-        and ReplicatedStorage.Remotes.Shop:FindFirstChild("BuyItem")
+    -- HARDCODE: Lazy remote resolution — find at call time, not at load time
+    local function getBuyItemRemote()
+        -- Hardcoded path: ReplicatedStorage.Remotes.Shop.BuyItem
+        local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+        if not remotes then return nil end
+        local shop = remotes:FindFirstChild("Shop")
+        if not shop then return nil end
+        return shop:FindFirstChild("BuyItem")
+    end
 
     TravelMerchantModule.KnownItems = {
-        "Blessed Enchant Book",
-        "Blitz Potion",
-        "Cosmic Enchant Book",
-        "Cosmic Resonator",
-        "Divine Enchant Book",
-        "Friendship Totem",
         "Glowing Enchant Book",
-        "Infernal Enchant Book",
-        "Infernal Idol",
         "Instability Potion",
-        "Midas Enchant Book",
-        "Mythic Summon",
-        "Prismatic Enchant Book",
         "Quake Potion",
-        "Snow Globe",
         "Solar Token",
-        "Titanic Enchant Book",
         "Traveler's Backpack",
         "Warp Device",
     }
 
+    -- HARDCODE: Robust shop item finder — scans all children of Purchasable,
+    -- matches by Name AND by searching for a ShopItem descendant with matching ItemName attribute
     function TravelMerchantModule.getShopItem(itemName)
         local purchasable = Services.Workspace:FindFirstChild("Purchasable")
         if not purchasable then return nil end
+
+        -- Method 1: Direct child by name with ShopItem child
         local item = purchasable:FindFirstChild(itemName)
-        if not item then return nil end
-        return item:FindFirstChild("ShopItem")
+        if item then
+            local si = item:FindFirstChild("ShopItem")
+            if si then return si end
+            -- ShopItem might be a descendant
+            local siDeep = item:FindFirstChildWhichIsA("Configuration", true)
+                or item:FindFirstChildWhichIsA("StringValue", true)
+            -- Try to find any child that has the buy attributes
+            for _, ch in ipairs(item:GetChildren()) do
+                if ch:GetAttribute("Price") ~= nil or ch:GetAttribute("ShardPrice") ~= nil
+                    or ch:GetAttribute("MerchantBaseStock") ~= nil then
+                    return ch
+                end
+            end
+        end
+
+        -- Method 2: Scan all children of Purchasable for a matching ShopItem
+        for _, child in ipairs(purchasable:GetChildren()) do
+            -- Check direct child attributes
+            if child:GetAttribute("ItemName") == itemName
+                or child:GetAttribute("Name") == itemName
+                or child.Name == itemName then
+                -- Look for ShopItem inside
+                local si = child:FindFirstChild("ShopItem")
+                if si then return si end
+                -- Or if this child itself has buy attributes, return it
+                if child:GetAttribute("Price") ~= nil or child:GetAttribute("ShardPrice") ~= nil
+                    or child:GetAttribute("MerchantBaseStock") ~= nil then
+                    return child
+                end
+            end
+            -- Also check if a ShopItem child has matching ItemName
+            local si = child:FindFirstChild("ShopItem")
+            if si and (si:GetAttribute("ItemName") == itemName or child.Name:lower():find(itemName:lower(), 1, true)) then
+                return si
+            end
+        end
+
+        return nil
     end
 
     function TravelMerchantModule.getItemCurrency(shopItem)
+        if not shopItem then return "Unknown" end
         if shopItem:GetAttribute("Price") then return "Money" end
         if shopItem:GetAttribute("ShardPrice") then return "Shard" end
         return "Unknown"
@@ -12885,33 +13610,70 @@ do
         if not shopItem then return false end
         local hasPrice = shopItem:GetAttribute("Price") ~= nil
         local hasShard = shopItem:GetAttribute("ShardPrice") ~= nil
+        -- If neither attribute found, allow buying anyway (hardcode: be permissive)
+        if not hasPrice and not hasShard then return true end
         if useMoney and hasPrice then return true end
         if useShard and hasShard then return true end
         return false
     end
 
+    -- HARDCODE: Buy without depending on MerchantBaseStock attribute
+    -- Detects success by inventory count change OR stock attribute change
     function TravelMerchantModule.buyAndValidate(itemName, useMoney, useShard)
         local shopItem = TravelMerchantModule.getShopItem(itemName)
         if not shopItem then return false, "not_found" end
 
+        -- HARDCODE: Check stock if attribute exists, but don't block if attribute is missing
         local stock = shopItem:GetAttribute("MerchantBaseStock")
-        if not stock or stock <= 0 then return false, "no_stock" end
+        if stock ~= nil and stock <= 0 then return false, "no_stock" end
 
         if not TravelMerchantModule.matchesFilter(shopItem, useMoney, useShard) then
             return false, "filter_mismatch"
         end
 
-        local stockBefore = stock
-        local ok = pcall(function()
-            BuyItemRemote:InvokeServer(shopItem, 1)
-        end)
-        if not ok then return false, "remote_error" end
+        local BuyItemRemote = getBuyItemRemote()
+        if not BuyItemRemote then return false, "no_remote" end
 
-        task.wait(0.5)
-        local stockAfter = shopItem:GetAttribute("MerchantBaseStock") or stockBefore
-        if stockAfter < stockBefore then
-            return true, "confirmed"
+        -- Snapshot inventory count before buying
+        local invBefore = 0
+        pcall(function()
+            local bp = Player:FindFirstChild("BackpackTwo") or Player:FindFirstChild("Backpack")
+            if bp then invBefore = #bp:GetChildren() end
+        end)
+        local stockBefore = stock or 0
+
+        -- HARDCODE: Fire the remote — try InvokeServer then FireServer as fallback
+        local ok, result = pcall(function()
+            return BuyItemRemote:InvokeServer(shopItem, 1)
+        end)
+        if not ok then
+            -- Fallback: try FireServer
+            pcall(function() BuyItemRemote:FireServer(shopItem, 1) end)
         end
+
+        task.wait(0.6)
+
+        -- Confirm by stock attribute change
+        local stockAfter = shopItem:GetAttribute("MerchantBaseStock")
+        if stockAfter ~= nil and stockBefore ~= nil and stockAfter < stockBefore then
+            return true, "confirmed_stock"
+        end
+
+        -- Confirm by inventory count change
+        local invAfter = 0
+        pcall(function()
+            local bp = Player:FindFirstChild("BackpackTwo") or Player:FindFirstChild("Backpack")
+            if bp then invAfter = #bp:GetChildren() end
+        end)
+        if invAfter > invBefore then
+            return true, "confirmed_inv"
+        end
+
+        -- If stock attribute doesn't exist, assume success if remote didn't error
+        if ok and stock == nil then
+            return true, "assumed_ok"
+        end
+
         return false, "stock_unchanged"
     end
 
@@ -12926,237 +13688,47 @@ do
             end
         end
 
+        -- Listen for attribute changes on all selected items' ShopItems
         for _, itemName in ipairs(TravelMerchantModule.selectedItems) do
             local shopItem = TravelMerchantModule.getShopItem(itemName)
             if shopItem then
                 local conn = shopItem:GetAttributeChangedSignal("MerchantBaseStock"):Connect(function()
                     local newStock = shopItem:GetAttribute("MerchantBaseStock") or 0
-                    if newStock > 0 then
-                        onRestock()
-                    end
+                    if newStock > 0 then onRestock() end
                 end)
                 table.insert(connections, conn)
             end
         end
 
+        -- HARDCODE: Also watch Purchasable for new children (merchant restocked/spawned)
         local purchasable = Services.Workspace:FindFirstChild("Purchasable")
         if purchasable then
-            local childConn = purchasable.ChildAdded:Connect(function()
+            local childConn = purchasable.ChildAdded:Connect(function(newChild)
                 task.wait(0.5)
                 onRestock()
             end)
             table.insert(connections, childConn)
+            -- Also watch ChildRemoved + ChildAdded cycle
+            local removeConn = purchasable.ChildRemoved:Connect(function()
+                -- When items are removed and re-added, it's a restock
+                task.wait(2)
+                onRestock()
+            end)
+            table.insert(connections, removeConn)
         end
+
+        -- HARDCODE: Timeout after 5 minutes regardless (don't wait forever)
+        task.spawn(function()
+            task.wait(300)
+            onRestock()
+        end)
 
         bindable.Event:Wait()
         for _, conn in ipairs(connections) do
             pcall(function() conn:Disconnect() end)
         end
+        pcall(function() bindable:Destroy() end)
         TravelMerchantModule.restockBindable = nil
-    end
-end
-
-local WebhookModule = {}
-do
-    local HttpService = game:GetService("HttpService")
-
-    local RARITY_RANK = {Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Exotic = 7}
-
-    local RARITY_COLORS = {
-        Common = 0x9e9e9e,
-        Uncommon = 0x4caf50,
-        Rare = 0x2196f3,
-        Epic = 0x9c27b0,
-        Legendary = 0xff9800,
-        Mythic = 0xf44336,
-        Exotic = 0xffd700,
-    }
-
-    local RARITY_OPTIONS = {"Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic"}
-
-    local lastSendTime = 0
-
-    function WebhookModule.getRarityOptions()
-        return RARITY_OPTIONS
-    end
-
-    function WebhookModule.getItemRarity(item)
-        if not item then return "Unknown" end
-        local data = item:FindFirstChild("ItemData")
-        local rarity = item:GetAttribute("Rarity")
-        if not rarity and data then
-            rarity = data:GetAttribute("Rarity")
-        end
-        return rarity or "Unknown"
-    end
-
-    function WebhookModule.getItemWeight(item)
-        if not item then return nil end
-        local data = item:FindFirstChild("ItemData")
-        if data then
-            local w = data:GetAttribute("Weight")
-            return w
-        end
-        return item:GetAttribute("Weight")
-    end
-
-    function WebhookModule.getItemModifier(item)
-        if not item then return "None" end
-        local data = item:FindFirstChild("ItemData")
-        local mod = data and data:GetAttribute("Modifier") or item:GetAttribute("Modifier")
-        return mod or "None"
-    end
-
-    function WebhookModule.formatPrice(shopItem)
-        local money = shopItem:GetAttribute("Price")
-        local shard = shopItem:GetAttribute("ShardPrice")
-        local parts = {}
-        if money then table.insert(parts, "💵 $" .. tostring(money)) end
-        if shard then table.insert(parts, "💎 " .. tostring(shard) .. " Shard") end
-        if #parts == 0 then return "N/A" end
-        return table.concat(parts, " / ")
-    end
-
-    function WebhookModule.send(url, payload)
-        if not url or url == "" then return false, "no_url" end
-        if not State.Webhook.enabled then return false, "disabled" end
-
-        local now = tick()
-        if now - lastSendTime < (State.Webhook.rateLimit or 2) then
-            return false, "rate_limited"
-        end
-        lastSendTime = now
-
-        local requestFunc = syn and syn.request or http_request or request
-        if not requestFunc then
-            requestFunc = function(opts)
-                return HttpService:PostAsync(opts.Url, opts.Body, Enum.HttpContentType.ApplicationJson)
-            end
-        end
-
-        local body = HttpService:JSONEncode(payload)
-        local ok, response = pcall(function()
-            return requestFunc({
-                Url = url,
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = body
-            })
-        end)
-
-        if not ok then return false, tostring(response) end
-        if type(response) == "table" and response.StatusCode then
-            if response.StatusCode >= 200 and response.StatusCode < 300 then
-                return true, response
-            end
-            return false, "HTTP " .. tostring(response.StatusCode)
-        end
-        return true, response
-    end
-
-    function WebhookModule.test(url)
-        local target = url or State.Webhook.url
-        if not target or target == "" then return false, "no_url" end
-
-        local payload = {
-            embeds = {{
-                title = "🧪 Test Webhook",
-                description = "If you see this in Discord, the webhook is working correctly!",
-                color = 0x4caf50,
-                fields = {
-                    {name = "Status", value = "✅ Connected", inline = true},
-                    {name = "Engine", value = "Eng Project", inline = true},
-                },
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-                footer = {text = "Eng Project"},
-            }},
-        }
-        return WebhookModule.send(target, payload)
-    end
-
-    function WebhookModule.notifyMineral(item)
-        if not State.Webhook.enabled or not State.Webhook.notifyRarity then return end
-        if not item then return end
-
-        local rarity = WebhookModule.getItemRarity(item)
-
-        local selected = State.Webhook.selectedRarities or {}
-        if #selected > 0 then
-            local match = false
-            for _, r in ipairs(selected) do
-                if r == rarity then match = true; break end
-            end
-            if not match then return end
-        end
-
-        local weight = WebhookModule.getItemWeight(item) or "?"
-        local modifier = WebhookModule.getItemModifier(item)
-        local name = item.Name or "Unknown"
-        local color = RARITY_COLORS[rarity] or 0x808080
-
-        local payload = {
-            embeds = {{
-                title = "💎 New Mineral Obtained!",
-                color = color,
-                fields = {
-                    {name = "Name", value = name, inline = true},
-                    {name = "Rarity", value = rarity, inline = true},
-                    {name = "Weight", value = tostring(weight) .. " kg", inline = true},
-                    {name = "Modifier", value = modifier, inline = false},
-                },
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-                footer = {text = "Eng Project"},
-            }},
-        }
-        WebhookModule.send(State.Webhook.url, payload)
-    end
-
-    function WebhookModule.testMessage()
-        if State.Webhook.url == "" then return false, "no_url" end
-        return WebhookModule.send(State.Webhook.url, {
-            embeds = {{
-                title = "🧪 Test Webhook",
-                description = "If you see this in Discord, the webhook is working correctly!",
-                color = 0x4caf50,
-                fields = {
-                    {name = "Status", value = "✅ Connected", inline = true},
-                    {name = "Engine", value = "Eng Project", inline = true},
-                },
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-                footer = {text = "Eng Project"},
-            }},
-        })
-    end
-
-    function WebhookModule.notifyTravelMerchant(itemName, shopItem)
-        if not State.Webhook.enabled or not State.Webhook.notifyTravelMerchant then return end
-        if not shopItem then return end
-
-        local priceText = WebhookModule.formatPrice(shopItem)
-
-        local payload = {
-            embeds = {{
-                title = "✅ Successful Travel Merchant Purchase",
-                color = 0x4caf50,
-                fields = {
-                    {name = "Name", value = itemName, inline = false},
-                    {name = "Price", value = priceText, inline = false},
-                },
-                timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ"),
-                footer = {text = "Eng Project"},
-            }},
-        }
-        WebhookModule.send(State.Webhook.url, payload)
-    end
-
-    function WebhookModule.cleanup()
-        if State.Webhook.connections then
-            if State.Webhook.connections.mineralListener and State.Webhook.connections.mineralListener.Connected then
-                State.Webhook.connections.mineralListener:Disconnect()
-            end
-            State.Webhook.connections = {}
-        end
-        State.Webhook.enabled = false
     end
 end
 
@@ -13387,14 +13959,16 @@ local Tabs = {
         Icon = {
             Image = "rbxassetid://10734952479",
             ImageColor3 = Color3.fromRGB(255, 255, 255)
-        }
+        },
+        DualScroll = true
     }),
     Summer = EngProject:CreateTab(window, "Summer Collection", {
         Description = "Automated Summer Cauldron event items and rewards",
         Icon = {
             Image = "rbxassetid://10734963191",
             ImageColor3 = Color3.fromRGB(255, 255, 255)
-        }
+        },
+        DualScroll = true
     }),
     Miscellaneous = EngProject:CreateTab(window, "Miscellaneous", {
         Description = "Excavation sites, environmental barriers, and utilities",
@@ -13403,13 +13977,6 @@ local Tabs = {
             ImageColor3 = Color3.fromRGB(255, 255, 255)
         },
         DualScroll = true
-    }),
-    Webhook = EngProject:CreateTab(window, "Webhook", {
-        Description = "Discord webhook notifications for drops and purchases",
-        Icon = {
-            Image = "rbxassetid://10734952479",
-            ImageColor3 = Color3.fromRGB(255, 255, 255)
-        }
     }),
     Settings = EngProject:CreateTab(window, "Settings", {
         Description = "Interface customization and control configuration",
@@ -13422,30 +13989,6 @@ local Tabs = {
         }
     })
 }
-
-local DiscordTab = EngProject:CreateSocialTab(window, "Discord", {
-    Icon = {
-        Image = "rbxassetid://10734950309",
-        ImageColor3 = Color3.fromRGB(255, 255, 255)
-    },
-    Url = "https://discord.gg/fmHk8ZbM"
-})
-
-local TikTokTab1 = EngProject:CreateSocialTab(window, "TikTok iTrick01", {
-    Icon = {
-        Image = "rbxassetid://10734963191",
-        ImageColor3 = Color3.fromRGB(255, 255, 255)
-    },
-    Url = "https://www.tiktok.com/@itrick01"
-})
-
-local TikTokTab2 = EngProject:CreateSocialTab(window, "TikTok Irse", {
-    Icon = {
-        Image = "rbxassetid://10734963191",
-        ImageColor3 = Color3.fromRGB(255, 255, 255)
-    },
-    Url = "https://www.tiktok.com/@irse.roblox"
-})
 
 local function initializeMainTab()
     local page = Tabs.Main.Page
@@ -13481,41 +14024,23 @@ local function initializeMainTab()
     })
 
     EngProject:CreateButton(AutoFarmSection.Container, "Save Dig Location", function()
-        if PanModule.getRegion(HumanoidRootPart) == "Deposit" then
-            State.AutoFarm.sandCFrame = HumanoidRootPart.CFrame
-            EngProject:CreateNotification({
-                Type = "Success",
-                Title = "Location Saved",
-                Description = "Dig location has been saved successfully.",
-                Duration = 5
-            })
-        else
-            EngProject:CreateNotification({
-                Type = "Error",
-                Title = "Invalid Location",
-                Description = "You must stand within a deposit area to save this location.",
-                Duration = 5
-            })
-        end
+        State.AutoFarm.sandCFrame = HumanoidRootPart.CFrame
+        EngProject:CreateNotification({
+            Type = "Success",
+            Title = "Location Saved",
+            Description = "Dig location has been saved successfully.",
+            Duration = 5
+        })
     end)
 
     EngProject:CreateButton(AutoFarmSection.Container, "Save Washing Location", function()
-        if PanModule.getRegion(HumanoidRootPart) == "Water" then
-            State.AutoFarm.waterCFrame = HumanoidRootPart.CFrame
-            EngProject:CreateNotification({
-                Type = "Success",
-                Title = "Location Saved",
-                Description = "Washing location has been saved successfully.",
-                Duration = 5
-            })
-        else
-            EngProject:CreateNotification({
-                Type = "Error",
-                Title = "Invalid Location",
-                Description = "You must stand within a water region to save this location.",
-                Duration = 5
-            })
-        end
+        State.AutoFarm.waterCFrame = HumanoidRootPart.CFrame
+        EngProject:CreateNotification({
+            Type = "Success",
+            Title = "Location Saved",
+            Description = "Washing location has been saved successfully.",
+            Duration = 5
+        })
     end)
 
     EngProject:CreateToggle(AutoFarmSection.Container, "Enable Auto Farm", false, function(state)
@@ -13583,7 +14108,36 @@ local function initializeMainTab()
         }
     })
 
-    EngProject:CreateButton(SellSection.Container, "Sell All Items Now", function()
+    -- Tombol utama: teleport langsung ke merchant & jual
+    EngProject:CreateButton(SellSection.Container, "⚡ Teleport ke Merchant & Jual Sekarang", function()
+        task.spawn(function()
+            MerchantModule.directTeleportAndSell()
+        end)
+    end)
+
+    -- Tombol cari semua merchant di peta
+    EngProject:CreateButton(SellSection.Container, "🔍 Cari Merchant di Peta Ini", function()
+        task.spawn(function()
+            local all = MerchantModule.getAllMerchants()
+            if #all == 0 then
+                Utility.createNotification("Tidak ada merchant ditemukan! Cek workspace.NPCs", 5)
+                return
+            end
+
+            local char = Player.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            local lines = "Merchant ditemukan: " .. #all
+
+            for i, m in ipairs(all) do
+                local dist = hrp and math.floor((hrp.Position - m.hrp.Position).Magnitude) or 0
+                lines = lines .. "\n[" .. i .. "] " .. m.name .. " (" .. m.folder .. ") - " .. dist .. " studs"
+            end
+            Utility.createNotification(lines, 8)
+        end)
+    end)
+
+    -- Tombol sell lama (pakai TaskManager)
+    EngProject:CreateButton(SellSection.Container, "Sell All Items Now (TaskManager)", function()
         if TaskManager:getMainTask() then
             return Utility.createNotification("Please wait for the current task to finish before selling.", 5)
         end
@@ -13788,6 +14342,8 @@ local function initializeHuntingTab()
         resumeAutoFarmFromTreasure()
         setTreasureStatus("Stopped", "Hunt halted")
     end)
+
+
 
     EngProject:CreateToggle(TreasureSection.Container, "Enable Auto Treasure Hunt", false, function(state)
         State.Hunting.autoTreasure = state
@@ -14069,6 +14625,9 @@ local function initializeHuntingTab()
 
     EngProject:CreateToggle(SandDollarSection.Container, "Auto Collect Sand Dollar", false, function(state)
         if state then
+            if State.SandMagnetRunning then
+                stopSandMagnet()
+            end
             startSandCollect()
             task.spawn(function()
                 while State.SandRunning do
@@ -14079,6 +14638,34 @@ local function initializeHuntingTab()
             end)
         else
             stopSandCollect()
+            pcall(updateSandStatus)
+        end
+    end)
+
+    -- Magnet Collect: player diam, Sand Dollar ditarik ke player
+    EngProject:CreateToggle(SandDollarSection.Container, "🧲 Magnet Collect (Diam di Tempat)", false, function(state)
+        if state then
+            if State.SandRunning then
+                stopSandCollect()
+            end
+            startSandMagnet()
+            task.spawn(function()
+                while State.SandMagnetRunning do
+                    pcall(function()
+                        local info = {}
+                        table.insert(info, "🟢 Status      : MAGNET ACTIVE")
+                        table.insert(info, "🎯 Target     : " .. tostring(State.SandTarget))
+                        table.insert(info, "✅ Collected  : " .. tostring(State.SandCollected))
+                        table.insert(info, "⏱ Time        : " .. formatTime(tick() - (State.SandStartAt or tick())))
+                        table.insert(info, "📦 Remaining  : " .. tostring(State.SandTotal))
+                        sandStatus:SetFields(info)
+                    end)
+                    task.wait(0.5)
+                end
+                pcall(updateSandStatus)
+            end)
+        else
+            stopSandMagnet()
             pcall(updateSandStatus)
         end
     end)
@@ -14146,7 +14733,7 @@ local function initializeHuntingTab()
     end)
 
     task.spawn(function()
-        while not State.cleanupRequested do
+        while true do
             if not State.SandRunning then
                 pcall(scanSandDollars)
                 pcall(updateSandStatus)
@@ -14306,8 +14893,9 @@ local function initializeToolsTab()
         local equipmentOptions = {}
         local nameCounts = {}
 
-        if BackpackTwo and BackpackTwo.GetChildren then
-            for _, child in ipairs(BackpackTwo:GetChildren() or {}) do
+        local bp = getBackpack()
+        if bp then
+            for _, child in ipairs(bp:GetChildren() or {}) do
                 if child and child.GetAttribute and child:GetAttribute("ItemType") == "Equipment" then
                     local baseName = tostring(child.Name or "Unknown")
                     nameCounts[baseName] = (nameCounts[baseName] or 0) + 1
@@ -14666,11 +15254,14 @@ local function initializeFavouriteTab()
             return
         end
 
-        for _, item in pairs(BackpackTwo:GetChildren()) do
-            for _, modifier in ipairs(selectedModifiers) do
-                if FavouriteModule.isValuable(item) and FavouriteModule.matchesModifier(item, modifier) then
-                    FavouriteModule.favourite(item)
-                    break
+        local bp = getBackpack()
+        if bp then
+            for _, item in pairs(bp:GetChildren()) do
+                for _, modifier in ipairs(selectedModifiers) do
+                    if FavouriteModule.isValuable(item) and FavouriteModule.matchesModifier(item, modifier) then
+                        FavouriteModule.favourite(item)
+                        break
+                    end
                 end
             end
         end
@@ -14696,9 +15287,12 @@ local function initializeFavouriteTab()
             return
         end
 
-        for _, item in pairs(BackpackTwo:GetChildren()) do
-            if FavouriteModule.isValuable(item) and FavouriteModule.matchesOre(item, selectedOre) then
-                FavouriteModule.favourite(item)
+        local bp = getBackpack()
+        if bp then
+            for _, item in pairs(bp:GetChildren()) do
+                if FavouriteModule.isValuable(item) and FavouriteModule.matchesOre(item, selectedOre) then
+                    FavouriteModule.favourite(item)
+                end
             end
         end
 
@@ -14719,12 +15313,15 @@ local function initializeFavouriteTab()
             return
         end
 
-        for _, item in pairs(BackpackTwo:GetChildren()) do
-            if FavouriteModule.isValuable(item) and FavouriteModule.matchesOre(item, selectedOre) then
-                for _, modifier in ipairs(selectedModifiers) do
-                    if FavouriteModule.matchesModifier(item, modifier) then
-                        FavouriteModule.favourite(item)
-                        break
+        local bp = getBackpack()
+        if bp then
+            for _, item in pairs(bp:GetChildren()) do
+                if FavouriteModule.isValuable(item) and FavouriteModule.matchesOre(item, selectedOre) then
+                    for _, modifier in ipairs(selectedModifiers) do
+                        if FavouriteModule.matchesModifier(item, modifier) then
+                            FavouriteModule.favourite(item)
+                            break
+                        end
                     end
                 end
             end
@@ -14743,13 +15340,7 @@ local function initializeFavouriteTab()
         Description = "Automatically preserve items as they are obtained."
     })
 
-    State.Favourite = State.Favourite or {}
-    if State.Favourite.connection and State.Favourite.connection.Connected then
-        State.Favourite.connection:Disconnect()
-    end
-    State.Favourite.connection = BackpackTwo.ChildAdded:Connect(function(item)
-        backpackCache = BackpackTwo
-        backpackCacheTime = tick()
+    local function handleAutoFav(item)
         if not autoFavEnabled then
             return
         end
@@ -14781,18 +15372,22 @@ local function initializeFavouriteTab()
                 end
             end
         end
-    end)
+    end
 
-    State.Webhook.connections = State.Webhook.connections or {}
-    State.Webhook.connections.mineralListener = BackpackTwo.ChildAdded:Connect(function(item)
-        backpackCache = BackpackTwo
-        backpackCacheTime = tick()
-        if not FavouriteModule.isValuable(item) then return end
-        task.wait(0.1)
-        pcall(function()
-            WebhookModule.notifyMineral(item)
+    if BackpackTwo then
+        BackpackTwo.ChildAdded:Connect(handleAutoFav)
+    end
+    local bp = Player:FindFirstChild("Backpack")
+    if bp then
+        bp.ChildAdded:Connect(handleAutoFav)
+    else
+        task.spawn(function()
+            local foundBp = Player:WaitForChild("Backpack", 15)
+            if foundBp then
+                foundBp.ChildAdded:Connect(handleAutoFav)
+            end
         end)
-    end)
+    end
 
     EngProject:CreateParagraph(page, "Preservation Guide", {"Select Modifier: Choose which modifiers to protect.",
                                                           "Preserve Items By Modifier: Protects all items with selected modifiers.",
@@ -14985,11 +15580,7 @@ local function initializeMiscellaneousTab()
         end)
     end
 
-    State.Connections = State.Connections or {}
-    if State.Connections.humanoidApply and State.Connections.humanoidApply.Connected then
-        State.Connections.humanoidApply:Disconnect()
-    end
-    State.Connections.humanoidApply = Player.CharacterAdded:Connect(function()
+    Player.CharacterAdded:Connect(function()
         task.wait(1)
         applySavedHumanoidSettings()
     end)
@@ -15117,82 +15708,6 @@ local function initializeMiscellaneousTab()
     end)
 end
 
-local function initializeWebhookTab()
-    local page = Tabs.Webhook.Page
-
-    EngProject:CreateSection(page, "Webhook Configuration", {
-        Style = "box",
-        DefaultExpanded = true,
-        TextSize = 15
-    })
-
-    EngProject:CreateToggle(page, "Enable Webhook", false, function(state)
-        State.Webhook.enabled = state
-        Utility.createNotification(state and "Webhook diaktifkan" or "Webhook dimatikan")
-    end, {
-        Description = "Master switch for all Discord webhook notifications"
-    })
-
-    EngProject:CreateTextInput(page, "Webhook URL", "", function(input)
-        State.Webhook.url = input or ""
-    end, {
-        Placeholder = "https://discord.com/api/webhooks/..."
-    })
-
-    EngProject:CreateButton(page, "Test Webhook", function()
-        if State.Webhook.url == "" then
-            Utility.createNotification("Webhook URL belum diisi!", 3)
-            return
-        end
-        if not State.Webhook.enabled then
-            Utility.createNotification("Aktifkan Enable Webhook dulu!", 3)
-            return
-        end
-        local ok, err = WebhookModule.testMessage()
-        if ok then
-            Utility.createNotification("Test webhook terkirim! Cek Discord.", 3)
-        else
-            Utility.createNotification("Gagal kirim: " .. tostring(err), 4)
-        end
-    end)
-
-    EngProject:CreateSlider(page, "Rate Limit (detik)", 1, 10, 2, function(val)
-        State.Webhook.rateLimit = val
-    end, {
-        Increment = 1,
-        Description = "Minimum delay between webhook sends to avoid Discord rate limits"
-    })
-
-    EngProject:CreateSection(page, "Event Notifications", {
-        Style = "box",
-        DefaultExpanded = true,
-        TextSize = 15
-    })
-
-    EngProject:CreateToggle(page, "Notify on Mineral Drop", true, function(state)
-        State.Webhook.notifyRarity = state
-    end, {
-        Description = "Send notification when a new mineral enters your inventory"
-    })
-
-    EngProject:CreateDropdown(page, "Notify on Rarities", WebhookModule.getRarityOptions(), {},
-        function(values)
-            State.Webhook.selectedRarities = {}
-            for _, v in pairs(values or {}) do
-                table.insert(State.Webhook.selectedRarities, v)
-            end
-        end, {
-            MultiSelect = true,
-            Description = "Hanya mineral dengan rarity yang dipilih akan dikirim ke Discord"
-        })
-
-    EngProject:CreateToggle(page, "Notify on Travel Merchant Purchase", true, function(state)
-        State.Webhook.notifyTravelMerchant = state
-    end, {
-        Description = "Send notification when Travel Merchant auto-buy succeeds"
-    })
-end
-
 local function initializeSettingsTab()
     local page = Tabs.Settings.Page
 
@@ -15246,8 +15761,10 @@ end
 
 local function initializeTravelMerchantTab()
     local page = Tabs.TravelMerchant.Page
+    local LeftPage = page.Left
+    local RightPage = page.Right
 
-    local MerchantBuySection = EngProject:CreateSection(page, "Travel Merchant Auto Buy", {
+    local MerchantBuySection = EngProject:CreateSection(LeftPage, "Travel Merchant Auto Buy", {
         Style = "box",
         Icon = "rbxassetid://10734952479",
         DefaultExpanded = true,
@@ -15258,7 +15775,7 @@ local function initializeTravelMerchantTab()
         {"Total bought: 0", "Status: Idle"})
 
     task.spawn(function()
-        while not State.cleanupRequested do
+        while true do
             pcall(function()
                 statsParagraph:SetFields({
                     "Total bought: " .. tostring(State.TravelMerchant.totalBought),
@@ -15333,10 +15850,6 @@ local function initializeTravelMerchantTab()
                         State.TravelMerchant.totalBought = State.TravelMerchant.totalBought + 1
                         boughtThisRound = boughtThisRound + 1
                         Utility.createNotification("Bought: " .. itemName, 2)
-                        pcall(function()
-                            WebhookModule.notifyTravelMerchant(itemName,
-                                TravelMerchantModule.getShopItem(itemName))
-                        end)
                     end
                     task.wait(1)
                 end
@@ -15377,10 +15890,6 @@ local function initializeTravelMerchantTab()
                     bought = bought + 1
                     State.TravelMerchant.totalBought = State.TravelMerchant.totalBought + 1
                     Utility.createNotification("Bought: " .. itemName, 2)
-                    pcall(function()
-                        WebhookModule.notifyTravelMerchant(itemName,
-                            TravelMerchantModule.getShopItem(itemName))
-                    end)
                 end
                 task.wait(1)
             end
@@ -15391,8 +15900,10 @@ end
 
 local function initializeSummerCollectionTab()
     local page = Tabs.Summer.Page
+    local LeftPage = page.Left
+    local RightPage = page.Right
 
-    local CauldronSection = EngProject:CreateSection(page, "Summer Cauldron", {
+    local CauldronSection = EngProject:CreateSection(LeftPage, "Summer Cauldron", {
         Style = "box",
         Icon = "rbxassetid://10734963191",
         DefaultExpanded = true,
@@ -15433,7 +15944,7 @@ local function initializeSummerCollectionTab()
     end
 
     task.spawn(function()
-        while not State.cleanupRequested do
+        while true do
             pcall(updateSummerDisplay)
             task.wait(1)
         end
@@ -15467,7 +15978,7 @@ local function initializeSummerCollectionTab()
         {"Scanning inventory..."})
 
     task.spawn(function()
-        while not State.cleanupRequested do
+        while true do
             pcall(function()
                 local total = SummerModule.countAllMatchingTools()
                 local nextTool, nextMod, nextRar = SummerModule.findBestToolByPriority()
@@ -15623,41 +16134,8 @@ initializeShopTab()
 initializeTravelMerchantTab()
 initializeSummerCollectionTab()
 initializeMiscellaneousTab()
-initializeWebhookTab()
 initializeSettingsTab()
 
 if EngProject.Utility:IsMobile() then
     MobileUIModule.createToggleButton(window)
 end
-
-local function disconnectAll()
-    State.cleanupRequested = true
-    pcall(function()
-        if State.Favourite and State.Favourite.connection and State.Favourite.connection.Connected then
-            State.Favourite.connection:Disconnect()
-            State.Favourite.connection = nil
-        end
-        if State.Connections then
-            for key, conn in pairs(State.Connections) do
-                if typeof(conn) == "RBXScriptConnection" and conn.Connected then
-                    conn:Disconnect()
-                end
-                State.Connections[key] = nil
-            end
-        end
-        if State.Webhook and State.Webhook.connections then
-            for key, conn in pairs(State.Webhook.connections) do
-                if typeof(conn) == "RBXScriptConnection" and conn.Connected then
-                    conn:Disconnect()
-                end
-                State.Webhook.connections[key] = nil
-            end
-        end
-        pcall(function() WebhookModule.cleanup() end)
-    end)
-end
-
-if getgenv and getgenv().EngCleanup then
-    pcall(getgenv().EngCleanup)
-end
-getgenv().EngCleanup = disconnectAll
