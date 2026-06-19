@@ -1,11 +1,5 @@
 -- ============================================================
---  HUNTING MODULE — RAYFIELD SAFE FINAL (v3)
---  UI Rayfield | Geode Opener | Treasure Hunt | Sand Dollar
---
---  Fix v3:
---  - Auto Treasure Hunt dikembalikan (Tab Treasure)
---  - Sand Dollar: bypass anti-teleport via Tween smooth move
---    + Repeat proximity sampai server acknowledge collect
+--  SCRIPT BY ENG & IRSE
 -- ============================================================
 
 --// Executor compatibility
@@ -5467,15 +5461,8 @@ function EngProject:CreateWindow(options)
     end
 
     if options.StartHidden then
-        mainFrame.Visible = false
-    end
-
-    if options.TabMode then
+if options.TabMode then
         window:SetTabMode(options.TabMode, true, options.TabDynamicThreshold)
-    end
-
-    if options.InitialOpacity then
-        window:SetOpacity(options.InitialOpacity, false)
     end
 
     return window
@@ -5495,8 +5482,7 @@ function EngProject:CreateTab(Window, Name, Options)
 
     local Tab = self.Utility:CreateInstance("TextButton", {
         Name = Name,
-        Size = UDim2.new(0, 0, 1, 0),
-        AutomaticSize = Enum.AutomaticSize.X,
+        Size = UDim2.new(1, -8, 0, Window.TabsExpanded and 32 or 44),
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
         Text = "",
@@ -5508,11 +5494,18 @@ function EngProject:CreateTab(Window, Name, Options)
         CornerRadius = UDim.new(0, self.Constants.Corner.Medium)
     }, Tab)
 
+    local Stroke = self.Utility:CreateInstance("UIStroke", {
+        Color = Theme.Separator or Color3.fromRGB(255, 255, 255),
+        Thickness = 1,
+        Transparency = 0.8,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    }, Tab)
+
     local AccentLine = self.Utility:CreateInstance("Frame", {
         Name = "AccentLine",
-        Size = UDim2.new(1, 0, 0, 2),
-        Position = UDim2.new(0, 0, 1, -2),
-        AnchorPoint = Vector2.new(0, 0),
+        Size = UDim2.new(0, 2, 0, 24),
+        Position = UDim2.new(0, -4, 0.5, 0),
+        AnchorPoint = Vector2.new(0, 0.5),
         BackgroundColor3 = Theme.TabAccent or Theme.Accent,
         BackgroundTransparency = 1,
         BorderSizePixel = 0,
@@ -5524,8 +5517,7 @@ function EngProject:CreateTab(Window, Name, Options)
 
     local ContentContainer = self.Utility:CreateInstance("Frame", {
         Name = "ContentContainer",
-        Size = UDim2.new(0, 0, 1, 0),
-        AutomaticSize = Enum.AutomaticSize.X,
+        Size = UDim2.new(1, 0, 1, 0),
         Position = UDim2.new(0, 0, 0, 0),
         AnchorPoint = Vector2.new(0, 0),
         BackgroundTransparency = 1,
@@ -5547,7 +5539,7 @@ function EngProject:CreateTab(Window, Name, Options)
     local IconSize = 0
 
     if Options.Icon and type(Options.Icon) == "table" and Options.Icon.Image then
-        IconSize = 18
+        IconSize = Window.TabsExpanded and self.Constants.Window.TabIconSizeExpanded or 24
         local IconData = self.IconManager:WrapIcon(Options.Icon)
 
         Icon = self.Utility:CreateInstance("ImageLabel", {
@@ -5571,9 +5563,9 @@ function EngProject:CreateTab(Window, Name, Options)
         TextXAlignment = Enum.TextXAlignment.Left,
         TextYAlignment = Enum.TextYAlignment.Center,
         BackgroundTransparency = 1,
-        Size = UDim2.new(0, 0, 1, 0),
-        AutomaticSize = Enum.AutomaticSize.X,
-        TextTruncate = Enum.TextTruncate.None,
+        Size = UDim2.new(1, -(IconSize > 0 and (IconSize + 8) or 0), 1, 0),
+        AutomaticSize = Enum.AutomaticSize.None,
+        TextTruncate = Enum.TextTruncate.AtEnd,
         Font = Theme.FontSecondary,
         TextColor3 = Theme.TextInactive,
         LayoutOrder = 2,
@@ -5605,29 +5597,44 @@ function EngProject:CreateTab(Window, Name, Options)
 
         if IsActive then
             Tab.BackgroundColor3 = CurrentTheme.SecondaryActive
-            Tab.BackgroundTransparency = 0
+            Tab.BackgroundTransparency = 0.2
             TextLabel.TextColor3 = CurrentTheme.TextActive
             if Icon then
                 Icon.ImageColor3 = CurrentTheme.TabIconActive or CurrentTheme.TextActive
             end
-            AccentLine.BackgroundTransparency = 0
+            if IsCollapsed then
+                AccentLine.BackgroundTransparency = 0
+            else
+                AccentLine.BackgroundTransparency = 1
+            end
+            Stroke.Color = CurrentTheme.TabAccent or CurrentTheme.Accent
+            Stroke.Transparency = 0.4
             UpdateActiveBrandDisplay(Name, Options)
         elseif TabState.IsHovering then
             Tab.BackgroundColor3 = CurrentTheme.Secondary
-            Tab.BackgroundTransparency = 0
+            Tab.BackgroundTransparency = 0.5
             TextLabel.TextColor3 = CurrentTheme.TextPrimary
             if Icon then
                 Icon.ImageColor3 = CurrentTheme.TabIconHover or CurrentTheme.TextPrimary
             end
             AccentLine.BackgroundTransparency = 1
+            Stroke.Color = CurrentTheme.TextPrimary
+            Stroke.Transparency = 0.6
         else
             Tab.BackgroundColor3 = CurrentTheme.Secondary
-            Tab.BackgroundTransparency = CurrentTheme.TransparencySecondary or 0.8
+            if IsCollapsed then
+                Tab.BackgroundTransparency = 1
+                Stroke.Transparency = 0.9
+            else
+                Tab.BackgroundTransparency = 0.9
+                Stroke.Transparency = 0.8
+            end
             TextLabel.TextColor3 = CurrentTheme.TextInactive
             if Icon then
                 Icon.ImageColor3 = CurrentTheme.TabIconInactive or CurrentTheme.TextInactive
             end
             AccentLine.BackgroundTransparency = 1
+            Stroke.Color = CurrentTheme.Separator or Color3.fromRGB(255, 255, 255)
         end
     end
 
@@ -5766,9 +5773,8 @@ function EngProject:CreateSocialTab(Window, Name, Options)
 
     local Tab = self.Utility:CreateInstance("TextButton", {
         Name = Name,
-        Size = UDim2.new(0, 0, 1, 0),
-        AutomaticSize = Enum.AutomaticSize.X,
-        BackgroundTransparency = 1,
+        Size = UDim2.new(1, -8, 0, Window.TabsExpanded and 32 or 44),
+        BackgroundTransparency = 0.9,
         BorderSizePixel = 0,
         Text = "",
         AutoButtonColor = false,
@@ -5780,10 +5786,16 @@ function EngProject:CreateSocialTab(Window, Name, Options)
         CornerRadius = UDim.new(0, self.Constants.Corner.Medium)
     }, Tab)
 
+    local Stroke = self.Utility:CreateInstance("UIStroke", {
+        Color = Theme.Separator or Color3.fromRGB(255, 255, 255),
+        Thickness = 1,
+        Transparency = 0.8,
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+    }, Tab)
+
     local ContentContainer = self.Utility:CreateInstance("Frame", {
         Name = "ContentContainer",
-        Size = UDim2.new(0, 0, 1, 0),
-        AutomaticSize = Enum.AutomaticSize.X,
+        Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
         ZIndex = self.Constants.ZIndex.Content + 1
     }, Tab)
@@ -5822,8 +5834,7 @@ function EngProject:CreateSocialTab(Window, Name, Options)
         TextXAlignment = Enum.TextXAlignment.Left,
         TextYAlignment = Enum.TextYAlignment.Center,
         BackgroundTransparency = 1,
-        Size = UDim2.new(0, 0, 1, 0),
-        AutomaticSize = Enum.AutomaticSize.X,
+        Size = UDim2.new(1, -(IconSize > 0 and (IconSize + 8) or 0), 1, 0),
         Font = Theme.FontSecondary,
         TextColor3 = Theme.TextInactive,
         LayoutOrder = 2,
@@ -5834,20 +5845,30 @@ function EngProject:CreateSocialTab(Window, Name, Options)
 
     local function RefreshTabVisuals()
         local CurrentTheme = self.ThemeManager:GetCurrentTheme(Window)
+        local IsCollapsed = not Window.TabsExpanded
         if TabState.IsHovering then
             Tab.BackgroundColor3 = CurrentTheme.Secondary
-            Tab.BackgroundTransparency = 0
+            Tab.BackgroundTransparency = 0.5
             TextLabel.TextColor3 = CurrentTheme.TextPrimary
             if Icon then
                 Icon.ImageColor3 = CurrentTheme.TabIconHover or CurrentTheme.TextPrimary
             end
+            Stroke.Color = CurrentTheme.TextPrimary
+            Stroke.Transparency = 0.6
         else
             Tab.BackgroundColor3 = CurrentTheme.Secondary
-            Tab.BackgroundTransparency = CurrentTheme.TransparencySecondary or 0.8
+            if IsCollapsed then
+                Tab.BackgroundTransparency = 1
+                Stroke.Transparency = 0.9
+            else
+                Tab.BackgroundTransparency = 0.9
+                Stroke.Transparency = 0.8
+            end
             TextLabel.TextColor3 = CurrentTheme.TextInactive
             if Icon then
                 Icon.ImageColor3 = CurrentTheme.TabIconInactive or CurrentTheme.TextInactive
             end
+            Stroke.Color = CurrentTheme.Separator or Color3.fromRGB(255, 255, 255)
         end
     end
 
