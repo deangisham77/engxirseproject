@@ -12413,6 +12413,33 @@ do
     end
 end
 
+local function scanRegionPos(centerPos, targetRegion)
+    local ok, PointToRegion = pcall(function()
+        return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Location"):WaitForChild("PointToRegion"))
+    end)
+    if not ok or not PointToRegion then return nil end
+    
+    -- Radial search in 3D
+    -- Step by 15 studs for performance and efficiency, up to 300 studs
+    for r = 0, 300, 15 do
+        for x = -r, r, 15 do
+            for z = -r, r, 15 do
+                if math.abs(x) == r or math.abs(z) == r then
+                    -- Test multiple heights to find valid terrain / water level
+                    for _, yOffset in ipairs({0, -5, 5, -15, 15, -30, 30}) do
+                        local testPos = centerPos + Vector3.new(x, yOffset, z)
+                        local region, _ = PointToRegion.GetPanningRegion(testPos)
+                        if region == targetRegion then
+                            return CFrame.new(testPos)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
 local AutoFarmModule = {}
 do
     function AutoFarmModule.moveToLocation(targetCFrame, routeType)
@@ -12639,11 +12666,16 @@ do
             return
         end
 
-        if not (State.AutoFarm.sandCFrame and State.AutoFarm.waterCFrame) then
-            Utility.createNotification("❌ Set locations!")
-            State.AutoFarm.active = false
-            State.AutoFarm.running = false
-            return
+        -- Dynamic location scanning fallback if not set
+        local char = Player.Character
+        local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+        if playerHrp then
+            if not State.AutoFarm.sandCFrame then
+                State.AutoFarm.sandCFrame = scanRegionPos(playerHrp.Position, "Deposit")
+            end
+            if not State.AutoFarm.waterCFrame then
+                State.AutoFarm.waterCFrame = scanRegionPos(playerHrp.Position, "Water")
+            end
         end
 
         Utility.createNotification("🚀 Starting!")
@@ -12680,16 +12712,51 @@ do
 
                                     AutoFarmModule.checkAndDoSell()
 
+                                    local loopChar = Player.Character
+                                    local loopHrp = loopChar and loopChar:FindFirstChild("HumanoidRootPart")
+                                    if not loopHrp then
+                                        task.wait(0.05)
+                                        return
+                                    end
+
                                     if panStatus.isFull then
+                                        -- Verify / find nearest Water region dynamically!
+                                        local targetCFrame = State.AutoFarm.waterCFrame
+                                        local nearestWater = scanRegionPos(loopHrp.Position, "Water")
+                                        if nearestWater then
+                                            targetCFrame = nearestWater
+                                            State.AutoFarm.waterCFrame = nearestWater
+                                        end
+
+                                        if not targetCFrame then
+                                            Utility.createNotification("❌ No water region found! Stopping Auto Farm.", 5)
+                                            State.AutoFarm.active = false
+                                            return
+                                        end
+
                                         if not AutoFarmModule.performTask("MovingToWater", "WashPan",
-                                            State.AutoFarm.waterCFrame, "Wash", "Water") then
+                                            targetCFrame, "Wash", "Water") then
                                             if not State.AutoFarm.interrupted then
                                                 State.AutoFarm.active = false
                                             end
                                         end
                                     else
+                                        -- Verify / find nearest Deposit region dynamically!
+                                        local targetCFrame = State.AutoFarm.sandCFrame
+                                        local nearestDeposit = scanRegionPos(loopHrp.Position, "Deposit")
+                                        if nearestDeposit then
+                                            targetCFrame = nearestDeposit
+                                            State.AutoFarm.sandCFrame = nearestDeposit
+                                        end
+
+                                        if not targetCFrame then
+                                            Utility.createNotification("❌ No sand deposit found! Stopping Auto Farm.", 5)
+                                            State.AutoFarm.active = false
+                                            return
+                                        end
+
                                         if not AutoFarmModule.performTask("MovingToSand", "DigSand",
-                                            State.AutoFarm.sandCFrame, "Dig", "Deposit") then
+                                            targetCFrame, "Dig", "Deposit") then
                                             if not State.AutoFarm.interrupted then
                                                 State.AutoFarm.active = false
                                             end
@@ -14028,7 +14095,63 @@ do
                     cleanText = cleanText:gsub("%s*[%(%[]?%s*%d+%s*/%s*%d+%s*[%]%)]?%s*$", "")
                     
                     -- Strip leading/trailing non-word/non-space symbols (like bullet points or brackets)
-                    cleanText = cleanText:gsub("^[^%w%s]+", ""):gsub("[^%w%s]+$", ""):gsub("^%s+", ""):gsub("%s+$", "")
+                    cleanText = cleanText:gsub("^%s*[^%w%s]+%s*", ""):gsub("%s*[^%w%s]+%s*$", ""):gsub("^%s+", ""):gsub("%s+$", "")
+                    
+                    -- Sibling fallback: if cleanText is empty (meaning the progress text was a separate label like "(0/70)")
+                    -- scan siblings of this text label for any actual quest text!
+                    if cleanText == "" and desc.Parent then
+                        for _, sibling in ipairs(desc.Parent:GetChildren()) do
+                            if sibling:IsA("TextLabel") and sibling ~= desc and sibling.Text ~= "" then
+                                local sibText = sibling.Text
+                                if not sibText:match("^%s*%d+%s*$") and not sibText:match("%d+%s*/%s*%d+") then
+                                    cleanText = sibText
+                                    -- Strip common quest prefixes
+                                    cleanText = cleanText:gsub("^%s*[Dd]redge%s*[Mm]aster%s*[Qq]uest%s*:%s*", "")
+                                    cleanText = cleanText:gsub("^%s*[Qq]uest%s*:%s*", "")
+                                    cleanText = cleanText:gsub("^%s*[Tt]ask%s*:%s*", "")
+                                    cleanText = cleanText:gsub("^%s*[Mm]ission%s*:%s*", "")
+                                    cleanText = cleanText:gsub("^%s*[Aa]ctive%s*[Qq]uest%s*:%s*", "")
+                                    cleanText = cleanText:gsub("^%s*[^%w%s]+%s*", ""):gsub("%s*[^%w%s]+%s*$", ""):gsub("^%s+", ""):gsub("%s+$", "")
+                                    break
+                                end
+                            end
+                        end
+                    end
+                    
+                    -- Locate action verbs anywhere in the string and discard any prefix
+                    local verbPattern = "[Bb]ring%s*%d*%s*"
+                    local startPos, endPos = cleanText:lower():find("bring%s*%d*%s*")
+                    if not startPos then
+                        startPos, endPos = cleanText:lower():find("collect%s*%d*%s*")
+                    end
+                    if not startPos then
+                        startPos, endPos = cleanText:lower():find("find%s*%d*%s*")
+                    end
+                    if not startPos then
+                        startPos, endPos = cleanText:lower():find("get%s*%d*%s*")
+                    end
+                    if not startPos then
+                        startPos, endPos = cleanText:lower():find("deliver%s*%d*%s*")
+                    end
+                    if not startPos then
+                        startPos, endPos = cleanText:lower():find("gather%s*%d*%s*")
+                    end
+                    if not startPos then
+                        startPos, endPos = cleanText:lower():find("harvest%s*%d*%s*")
+                    end
+                    if not startPos then
+                        startPos, endPos = cleanText:lower():find("mine%s*%d*%s*")
+                    end
+                    if not startPos then
+                        startPos, endPos = cleanText:lower():find("fish%s*%d*%s*")
+                    end
+                    if not startPos then
+                        startPos, endPos = cleanText:lower():find("obtain%s*%d*%s*")
+                    end
+                    
+                    if startPos then
+                        cleanText = cleanText:sub(startPos)
+                    end
                     
                     local lowerText = cleanText:lower()
                     local isActionQuest = lowerText:find("^bring") or lowerText:find("^collect") or lowerText:find("^find") or lowerText:find("^get") or lowerText:find("^deliver") or lowerText:find("^gather") or lowerText:find("^harvest") or lowerText:find("^mine") or lowerText:find("^fish") or lowerText:find("^obtain")
@@ -14038,14 +14161,14 @@ do
                     local parent = desc.Parent
                     while parent and parent ~= playerGui do
                         local n = parent.Name:lower()
-                        if n:find("quest") or n:find("tracker") or n:find("hud") or n:find("book") or n:find("task") or n:find("mission") then
+                        if n:find("quest") or n:find("tracker") or n:find("hud") or n:find("book") or n:find("task") or n:find("mission") or n:find("journal") or n:find("dialog") or n:find("npc") then
                             isQuestUI = true
                             break
                         end
                         parent = parent.Parent
                     end
                     
-                    -- If we found a strong match (it's an action quest, or inside a quest UI), it's a candidate!
+                    -- If we found a match, add to candidates!
                     if isActionQuest or isQuestUI then
                         local item = cleanText
                         -- Strip all possible action words & count modifiers
@@ -14062,17 +14185,14 @@ do
                         item = item:gsub("^%s*%d+%s*", "")
                         item = item:gsub("^%s+", ""):gsub("%s+$", "")
                         
-                        -- Prioritize exact match where both are true
-                        if isActionQuest and isQuestUI then
-                            return item, cur, tot
-                        else
-                            table.insert(candidates, {
-                                item = item,
-                                cur = cur,
-                                tot = tot,
-                                priority = (isActionQuest and 2 or 0) + (isQuestUI and 1 or 0)
-                            })
-                        end
+                        local priority = (isActionQuest and 2 or 0) + (isQuestUI and 1 or 0)
+                        table.insert(candidates, {
+                            item = item,
+                            cur = cur,
+                            tot = tot,
+                            priority = priority,
+                            text = text
+                        })
                     end
                 end
             end
@@ -14082,7 +14202,9 @@ do
             table.sort(candidates, function(a, b)
                 return a.priority > b.priority
             end)
-            return candidates[1].item, candidates[1].cur, candidates[1].tot
+            local best = candidates[1]
+            print("[AutoQuest] Selected Best Quest: '" .. tostring(best.text) .. "' -> Parsed Item: '" .. tostring(best.item) .. "' (" .. tostring(best.cur) .. "/" .. tostring(best.tot) .. ") | Priority: " .. tostring(best.priority))
+            return best.item, best.cur, best.tot
         end
         
         return nil, nil, nil
@@ -14160,11 +14282,6 @@ do
                 if not item or (cur and tot and cur >= tot) then
                     local targetStr = item and (item .. " (Complete!)") or "No Active Quest"
                     updateUI("Teleporting to NPC", targetStr)
-                    
-                    if State.AutoFarm.active then
-                        AutoFarmModule.stop()
-                        task.wait(1.0)
-                    end
                     
                     local dm = findDredgeMaster()
                     if dm and dm:FindFirstChild("HumanoidRootPart") then
@@ -14245,11 +14362,6 @@ do
                         else
                             State.AutoFarm.waterCFrame = playerHrp.CFrame
                         end
-                    end
-                    
-                    if not State.AutoFarm.active then
-                        Utility.createNotification("Starting Auto Farm for quest item...", 3)
-                        AutoFarmModule.start()
                     end
                     
                     updateUI("Farming Quest Items", item .. " (" .. tostring(cur) .. "/" .. tostring(tot) .. ")")
