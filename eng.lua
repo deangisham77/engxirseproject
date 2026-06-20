@@ -12726,31 +12726,7 @@ do
         end
 
         if not State.AutoFarm.sandCFrame or not State.AutoFarm.waterCFrame then
-            -- Retry scan up to 3 times
-            for attempt = 1, 3 do
-                task.wait(1)
-                char = Player.Character
-                playerHrp = char and char:FindFirstChild("HumanoidRootPart")
-                if playerHrp then
-                    if not State.AutoFarm.manualSand or not State.AutoFarm.sandCFrame then
-                        State.AutoFarm.sandCFrame = scanRegionPos(playerHrp.Position, "Deposit")
-                    end
-                    if not State.AutoFarm.manualWater or not State.AutoFarm.waterCFrame then
-                        State.AutoFarm.waterCFrame = scanRegionPos(playerHrp.Position, "Water")
-                    end
-                end
-                if State.AutoFarm.sandCFrame and State.AutoFarm.waterCFrame then
-                    break
-                end
-            end
-        end
-
-        if not State.AutoFarm.sandCFrame or not State.AutoFarm.waterCFrame then
-            Utility.createNotification("❌ Deposit or Water not found! Stopping.", 5)
-            State.AutoFarm.active = false
-            State.AutoFarm.running = false
-            syncToggles(false)
-            return
+            Utility.createNotification("⚠️ Waiting for deposit/water in this area...", 4)
         end
 
         syncToggles(true)
@@ -12807,8 +12783,7 @@ do
                                         end
 
                                         if not targetCFrame then
-                                            Utility.createNotification("❌ No water region found! Stopping Auto Farm.", 5)
-                                            State.AutoFarm.active = false
+                                            task.wait(1.5)
                                             return
                                         end
 
@@ -12830,8 +12805,7 @@ do
                                         end
 
                                         if not targetCFrame then
-                                            Utility.createNotification("❌ No sand deposit found! Stopping Auto Farm.", 5)
-                                            State.AutoFarm.active = false
+                                            task.wait(1.5)
                                             return
                                         end
 
