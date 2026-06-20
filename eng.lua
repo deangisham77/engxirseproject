@@ -14387,7 +14387,11 @@ do
                         Utility.createNotification("Traveling to " .. waypoint .. " for " .. item .. "...", 4)
                         if WaypointModule and WaypointModule.teleport then
                             WaypointModule.teleport(waypoint)
-                                            else
+                            task.wait(3.0)
+                        else
+                            Utility.createNotification("WaypointModule not found!", 3)
+                        end
+                    else
                         -- Stop manual Auto Farm to avoid conflicting movements
                         AutoFarmModule.stop()
                         
