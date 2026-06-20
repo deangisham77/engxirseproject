@@ -209,8 +209,9 @@ local State = {
 
     Quest = {
         autoQuest = false,
-        interval = 60,
-        running = false
+        interval = 10,
+        running = false,
+        statusUI = nil
     }
 }
 
@@ -14036,6 +14037,17 @@ do
         end)
     end
 
+    local function updateUI(status, target)
+        if State.Quest.statusUI and State.Quest.statusUI.SetFields then
+            pcall(function()
+                State.Quest.statusUI:SetFields({
+                    "Status: " .. tostring(status),
+                    "Target: " .. tostring(target)
+                })
+            end)
+        end
+    end
+
     function AutoQuestModule.start()
         if running then return end
         running = true
@@ -14044,7 +14056,9 @@ do
                 local item, cur, tot = getActiveQuestDetails()
                 
                 if not item or (cur and tot and cur >= tot) then
-                    -- Stop Auto Farm before interacting
+                    local targetStr = item and (item .. " (Complete!)") or "No Active Quest"
+                    updateUI("Teleporting to NPC", targetStr)
+                    
                     if State.AutoFarm.active then
                         AutoFarmModule.stop()
                         task.wait(1.0)
@@ -14066,6 +14080,7 @@ do
                             local prompt = dm:FindFirstChildWhichIsA("ProximityPrompt", true) or hrp:FindFirstChildWhichIsA("ProximityPrompt", true)
                             if prompt then
                                 prompt.HoldDuration = 0
+                                updateUI("Talking to NPC", targetStr)
                                 if fireproximityprompt then
                                     fireproximityprompt(prompt)
                                 else
@@ -14101,6 +14116,7 @@ do
                     local areaMatch = string.find(currentArea:lower(), waypoint:lower())
                     
                     if not areaMatch then
+                        updateUI("Traveling to Zone", waypoint .. " (for " .. item .. ")")
                         Utility.createNotification("Traveling to " .. waypoint .. " for " .. item .. "...", 4)
                         if WaypointModule and WaypointModule.teleport then
                             WaypointModule.teleport(waypoint)
@@ -14121,8 +14137,10 @@ do
                         Utility.createNotification("Starting Auto Farm for quest item...", 3)
                         AutoFarmModule.start()
                     end
+                    
+                    updateUI("Farming Quest Items", item .. " (" .. tostring(cur) .. "/" .. tostring(tot) .. ")")
                 end
-                task.wait(State.Quest.interval or 60)
+                task.wait(State.Quest.interval or 10)
             end
         end)
     end
@@ -14133,6 +14151,7 @@ do
             pcall(task.cancel, questThread)
             questThread = nil
         end
+        updateUI("Idle", "None")
     end
 end
 
@@ -14439,6 +14458,12 @@ local function initializeMainTab()
         TextSize = 15
     })
 
+    local questStatusPara = EngProject:CreateParagraph(AutoQuestSection.Container, "Quest Status", {
+        "Status: Idle",
+        "Target: None"
+    })
+    State.Quest.statusUI = questStatusPara
+
     EngProject:CreateToggle(AutoQuestSection.Container, "Enable Auto Quest (Dredge Master)", false, function(state)
         State.Quest.autoQuest = state
         if state then
@@ -14448,10 +14473,10 @@ local function initializeMainTab()
         end
     end)
 
-    EngProject:CreateSlider(AutoQuestSection.Container, "Quest Check Interval (s)", 10, 300, State.Quest.interval, function(val)
+    EngProject:CreateSlider(AutoQuestSection.Container, "Quest Check Interval (s)", 5, 120, State.Quest.interval, function(val)
         State.Quest.interval = val
     end, {
-        Increment = 5
+        Increment = 1
     })
 
     local SellSection = EngProject:CreateSection(RightPage, "Auto Sell", {
