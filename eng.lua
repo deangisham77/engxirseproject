@@ -13964,6 +13964,33 @@ do
         ["starfall"] = "Starfall River"
     }
 
+    local function scanRegionPos(centerPos, targetRegion)
+        local ok, PointToRegion = pcall(function()
+            return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Location"):WaitForChild("PointToRegion"))
+        end)
+        if not ok or not PointToRegion then return nil end
+        
+        -- Radial search in 3D
+        -- Step by 15 studs for performance and efficiency, up to 300 studs
+        for r = 0, 300, 15 do
+            for x = -r, r, 15 do
+                for z = -r, r, 15 do
+                    if math.abs(x) == r or math.abs(z) == r then
+                        -- Test multiple heights to find valid terrain / water level
+                        for _, yOffset in ipairs({0, -5, 5, -15, 15, -30, 30}) do
+                            local testPos = centerPos + Vector3.new(x, yOffset, z)
+                            local region, _ = PointToRegion.GetPanningRegion(testPos)
+                            if region == targetRegion then
+                                return CFrame.new(testPos)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
     local function findDredgeMaster()
         local NPCs = workspace:FindFirstChild("NPCs")
         if NPCs then
@@ -14204,8 +14231,20 @@ do
                     local char = Player.Character
                     local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
                     if playerHrp then
-                        State.AutoFarm.sandCFrame = playerHrp.CFrame
-                        State.AutoFarm.waterCFrame = playerHrp.CFrame
+                        local nearestDeposit = scanRegionPos(playerHrp.Position, "Deposit")
+                        local nearestWater = scanRegionPos(playerHrp.Position, "Water")
+                        
+                        if nearestDeposit then
+                            State.AutoFarm.sandCFrame = nearestDeposit
+                        else
+                            State.AutoFarm.sandCFrame = playerHrp.CFrame
+                        end
+                        
+                        if nearestWater then
+                            State.AutoFarm.waterCFrame = nearestWater
+                        else
+                            State.AutoFarm.waterCFrame = playerHrp.CFrame
+                        end
                     end
                     
                     if not State.AutoFarm.active then
@@ -14553,6 +14592,14 @@ local function initializeMainTab()
     end, {
         Increment = 1
     })
+
+    EngProject:CreateButton(AutoQuestSection.Container, "Start Auto Farm", function()
+        AutoFarmModule.start()
+    end)
+
+    EngProject:CreateButton(AutoQuestSection.Container, "Stop Auto Farm", function()
+        AutoFarmModule.stop()
+    end)
 
     local SellSection = EngProject:CreateSection(RightPage, "Auto Sell", {
         Style = "box",
