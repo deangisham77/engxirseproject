@@ -12688,6 +12688,15 @@ do
         State.AutoFarm.interrupted = false
         State.AutoFarm.interruptReason = nil
 
+        local currentArea = Player:GetAttribute("CurrentArea")
+        if State.AutoFarm.savedArea ~= currentArea then
+            State.AutoFarm.sandCFrame = nil
+            State.AutoFarm.waterCFrame = nil
+            State.AutoFarm.manualSand = nil
+            State.AutoFarm.manualWater = nil
+            State.AutoFarm.savedArea = currentArea
+        end
+
         if not State.AutoFarm.travelMode or State.AutoFarm.travelMode == "" then
             Utility.createNotification("❌ Select travel mode!")
             State.AutoFarm.active = false
@@ -12708,10 +12717,10 @@ do
         local char = Player.Character
         local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
         if playerHrp then
-            if not State.AutoFarm.sandCFrame then
+            if not State.AutoFarm.manualSand or not State.AutoFarm.sandCFrame then
                 State.AutoFarm.sandCFrame = scanRegionPos(playerHrp.Position, "Deposit")
             end
-            if not State.AutoFarm.waterCFrame then
+            if not State.AutoFarm.manualWater or not State.AutoFarm.waterCFrame then
                 State.AutoFarm.waterCFrame = scanRegionPos(playerHrp.Position, "Water")
             end
         end
@@ -12723,10 +12732,10 @@ do
                 char = Player.Character
                 playerHrp = char and char:FindFirstChild("HumanoidRootPart")
                 if playerHrp then
-                    if not State.AutoFarm.sandCFrame then
+                    if not State.AutoFarm.manualSand or not State.AutoFarm.sandCFrame then
                         State.AutoFarm.sandCFrame = scanRegionPos(playerHrp.Position, "Deposit")
                     end
-                    if not State.AutoFarm.waterCFrame then
+                    if not State.AutoFarm.manualWater or not State.AutoFarm.waterCFrame then
                         State.AutoFarm.waterCFrame = scanRegionPos(playerHrp.Position, "Water")
                     end
                 end
@@ -12789,7 +12798,7 @@ do
                                     if panStatus.isFull then
                                         -- Verify / find nearest Water region dynamically!
                                         local targetCFrame = State.AutoFarm.waterCFrame
-                                        if State.Quest.autoQuest then
+                                        if not State.AutoFarm.manualWater or State.Quest.autoQuest then
                                             local nearestWater = scanRegionPos(loopHrp.Position, "Water")
                                             if nearestWater then
                                                 targetCFrame = nearestWater
@@ -12812,7 +12821,7 @@ do
                                     else
                                         -- Verify / find nearest Deposit region dynamically!
                                         local targetCFrame = State.AutoFarm.sandCFrame
-                                        if State.Quest.autoQuest then
+                                        if not State.AutoFarm.manualSand or State.Quest.autoQuest then
                                             local nearestDeposit = scanRegionPos(loopHrp.Position, "Deposit")
                                             if nearestDeposit then
                                                 targetCFrame = nearestDeposit
@@ -14800,6 +14809,8 @@ local function initializeMainTab()
 
     EngProject:CreateButton(AutoFarmSection.Container, "Save Dig Location", function()
         State.AutoFarm.sandCFrame = HumanoidRootPart.CFrame
+        State.AutoFarm.manualSand = true
+        State.AutoFarm.savedArea = Player:GetAttribute("CurrentArea")
         EngProject:CreateNotification({
             Type = "Success",
             Title = "Location Saved",
@@ -14810,6 +14821,8 @@ local function initializeMainTab()
 
     EngProject:CreateButton(AutoFarmSection.Container, "Save Washing Location", function()
         State.AutoFarm.waterCFrame = HumanoidRootPart.CFrame
+        State.AutoFarm.manualWater = true
+        State.AutoFarm.savedArea = Player:GetAttribute("CurrentArea")
         EngProject:CreateNotification({
             Type = "Success",
             Title = "Location Saved",
