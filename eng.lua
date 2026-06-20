@@ -12413,6 +12413,42 @@ do
     end
 end
 
+_G.scanRegionPos = function(centerPos, targetRegion)
+    local ok, PointToRegion = pcall(function()
+        return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Location"):WaitForChild("PointToRegion"))
+    end)
+    if not ok or not PointToRegion then return nil end
+    
+    -- Multi-stage radial search in 3D: accurate nearby, fast far away
+    local stages = {
+        {max = 150, step = 15},
+        {max = 500, step = 35},
+        {max = 1200, step = 60}
+    }
+    
+    for _, stage in ipairs(stages) do
+        local r = stage.max
+        local step = stage.step
+        for dist = 0, r, step do
+            for x = -dist, dist, step do
+                for z = -dist, dist, step do
+                    if math.abs(x) == dist or math.abs(z) == dist then
+                        -- Test multiple height offsets (water level vs peak vs cave depth)
+                        for _, yOffset in ipairs({0, -10, 10, -30, 30, -60, 60}) do
+                            local testPos = centerPos + Vector3.new(x, yOffset, z)
+                            local region, _ = PointToRegion.GetPanningRegion(testPos)
+                            if region == targetRegion then
+                                return CFrame.new(testPos)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
 local AutoFarmModule = {}
 do
     function AutoFarmModule.moveToLocation(targetCFrame, routeType)
@@ -12648,6 +12684,26 @@ do
             end
             if not State.AutoFarm.waterCFrame then
                 State.AutoFarm.waterCFrame = scanRegionPos(playerHrp.Position, "Water")
+            end
+        end
+
+        if not State.AutoFarm.sandCFrame or not State.AutoFarm.waterCFrame then
+            -- Retry scan up to 3 times
+            for attempt = 1, 3 do
+                task.wait(1)
+                char = Player.Character
+                playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+                if playerHrp then
+                    if not State.AutoFarm.sandCFrame then
+                        State.AutoFarm.sandCFrame = scanRegionPos(playerHrp.Position, "Deposit")
+                    end
+                    if not State.AutoFarm.waterCFrame then
+                        State.AutoFarm.waterCFrame = scanRegionPos(playerHrp.Position, "Water")
+                    end
+                end
+                if State.AutoFarm.sandCFrame and State.AutoFarm.waterCFrame then
+                    break
+                end
             end
         end
 
@@ -14190,15 +14246,15 @@ do
                 end)
                 local best = incomplete[1]
                 print("[AutoQuest] Selected Best (Easiest) Quest: '" .. tostring(best.text) .. "' -> Parsed Item: '" .. tostring(best.item) .. "' (" .. tostring(best.cur) .. "/" .. tostring(best.tot) .. ") | Difficulty: " .. tostring(best.difficulty))
-                return best.item, best.cur, best.tot
+                return best.item, best.cur, best.tot, candidates
             else
                 local best = complete[1]
                 print("[AutoQuest] All tasks completed! Selected: '" .. tostring(best.text) .. "' -> Parsed Item: '" .. tostring(best.item) .. "' (" .. tostring(best.cur) .. "/" .. tostring(best.tot) .. ")")
-                return best.item, best.cur, best.tot
+                return best.item, best.cur, best.tot, candidates
             end
         end
         
-        return nil, nil, nil
+        return nil, nil, nil, nil
     end
 
     local function processDialogue()
@@ -14252,13 +14308,10 @@ do
         end)
     end
 
-    local function updateUI(status, target)
+    local function updateUI(fields)
         if State.Quest.statusUI and State.Quest.statusUI.SetFields then
             pcall(function()
-                State.Quest.statusUI:SetFields({
-                    "Status: " .. tostring(status),
-                    "Target: " .. tostring(target)
-                })
+                State.Quest.statusUI:SetFields(fields)
             end)
         end
     end
@@ -14268,11 +14321,23 @@ do
         running = true
         questThread = task.spawn(function()
             while running do
-                local item, cur, tot = getActiveQuestDetails()
+                local item, cur, tot, candidates = getActiveQuestDetails()
                 
                 if not item or (cur and tot and cur >= tot) then
                     local targetStr = item and (item .. " (Complete!)") or "No Active Quest"
-                    updateUI("Teleporting to NPC", targetStr)
+                    
+                    local uiLines = {
+                        "Status: Teleporting to NPC",
+                        "Target: " .. targetStr
+                    }
+                    if candidates and #candidates > 0 then
+                        table.insert(uiLines, "Quest Tasks:")
+                        for _, c in ipairs(candidates) do
+                            local statusStr = c.cur >= c.tot and "Completed" or "Pending"
+                            table.insert(uiLines, string.format("- %s: %d/%d (%s)", c.item, c.cur, c.tot, statusStr))
+                        end
+                    end
+                    updateUI(uiLines)
                     
                     -- Stop Auto Farm before talking to NPC
                     AutoFarmModule.stop()
@@ -14293,7 +14358,7 @@ do
                             local prompt = dm:FindFirstChildWhichIsA("ProximityPrompt", true) or hrp:FindFirstChildWhichIsA("ProximityPrompt", true)
                             if prompt then
                                 prompt.HoldDuration = 0
-                                updateUI("Talking to NPC", targetStr)
+                                updateUI({"Status: Talking to NPC", "Target: " .. targetStr})
                                 if fireproximityprompt then
                                     fireproximityprompt(prompt)
                                 else
@@ -14345,7 +14410,18 @@ do
                         -- Stop Auto Farm before teleporting
                         AutoFarmModule.stop()
                         
-                        updateUI("Traveling to Zone", waypoint .. " (for " .. item .. ")")
+                        local uiLines = {
+                            "Status: Traveling to Zone",
+                            "Target Zone: " .. waypoint .. " (for " .. item .. ")"
+                        }
+                        if candidates and #candidates > 0 then
+                            table.insert(uiLines, "Quest Tasks:")
+                            for _, c in ipairs(candidates) do
+                                local statusStr = c.cur >= c.tot and "Completed" or (c.item == item and "Traveling" or "Pending")
+                                table.insert(uiLines, string.format("- %s: %d/%d (%s)", c.item, c.cur, c.tot, statusStr))
+                            end
+                        end
+                        updateUI(uiLines)
                         Utility.createNotification("Traveling to " .. waypoint .. " for " .. item .. "...", 4)
                         if WaypointModule and WaypointModule.teleport then
                             WaypointModule.teleport(waypoint)
@@ -14360,6 +14436,22 @@ do
                             local nearestDeposit = scanRegionPos(playerHrp.Position, "Deposit")
                             local nearestWater = scanRegionPos(playerHrp.Position, "Water")
                             
+                            -- Retry scan up to 3 times if not found
+                            if not nearestDeposit or not nearestWater then
+                                for attempt = 1, 3 do
+                                    task.wait(1)
+                                    char = Player.Character
+                                    playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+                                    if playerHrp then
+                                        nearestDeposit = nearestDeposit or scanRegionPos(playerHrp.Position, "Deposit")
+                                        nearestWater = nearestWater or scanRegionPos(playerHrp.Position, "Water")
+                                        if nearestDeposit and nearestWater then
+                                            break
+                                        end
+                                    end
+                                end
+                            end
+                            
                             if nearestDeposit and nearestWater then
                                 State.AutoFarm.sandCFrame = nearestDeposit
                                 State.AutoFarm.waterCFrame = nearestWater
@@ -14368,11 +14460,35 @@ do
                                 if not State.AutoFarm.running then
                                     AutoFarmModule.start()
                                 end
-                                updateUI("Farming Quest Items", item .. " (" .. tostring(cur) .. "/" .. tostring(tot) .. ")")
+                                
+                                local uiLines = {
+                                    "Status: Farming Quest Items",
+                                    "Active Target: " .. item .. " (" .. tostring(cur) .. "/" .. tostring(tot) .. ")"
+                                }
+                                if candidates and #candidates > 0 then
+                                    table.insert(uiLines, "All Quest Tasks:")
+                                    for _, c in ipairs(candidates) do
+                                        local statusStr = c.cur >= c.tot and "Completed" or (c.item == item and "Farming" or "Pending")
+                                        table.insert(uiLines, string.format("- %s: %d/%d (%s)", c.item, c.cur, c.tot, statusStr))
+                                    end
+                                end
+                                updateUI(uiLines)
                             else
                                 -- Stop Auto Farm since we don't have both
                                 AutoFarmModule.stop()
-                                updateUI("Waiting for deposit/water", item)
+                                
+                                local uiLines = {
+                                    "Status: Waiting for Deposit/Water",
+                                    "Active Target: " .. item
+                                }
+                                if candidates and #candidates > 0 then
+                                    table.insert(uiLines, "All Quest Tasks:")
+                                    for _, c in ipairs(candidates) do
+                                        local statusStr = c.cur >= c.tot and "Completed" or "Pending"
+                                        table.insert(uiLines, string.format("- %s: %d/%d (%s)", c.item, c.cur, c.tot, statusStr))
+                                    end
+                                end
+                                updateUI(uiLines)
                                 Utility.createNotification("Waiting for deposit/water in " .. waypoint .. "...", 3)
                             end
                         end
@@ -14389,7 +14505,7 @@ do
             pcall(task.cancel, questThread)
             questThread = nil
         end
-        updateUI("Idle", "None")
+        updateUI({"Status: Idle", "Target: None"})
         -- Stop Auto Farm when Auto Quest is stopped
         AutoFarmModule.stop()
     end
