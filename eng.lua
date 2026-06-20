@@ -13940,7 +13940,28 @@ do
         ["ice"] = "Frozen Peak",
         ["glacial"] = "Frozen Peak",
         ["sand"] = "Rubble Creek",
-        ["dollar"] = "Fortune River"
+        ["dollar"] = "Fortune River",
+        
+        -- Additional items / ores mappings for Prospecting!
+        ["silver"] = "Sunset Beach",
+        ["copper"] = "Crystal Cavern",
+        ["pyrite"] = "Rubble Creek",
+        ["platinum"] = "Rubble Creek",
+        ["seashell"] = "Sunset Beach",
+        ["pearl"] = "Sunset Beach",
+        ["blue ice"] = "Frozen Peak",
+        ["titanium"] = "Rubble Creek",
+        ["neodymium"] = "Rubble Creek",
+        ["topaz"] = "Rubble Creek",
+        ["nickel"] = "Starfall River",
+        ["ruby"] = "Crystal Cavern",
+        ["sapphire"] = "Sunset Beach",
+        ["diamond"] = "Crystal Cavern",
+        ["emerald"] = "Fortune River",
+        ["uranium"] = "Overgrown Grotto",
+        ["sulfur"] = "Volcano",
+        ["meteor"] = "Meteor Valley",
+        ["starfall"] = "Starfall River"
     }
 
     local function findDredgeMaster()
@@ -13967,36 +13988,63 @@ do
         
         local candidates = {}
         for _, desc in ipairs(playerGui:GetDescendants()) do
-            if desc:IsA("TextLabel") and desc.Visible and desc.Text ~= "" then
+            if desc:IsA("TextLabel") and desc.Text ~= "" then
                 local text = desc.Text
-                local match, cur, tot = text:match("([%a%s%d]+)%s*%(%s*(%d+)%s*/%s*(%d+)%s*%)")
-                if match and cur and tot then
-                    local item = match:match("([%a%s]+)")
-                    if item then
-                        item = item:gsub("^%s+", ""):gsub("%s+$", "")
+                -- Find the numbers separated by a slash (e.g. 0/70)
+                local cur, tot = text:match("(%d+)%s*/%s*(%d+)")
+                if cur and tot then
+                    cur = tonumber(cur)
+                    tot = tonumber(tot)
+                    
+                    -- Strip progress portion from start/end to get the potential quest name/item
+                    local cleanText = text:gsub("^%s*[%(%[]?%s*%d+%s*/%s*%d+%s*[%]%)]?%s*", "")
+                    cleanText = cleanText:gsub("%s*[%(%[]?%s*%d+%s*/%s*%d+%s*[%]%)]?%s*$", "")
+                    
+                    -- Strip leading/trailing non-word/non-space symbols (like bullet points or brackets)
+                    cleanText = cleanText:gsub("^[^%w%s]+", ""):gsub("[^%w%s]+$", ""):gsub("^%s+", ""):gsub("%s+$", "")
+                    
+                    local lowerText = cleanText:lower()
+                    local isActionQuest = lowerText:find("^bring") or lowerText:find("^collect") or lowerText:find("^find") or lowerText:find("^get") or lowerText:find("^deliver") or lowerText:find("^gather") or lowerText:find("^harvest") or lowerText:find("^mine") or lowerText:find("^fish") or lowerText:find("^obtain")
+                    
+                    -- Check if parent hierarchy indicates quest UI
+                    local isQuestUI = false
+                    local parent = desc.Parent
+                    while parent and parent ~= playerGui do
+                        local n = parent.Name:lower()
+                        if n:find("quest") or n:find("tracker") or n:find("hud") or n:find("book") or n:find("task") or n:find("mission") then
+                            isQuestUI = true
+                            break
+                        end
+                        parent = parent.Parent
+                    end
+                    
+                    -- If we found a strong match (it's an action quest, or inside a quest UI), it's a candidate!
+                    if isActionQuest or isQuestUI then
+                        local item = cleanText
+                        -- Strip all possible action words & count modifiers
                         item = item:gsub("^%s*[Bb]ring%s*%d*%s*", "")
                         item = item:gsub("^%s*[Cc]ollect%s*%d*%s*", "")
                         item = item:gsub("^%s*[Ff]ind%s*%d*%s*", "")
                         item = item:gsub("^%s*[Gg]et%s*%d*%s*", "")
                         item = item:gsub("^%s*[Dd]eliver%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Gg]ather%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Hh]arvest%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Mm]ine%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Ff]ish%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Oo]btain%s*%d*%s*", "")
                         item = item:gsub("^%s*%d+%s*", "")
                         item = item:gsub("^%s+", ""):gsub("%s+$", "")
                         
-                        local isQuestUI = false
-                        local parent = desc.Parent
-                        while parent and parent ~= playerGui do
-                            local n = parent.Name:lower()
-                            if n:find("quest") or n:find("tracker") or n:find("hud") or n:find("book") then
-                                isQuestUI = true
-                                break
-                            end
-                            parent = parent.Parent
-                        end
-                        
-                        if isQuestUI then
-                            return item, tonumber(cur), tonumber(tot)
+                        -- Prioritize exact match where both are true
+                        if isActionQuest and isQuestUI then
+                            return item, cur, tot
                         else
-                            table.insert(candidates, {item, tonumber(cur), tonumber(tot)})
+                            table.insert(candidates, {
+                                item = item,
+                                cur = cur,
+                                tot = tot,
+                                priority = (isActionQuest and 2 or 0) + (isQuestUI and 1 or 0)
+                            })
                         end
                     end
                 end
@@ -14004,7 +14052,10 @@ do
         end
         
         if #candidates > 0 then
-            return candidates[1][1], candidates[1][2], candidates[1][3]
+            table.sort(candidates, function(a, b)
+                return a.priority > b.priority
+            end)
+            return candidates[1].item, candidates[1].cur, candidates[1].tot
         end
         
         return nil, nil, nil
@@ -14018,17 +14069,41 @@ do
             for _, child in ipairs(playerGui:GetChildren()) do
                 if child:IsA("ScreenGui") and (child.Name:lower():find("dialog") or child.Name:lower():find("quest") or child.Name:lower():find("chat") or child.Name:lower():find("npc")) then
                     for _, desc in ipairs(child:GetDescendants()) do
-                        if desc:IsA("TextButton") and desc.Visible then
-                            local txt = desc.Text:lower()
+                        local isClickable = desc:IsA("TextButton") or desc:IsA("ImageButton")
+                        local textObj = nil
+                        if desc:IsA("TextLabel") then
+                            textObj = desc
+                        elseif desc:IsA("TextButton") then
+                            textObj = desc
+                        end
+                        
+                        if textObj and textObj.Text ~= "" and textObj.Visible then
+                            local txt = textObj.Text:lower()
                             if txt:find("accept") or txt:find("yes") or txt:find("sure") or txt:find("complete") or txt:find("claim") or txt:find("turn in") or txt:find("ok") or txt:find("next") or txt:find("confirm") then
-                                pcall(function()
-                                    if firesignal then
-                                        firesignal(desc.MouseButton1Click)
-                                        firesignal(desc.Activated)
+                                local button = nil
+                                if isClickable then
+                                    button = desc
+                                else
+                                    local p = desc.Parent
+                                    while p and p ~= child do
+                                        if p:IsA("TextButton") or p:IsA("ImageButton") then
+                                            button = p
+                                            break
+                                        end
+                                        p = p.Parent
                                     end
-                                    desc:Activate()
-                                end)
-                                task.wait(0.2)
+                                end
+                                
+                                if button and button.Visible then
+                                    pcall(function()
+                                        if firesignal then
+                                            firesignal(button.MouseButton1Click)
+                                            firesignal(button.Activated)
+                                        end
+                                        button:Activate()
+                                    end)
+                                    task.wait(0.2)
+                                end
                             end
                         end
                     end
