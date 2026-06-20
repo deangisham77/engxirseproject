@@ -13925,6 +13925,23 @@ do
     local running = false
     local questThread = nil
     
+    local ItemToWaypoint = {
+        ["amethyst"] = "Crystal Cavern",
+        ["crystal"] = "Crystal Cavern",
+        ["gold"] = "Fortune River",
+        ["obsidian"] = "Volcano",
+        ["dragon"] = "Volcano",
+        ["fossil"] = "Windswept Beach",
+        ["ammonite"] = "Windswept Beach",
+        ["amber"] = "Fungal Marsh",
+        ["swamp"] = "Rotwood Swamp",
+        ["cinnabar"] = "Volcano",
+        ["ice"] = "Frozen Peak",
+        ["glacial"] = "Frozen Peak",
+        ["sand"] = "Rubble Creek",
+        ["dollar"] = "Fortune River"
+    }
+
     local function findDredgeMaster()
         local NPCs = workspace:FindFirstChild("NPCs")
         if NPCs then
@@ -13941,6 +13958,55 @@ do
             end
         end
         return nil
+    end
+
+    local function getActiveQuestDetails()
+        local playerGui = Player:FindFirstChild("PlayerGui")
+        if not playerGui then return nil, nil, nil end
+        
+        local candidates = {}
+        for _, desc in ipairs(playerGui:GetDescendants()) do
+            if desc:IsA("TextLabel") and desc.Visible and desc.Text ~= "" then
+                local text = desc.Text
+                local match, cur, tot = text:match("([%a%s%d]+)%s*%(%s*(%d+)%s*/%s*(%d+)%s*%)")
+                if match and cur and tot then
+                    local item = match:match("([%a%s]+)")
+                    if item then
+                        item = item:gsub("^%s+", ""):gsub("%s+$", "")
+                        item = item:gsub("^%s*[Bb]ring%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Cc]ollect%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Ff]ind%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Gg]et%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Dd]eliver%s*%d*%s*", "")
+                        item = item:gsub("^%s*%d+%s*", "")
+                        item = item:gsub("^%s+", ""):gsub("%s+$", "")
+                        
+                        local isQuestUI = false
+                        local parent = desc.Parent
+                        while parent and parent ~= playerGui do
+                            local n = parent.Name:lower()
+                            if n:find("quest") or n:find("tracker") or n:find("hud") or n:find("book") then
+                                isQuestUI = true
+                                break
+                            end
+                            parent = parent.Parent
+                        end
+                        
+                        if isQuestUI then
+                            return item, tonumber(cur), tonumber(tot)
+                        else
+                            table.insert(candidates, {item, tonumber(cur), tonumber(tot)})
+                        end
+                    end
+                end
+            end
+        end
+        
+        if #candidates > 0 then
+            return candidates[1][1], candidates[1][2], candidates[1][3]
+        end
+        
+        return nil, nil, nil
     end
 
     local function processDialogue()
@@ -13975,46 +14041,86 @@ do
         running = true
         questThread = task.spawn(function()
             while running do
-                local dm = findDredgeMaster()
-                if dm and dm:FindFirstChild("HumanoidRootPart") then
-                    local hrp = dm.HumanoidRootPart
-                    local char = Player.Character
-                    local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+                local item, cur, tot = getActiveQuestDetails()
+                
+                if not item or (cur and tot and cur >= tot) then
+                    -- Stop Auto Farm before interacting
+                    if State.AutoFarm.active then
+                        AutoFarmModule.stop()
+                        task.wait(1.0)
+                    end
                     
-                    if playerHrp then
-                        local originCF = playerHrp.CFrame
-                        Utility.createNotification("Teleporting to Dredge Master...", 3)
+                    local dm = findDredgeMaster()
+                    if dm and dm:FindFirstChild("HumanoidRootPart") then
+                        local hrp = dm.HumanoidRootPart
+                        local char = Player.Character
+                        local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
                         
-                        pcall(function()
-                            playerHrp.CFrame = hrp.CFrame * CFrame.new(0, 0, -3)
-                        end)
-                        task.wait(1)
-                        
-                        local prompt = dm:FindFirstChildWhichIsA("ProximityPrompt", true) or hrp:FindFirstChildWhichIsA("ProximityPrompt", true)
-                        if prompt then
-                            prompt.HoldDuration = 0
-                            if fireproximityprompt then
-                                fireproximityprompt(prompt)
-                            else
-                                prompt:InputHoldBegin()
-                                task.wait(0.1)
-                                prompt:InputHoldEnd()
-                            end
-                            task.wait(0.5)
-                            
-                            processDialogue()
+                        if playerHrp then
+                            Utility.createNotification("Teleporting to Dredge Master...", 3)
+                            pcall(function()
+                                playerHrp.CFrame = hrp.CFrame * CFrame.new(0, 0, -3)
+                            end)
                             task.wait(1.5)
                             
-                            pcall(function()
-                                playerHrp.CFrame = originCF
-                            end)
-                            Utility.createNotification("Quest check completed!", 3)
-                        else
-                            Utility.createNotification("ProximityPrompt not found!", 3)
+                            local prompt = dm:FindFirstChildWhichIsA("ProximityPrompt", true) or hrp:FindFirstChildWhichIsA("ProximityPrompt", true)
+                            if prompt then
+                                prompt.HoldDuration = 0
+                                if fireproximityprompt then
+                                    fireproximityprompt(prompt)
+                                else
+                                    prompt:InputHoldBegin()
+                                    task.wait(0.1)
+                                    prompt:InputHoldEnd()
+                                end
+                                task.wait(0.5)
+                                
+                                processDialogue()
+                                task.wait(2.0)
+                            else
+                                Utility.createNotification("ProximityPrompt not found!", 3)
+                            end
                         end
+                    else
+                        Utility.createNotification("Dredge Master not found!", 3)
                     end
                 else
-                    Utility.createNotification("Dredge Master not found!", 3)
+                    -- We have a quest and need more items!
+                    local waypoint = nil
+                    local itemLower = item:lower()
+                    for key, wp in pairs(ItemToWaypoint) do
+                        if itemLower:find(key) then
+                            waypoint = wp
+                            break
+                        end
+                    end
+                    
+                    waypoint = waypoint or "Fortune River"
+                    
+                    local currentArea = Player:GetAttribute("CurrentArea") or ""
+                    local areaMatch = string.find(currentArea:lower(), waypoint:lower())
+                    
+                    if not areaMatch then
+                        Utility.createNotification("Traveling to " .. waypoint .. " for " .. item .. "...", 4)
+                        if WaypointModule and WaypointModule.teleport then
+                            WaypointModule.teleport(waypoint)
+                            task.wait(3.0)
+                        else
+                            Utility.createNotification("WaypointModule not found!", 3)
+                        end
+                    end
+                    
+                    local char = Player.Character
+                    local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+                    if playerHrp then
+                        State.AutoFarm.sandCFrame = playerHrp.CFrame
+                        State.AutoFarm.waterCFrame = playerHrp.CFrame
+                    end
+                    
+                    if not State.AutoFarm.active then
+                        Utility.createNotification("Starting Auto Farm for quest item...", 3)
+                        AutoFarmModule.start()
+                    end
                 end
                 task.wait(State.Quest.interval or 60)
             end
