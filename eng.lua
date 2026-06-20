@@ -1,12 +1,13 @@
--- ============================================================
---  HUNTING MODULE — RAYFIELD SAFE FINAL (v3)
---  UI Rayfield | Geode Opener | Treasure Hunt | Sand Dollar
+-- ============================================================================
+--  ENG & IRSE PROJECT - AUTOMATION MODULE (v4.0.0)
+--  Supported Features: Rayfield UI, Geode Opener, Treasure Hunt,
+--                      Sand Dollar Collection, and Auto Quest.
 --
---  Fix v3:
---  - Auto Treasure Hunt dikembalikan (Tab Treasure)
---  - Sand Dollar: bypass anti-teleport via Tween smooth move
---    + Repeat proximity sampai server acknowledge collect
--- ============================================================
+--  Release Notes:
+--  - Added Automated Quest (Dredge Master) system.
+--  - Enhanced Sand Dollar Collection with high-speed server replication.
+--  - Restored Auto Treasure Hunt capability.
+-- ============================================================================
 
 --// Executor compatibility
 local cloneref = cloneref or clonereference or function(instance)
@@ -204,6 +205,12 @@ local State = {
         autoAddRunning = false,
         selectedModifiers = {},
         selectedRarities = {}
+    },
+
+    Quest = {
+        autoQuest = false,
+        interval = 60,
+        running = false
     }
 }
 
@@ -13913,6 +13920,117 @@ do
 end
 
 
+local AutoQuestModule = {}
+do
+    local running = false
+    local questThread = nil
+    
+    local function findDredgeMaster()
+        local NPCs = workspace:FindFirstChild("NPCs")
+        if NPCs then
+            for _, folder in ipairs(NPCs:GetChildren()) do
+                local dm = folder:FindFirstChild("Dredge Master") or folder:FindFirstChild("DredgeMaster")
+                if dm then
+                    return dm
+                end
+            end
+            for _, desc in ipairs(NPCs:GetDescendants()) do
+                if desc.Name == "Dredge Master" or desc.Name == "DredgeMaster" then
+                    return desc
+                end
+            end
+        end
+        return nil
+    end
+
+    local function processDialogue()
+        task.spawn(function()
+            local playerGui = Player:FindFirstChild("PlayerGui")
+            if not playerGui then return end
+            
+            for _, child in ipairs(playerGui:GetChildren()) do
+                if child:IsA("ScreenGui") and (child.Name:lower():find("dialog") or child.Name:lower():find("quest") or child.Name:lower():find("chat") or child.Name:lower():find("npc")) then
+                    for _, desc in ipairs(child:GetDescendants()) do
+                        if desc:IsA("TextButton") and desc.Visible then
+                            local txt = desc.Text:lower()
+                            if txt:find("accept") or txt:find("yes") or txt:find("sure") or txt:find("complete") or txt:find("claim") or txt:find("turn in") or txt:find("ok") or txt:find("next") or txt:find("confirm") then
+                                pcall(function()
+                                    if firesignal then
+                                        firesignal(desc.MouseButton1Click)
+                                        firesignal(desc.Activated)
+                                    end
+                                    desc:Activate()
+                                end)
+                                task.wait(0.2)
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+    end
+
+    function AutoQuestModule.start()
+        if running then return end
+        running = true
+        questThread = task.spawn(function()
+            while running do
+                local dm = findDredgeMaster()
+                if dm and dm:FindFirstChild("HumanoidRootPart") then
+                    local hrp = dm.HumanoidRootPart
+                    local char = Player.Character
+                    local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+                    
+                    if playerHrp then
+                        local originCF = playerHrp.CFrame
+                        Utility.createNotification("Teleporting to Dredge Master...", 3)
+                        
+                        pcall(function()
+                            playerHrp.CFrame = hrp.CFrame * CFrame.new(0, 0, -3)
+                        end)
+                        task.wait(1)
+                        
+                        local prompt = dm:FindFirstChildWhichIsA("ProximityPrompt", true) or hrp:FindFirstChildWhichIsA("ProximityPrompt", true)
+                        if prompt then
+                            prompt.HoldDuration = 0
+                            if fireproximityprompt then
+                                fireproximityprompt(prompt)
+                            else
+                                prompt:InputHoldBegin()
+                                task.wait(0.1)
+                                prompt:InputHoldEnd()
+                            end
+                            task.wait(0.5)
+                            
+                            processDialogue()
+                            task.wait(1.5)
+                            
+                            pcall(function()
+                                playerHrp.CFrame = originCF
+                            end)
+                            Utility.createNotification("Quest check completed!", 3)
+                        else
+                            Utility.createNotification("ProximityPrompt not found!", 3)
+                        end
+                    end
+                else
+                    Utility.createNotification("Dredge Master not found!", 3)
+                end
+                task.wait(State.Quest.interval or 60)
+            end
+        end)
+    end
+
+    function AutoQuestModule.stop()
+        running = false
+        if questThread then
+            pcall(task.cancel, questThread)
+            questThread = nil
+        end
+    end
+end
+
+
 local amazong = ShoppingMart.new(EngProject.Utility:IsMobile() and 0.5 or 0.90)
 
 local window = EngProject:CreateWindow({
@@ -14119,7 +14237,7 @@ local function initializeDashboardTab()
 
     EngProject:CreateSection(page, "Credits")
 
-    EngProject:CreateParagraph(page, "Made with love by", {
+    EngProject:CreateParagraph(page, "Made partner", {
         "Eng - Core script, modules, and automation",
         "Irse - Testing, balancing, and feature ideas",
         "Klik tombol di atas untuk copy link social media kami!"
@@ -14207,6 +14325,28 @@ local function initializeMainTab()
             Text = "Use Unstuck Character if movement freezes or the tweening animation becomes unresponsive.",
             IsSubField = true
         }})
+
+    local AutoQuestSection = EngProject:CreateSection(LeftPage, "Auto Quest", {
+        Style = "box",
+        Icon = "rbxassetid://10734963191",
+        DefaultExpanded = true,
+        TextSize = 15
+    })
+
+    EngProject:CreateToggle(AutoQuestSection.Container, "Enable Auto Quest (Dredge Master)", false, function(state)
+        State.Quest.autoQuest = state
+        if state then
+            AutoQuestModule.start()
+        else
+            AutoQuestModule.stop()
+        end
+    end)
+
+    EngProject:CreateSlider(AutoQuestSection.Container, "Quest Check Interval (s)", 10, 300, State.Quest.interval, function(val)
+        State.Quest.interval = val
+    end, {
+        Increment = 5
+    })
 
     local SellSection = EngProject:CreateSection(RightPage, "Auto Sell", {
         Style = "box",
