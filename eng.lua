@@ -12449,6 +12449,32 @@ _G.scanRegionPos = function(centerPos, targetRegion)
     return nil
 end
 
+local autoFarmToggle1, autoFarmToggle2
+local settingToggleState = false
+local function syncToggles(state)
+    if settingToggleState then return end
+    settingToggleState = true
+    if autoFarmToggle1 then
+        pcall(function()
+            if autoFarmToggle1.Set then
+                autoFarmToggle1:Set(state)
+            elseif autoFarmToggle1.SetValue then
+                autoFarmToggle1:SetValue(state)
+            end
+        end)
+    end
+    if autoFarmToggle2 then
+        pcall(function()
+            if autoFarmToggle2.Set then
+                autoFarmToggle2:Set(state)
+            elseif autoFarmToggle2.SetValue then
+                autoFarmToggle2:SetValue(state)
+            end
+        end)
+    end
+    settingToggleState = false
+end
+
 local AutoFarmModule = {}
 do
     function AutoFarmModule.moveToLocation(targetCFrame, routeType)
@@ -12618,6 +12644,7 @@ do
 
         TaskManager:clearSubTasks()
         State.AutoFarm.running = false
+        syncToggles(false)
     end
 
     function AutoFarmModule.pause(reason)
@@ -12665,6 +12692,7 @@ do
             Utility.createNotification("❌ Select travel mode!")
             State.AutoFarm.active = false
             State.AutoFarm.running = false
+            syncToggles(false)
             return
         end
 
@@ -12672,6 +12700,7 @@ do
             Utility.createNotification("❌ Select farming mode!")
             State.AutoFarm.active = false
             State.AutoFarm.running = false
+            syncToggles(false)
             return
         end
 
@@ -12711,9 +12740,11 @@ do
             Utility.createNotification("❌ Deposit or Water not found! Stopping.", 5)
             State.AutoFarm.active = false
             State.AutoFarm.running = false
+            syncToggles(false)
             return
         end
 
+        syncToggles(true)
         Utility.createNotification("🚀 Starting!")
 
         task.spawn(function()
@@ -12758,10 +12789,12 @@ do
                                     if panStatus.isFull then
                                         -- Verify / find nearest Water region dynamically!
                                         local targetCFrame = State.AutoFarm.waterCFrame
-                                        local nearestWater = scanRegionPos(loopHrp.Position, "Water")
-                                        if nearestWater then
-                                            targetCFrame = nearestWater
-                                            State.AutoFarm.waterCFrame = nearestWater
+                                        if State.Quest.autoQuest then
+                                            local nearestWater = scanRegionPos(loopHrp.Position, "Water")
+                                            if nearestWater then
+                                                targetCFrame = nearestWater
+                                                State.AutoFarm.waterCFrame = nearestWater
+                                            end
                                         end
 
                                         if not targetCFrame then
@@ -12779,10 +12812,12 @@ do
                                     else
                                         -- Verify / find nearest Deposit region dynamically!
                                         local targetCFrame = State.AutoFarm.sandCFrame
-                                        local nearestDeposit = scanRegionPos(loopHrp.Position, "Deposit")
-                                        if nearestDeposit then
-                                            targetCFrame = nearestDeposit
-                                            State.AutoFarm.sandCFrame = nearestDeposit
+                                        if State.Quest.autoQuest then
+                                            local nearestDeposit = scanRegionPos(loopHrp.Position, "Deposit")
+                                            if nearestDeposit then
+                                                targetCFrame = nearestDeposit
+                                                State.AutoFarm.sandCFrame = nearestDeposit
+                                            end
                                         end
 
                                         if not targetCFrame then
@@ -12827,9 +12862,13 @@ do
     end
 
     function AutoFarmModule.stop()
+        if not State.AutoFarm.active and not State.AutoFarm.running then
+            return
+        end
         State.AutoFarm.active = false
         State.AutoFarm.interrupted = false
         State.AutoFarm.interruptReason = nil
+        syncToggles(false)
     end
 end
 
@@ -14143,6 +14182,7 @@ do
         if not playerGui then return nil, nil, nil end
         
         local candidates = {}
+        local seenItems = {}
         for _, desc in ipairs(playerGui:GetDescendants()) do
             if desc:IsA("TextLabel") and desc.Text ~= "" then
                 local text = desc.Text
@@ -14217,13 +14257,16 @@ do
                             end
                         end
                         
-                        table.insert(candidates, {
-                            item = item,
-                            cur = cur,
-                            tot = tot,
-                            difficulty = difficulty,
-                            text = text
-                        })
+                        if not seenItems[itemLower] then
+                            seenItems[itemLower] = true
+                            table.insert(candidates, {
+                                item = item,
+                                cur = cur,
+                                tot = tot,
+                                difficulty = difficulty,
+                                text = text
+                            })
+                        end
                     end
                 end
             end
@@ -14241,11 +14284,8 @@ do
             end
             
             if #incomplete > 0 then
-                table.sort(incomplete, function(a, b)
-                    return a.difficulty < b.difficulty
-                end)
                 local best = incomplete[1]
-                print("[AutoQuest] Selected Best (Easiest) Quest: '" .. tostring(best.text) .. "' -> Parsed Item: '" .. tostring(best.item) .. "' (" .. tostring(best.cur) .. "/" .. tostring(best.tot) .. ") | Difficulty: " .. tostring(best.difficulty))
+                print("[AutoQuest] Selected Incomplete Task: '" .. tostring(best.text) .. "' -> Parsed Item: '" .. tostring(best.item) .. "' (" .. tostring(best.cur) .. "/" .. tostring(best.tot) .. ")")
                 return best.item, best.cur, best.tot, candidates
             else
                 local best = complete[1]
@@ -14452,19 +14492,19 @@ do
                                 end
                             end
                             
-                            if nearestDeposit and nearestWater then
-                                State.AutoFarm.sandCFrame = nearestDeposit
-                                State.AutoFarm.waterCFrame = nearestWater
-                                
-                                -- Start Auto Farm if not already running!
-                                if not State.AutoFarm.running then
-                                    AutoFarmModule.start()
-                                end
-                                
-                                local uiLines = {
-                                    "Status: Farming Quest Items",
-                                    "Active Target: " .. item .. " (" .. tostring(cur) .. "/" .. tostring(tot) .. ")"
-                                }
+                             if nearestDeposit and nearestWater then
+                                 State.AutoFarm.sandCFrame = nearestDeposit
+                                 State.AutoFarm.waterCFrame = nearestWater
+                                 
+                                 -- Start Auto Farm if active but not running
+                                 if State.AutoFarm.active and not State.AutoFarm.running then
+                                     AutoFarmModule.start()
+                                 end
+                                 
+                                 local uiLines = {
+                                     "Status: " .. (State.AutoFarm.active and "Farming Quest Items" or "Auto Farm Paused"),
+                                     "Active Target: " .. item .. " (" .. tostring(cur) .. "/" .. tostring(tot) .. ")"
+                                 }
                                 if candidates and #candidates > 0 then
                                     table.insert(uiLines, "All Quest Tasks:")
                                     for _, c in ipairs(candidates) do
@@ -14778,7 +14818,8 @@ local function initializeMainTab()
         })
     end)
 
-    EngProject:CreateToggle(AutoFarmSection.Container, "Enable Auto Farm", false, function(state)
+    autoFarmToggle1 = EngProject:CreateToggle(AutoFarmSection.Container, "Enable Auto Farm", false, function(state)
+        if settingToggleState then return end
         if state then
             AutoFarmModule.start()
         else
@@ -14826,6 +14867,15 @@ local function initializeMainTab()
             AutoQuestModule.start()
         else
             AutoQuestModule.stop()
+        end
+    end)
+
+    autoFarmToggle2 = EngProject:CreateToggle(AutoQuestSection.Container, "Enable Auto Farm", false, function(state)
+        if settingToggleState then return end
+        if state then
+            AutoFarmModule.start()
+        else
+            AutoFarmModule.stop()
         end
     end)
 
