@@ -209,6 +209,8 @@ local State = {
 
     Quest = {
         autoQuest = false,
+        autoFarm = true,
+        isFarming = false,
         interval = 10,
         running = false,
         statusUI = nil
@@ -12449,11 +12451,8 @@ _G.scanRegionPos = function(centerPos, targetRegion)
     return nil
 end
 
-local autoFarmToggle1, autoFarmToggle2
-local settingToggleState = false
-local function syncToggles(state)
-    if settingToggleState then return end
-    settingToggleState = true
+local autoFarmToggle1
+local function updateManualToggle(state)
     if autoFarmToggle1 then
         pcall(function()
             if autoFarmToggle1.Set then
@@ -12463,16 +12462,10 @@ local function syncToggles(state)
             end
         end)
     end
-    if autoFarmToggle2 then
-        pcall(function()
-            if autoFarmToggle2.Set then
-                autoFarmToggle2:Set(state)
-            elseif autoFarmToggle2.SetValue then
-                autoFarmToggle2:SetValue(state)
-            end
-        end)
-    end
-    settingToggleState = false
+end
+
+local function isFarmingActive()
+    return State.AutoFarm.active or (State.Quest.autoQuest and State.Quest.isFarming)
 end
 
 local AutoFarmModule = {}
@@ -12493,7 +12486,7 @@ do
                 Route = LegitWaypointReader:buildRoute(routeType or "Dig", targetCFrame),
                 StopDistance = 5,
                 ShouldContinue = function()
-                    return State.AutoFarm.active and not State.AutoFarm.interrupted
+                    return isFarmingActive() and not State.AutoFarm.interrupted
                 end
             })
             completed = true
@@ -12519,7 +12512,7 @@ do
                 Speed = State.Speed or 24,
                 StopDistance = 8,
                 ShouldContinue = function()
-                    return State.AutoFarm.active and not State.AutoFarm.interrupted
+                    return isFarmingActive() and not State.AutoFarm.interrupted
                 end
             })
             completed = true
@@ -12534,7 +12527,7 @@ do
         end
 
         local elapsed = 0
-        while not completed and elapsed < 45 and State.AutoFarm.active and not State.AutoFarm.interrupted do
+        while not completed and elapsed < 45 and isFarmingActive() and not State.AutoFarm.interrupted do
             task.wait(0.05)
             elapsed = elapsed + 0.05
         end
@@ -12564,7 +12557,7 @@ do
             -- end
 
             local killSwitch = function()
-                return State.AutoFarm.active and not State.AutoFarm.interrupted
+                return isFarmingActive() and not State.AutoFarm.interrupted
             end
 
             local r = PanModule.handleAction(State.AutoFarm.actionMode, actionType, true, killSwitch)
@@ -12644,7 +12637,7 @@ do
 
         TaskManager:clearSubTasks()
         State.AutoFarm.running = false
-        syncToggles(false)
+        updateManualToggle(false)
     end
 
     function AutoFarmModule.pause(reason)
@@ -12688,20 +12681,11 @@ do
         State.AutoFarm.interrupted = false
         State.AutoFarm.interruptReason = nil
 
-        local currentArea = Player:GetAttribute("CurrentArea")
-        if State.AutoFarm.savedArea ~= currentArea then
-            State.AutoFarm.sandCFrame = nil
-            State.AutoFarm.waterCFrame = nil
-            State.AutoFarm.manualSand = nil
-            State.AutoFarm.manualWater = nil
-            State.AutoFarm.savedArea = currentArea
-        end
-
         if not State.AutoFarm.travelMode or State.AutoFarm.travelMode == "" then
             Utility.createNotification("❌ Select travel mode!")
             State.AutoFarm.active = false
             State.AutoFarm.running = false
-            syncToggles(false)
+            updateManualToggle(false)
             return
         end
 
@@ -12709,27 +12693,19 @@ do
             Utility.createNotification("❌ Select farming mode!")
             State.AutoFarm.active = false
             State.AutoFarm.running = false
-            syncToggles(false)
+            updateManualToggle(false)
             return
         end
 
-        -- Dynamic location scanning fallback if not set
-        local char = Player.Character
-        local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
-        if playerHrp then
-            if not State.AutoFarm.manualSand or not State.AutoFarm.sandCFrame then
-                State.AutoFarm.sandCFrame = scanRegionPos(playerHrp.Position, "Deposit")
-            end
-            if not State.AutoFarm.manualWater or not State.AutoFarm.waterCFrame then
-                State.AutoFarm.waterCFrame = scanRegionPos(playerHrp.Position, "Water")
-            end
+        if not (State.AutoFarm.sandCFrame and State.AutoFarm.waterCFrame) then
+            Utility.createNotification("❌ Set locations!")
+            State.AutoFarm.active = false
+            State.AutoFarm.running = false
+            updateManualToggle(false)
+            return
         end
 
-        if not State.AutoFarm.sandCFrame or not State.AutoFarm.waterCFrame then
-            Utility.createNotification("⚠️ Waiting for deposit/water in this area...", 4)
-        end
-
-        syncToggles(true)
+        updateManualToggle(true)
         Utility.createNotification("🚀 Starting!")
 
         task.spawn(function()
@@ -12764,53 +12740,16 @@ do
 
                                     AutoFarmModule.checkAndDoSell()
 
-                                    local loopChar = Player.Character
-                                    local loopHrp = loopChar and loopChar:FindFirstChild("HumanoidRootPart")
-                                    if not loopHrp then
-                                        task.wait(0.05)
-                                        return
-                                    end
-
                                     if panStatus.isFull then
-                                        -- Verify / find nearest Water region dynamically!
-                                        local targetCFrame = State.AutoFarm.waterCFrame
-                                        if not State.AutoFarm.manualWater or State.Quest.autoQuest then
-                                            local nearestWater = scanRegionPos(loopHrp.Position, "Water")
-                                            if nearestWater then
-                                                targetCFrame = nearestWater
-                                                State.AutoFarm.waterCFrame = nearestWater
-                                            end
-                                        end
-
-                                        if not targetCFrame then
-                                            task.wait(1.5)
-                                            return
-                                        end
-
                                         if not AutoFarmModule.performTask("MovingToWater", "WashPan",
-                                            targetCFrame, "Wash", "Water") then
+                                            State.AutoFarm.waterCFrame, "Wash", "Water") then
                                             if not State.AutoFarm.interrupted then
                                                 State.AutoFarm.active = false
                                             end
                                         end
                                     else
-                                        -- Verify / find nearest Deposit region dynamically!
-                                        local targetCFrame = State.AutoFarm.sandCFrame
-                                        if not State.AutoFarm.manualSand or State.Quest.autoQuest then
-                                            local nearestDeposit = scanRegionPos(loopHrp.Position, "Deposit")
-                                            if nearestDeposit then
-                                                targetCFrame = nearestDeposit
-                                                State.AutoFarm.sandCFrame = nearestDeposit
-                                            end
-                                        end
-
-                                        if not targetCFrame then
-                                            task.wait(1.5)
-                                            return
-                                        end
-
                                         if not AutoFarmModule.performTask("MovingToSand", "DigSand",
-                                            targetCFrame, "Dig", "Deposit") then
+                                            State.AutoFarm.sandCFrame, "Dig", "Deposit") then
                                             if not State.AutoFarm.interrupted then
                                                 State.AutoFarm.active = false
                                             end
@@ -12851,7 +12790,7 @@ do
         State.AutoFarm.active = false
         State.AutoFarm.interrupted = false
         State.AutoFarm.interruptReason = nil
-        syncToggles(false)
+        updateManualToggle(false)
     end
 end
 
@@ -14448,72 +14387,120 @@ do
                         Utility.createNotification("Traveling to " .. waypoint .. " for " .. item .. "...", 4)
                         if WaypointModule and WaypointModule.teleport then
                             WaypointModule.teleport(waypoint)
-                            task.wait(3.0)
-                        else
-                            Utility.createNotification("WaypointModule not found!", 3)
-                        end
-                    else
-                        local char = Player.Character
-                        local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
-                        if playerHrp then
-                            local nearestDeposit = scanRegionPos(playerHrp.Position, "Deposit")
-                            local nearestWater = scanRegionPos(playerHrp.Position, "Water")
-                            
-                            -- Retry scan up to 3 times if not found
-                            if not nearestDeposit or not nearestWater then
-                                for attempt = 1, 3 do
-                                    task.wait(1)
-                                    char = Player.Character
-                                    playerHrp = char and char:FindFirstChild("HumanoidRootPart")
-                                    if playerHrp then
-                                        nearestDeposit = nearestDeposit or scanRegionPos(playerHrp.Position, "Deposit")
-                                        nearestWater = nearestWater or scanRegionPos(playerHrp.Position, "Water")
-                                        if nearestDeposit and nearestWater then
-                                            break
+                                            else
+                        -- Stop manual Auto Farm to avoid conflicting movements
+                        AutoFarmModule.stop()
+                        
+                        State.Quest.isFarming = true
+                        
+                        -- Inner loop for digging and washing dynamically
+                        while running and State.Quest.autoQuest and areaMatch and not (not item or (cur and tot and cur >= tot)) do
+                            if not State.Quest.autoFarm then
+                                if State.AutoFarm.locked then
+                                    CharacterLock.unlock()
+                                    State.AutoFarm.locked = false
+                                end
+                                updateUI({
+                                    "Status: Auto Farm Paused",
+                                    "Active Target: " .. item .. " (" .. tostring(cur) .. "/" .. tostring(tot) .. ")"
+                                })
+                                task.wait(1.0)
+                            elseif State.AutoFarm.interrupted then
+                                if State.AutoFarm.locked then
+                                    CharacterLock.unlock()
+                                    State.AutoFarm.locked = false
+                                end
+                                while State.AutoFarm.interrupted and running and State.Quest.autoQuest and State.Quest.autoFarm do
+                                    task.wait(0.1)
+                                end
+                            else
+                                local char = Player.Character
+                                local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+                                if playerHrp then
+                                    local nearestDeposit = scanRegionPos(playerHrp.Position, "Deposit")
+                                    local nearestWater = scanRegionPos(playerHrp.Position, "Water")
+                                    
+                                    if not nearestDeposit or not nearestWater then
+                                        for attempt = 1, 3 do
+                                            task.wait(1)
+                                            char = Player.Character
+                                            playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+                                            if playerHrp then
+                                                nearestDeposit = nearestDeposit or scanRegionPos(playerHrp.Position, "Deposit")
+                                                nearestWater = nearestWater or scanRegionPos(playerHrp.Position, "Water")
+                                                if nearestDeposit and nearestWater then
+                                                    break
+                                                end
+                                            end
                                         end
                                     end
+                                    
+                                    if nearestDeposit and nearestWater then
+                                        local acquired = TaskManager:requestTask("AutoFarm", 1)
+                                        if acquired then
+                                            local hasTurn = TaskManager:waitForTurn("AutoFarm", 5)
+                                            if hasTurn then
+                                                local started = TaskManager:startTask("AutoFarm")
+                                                if started then
+                                                    local panStatus = PanModule.getStatus()
+                                                    if panStatus then
+                                                        AutoFarmModule.checkAndDoSell()
+                                                        
+                                                        if panStatus.isFull then
+                                                            -- Wash
+                                                            AutoFarmModule.performTask("MovingToWater", "WashPan", nearestWater, "Wash", "Water")
+                                                        else
+                                                            -- Dig
+                                                            AutoFarmModule.performTask("MovingToSand", "DigSand", nearestDeposit, "Dig", "Deposit")
+                                                        end
+                                                    end
+                                                    TaskManager:finishTask("AutoFarm")
+                                                end
+                                            end
+                                        end
+                                    else
+                                        if State.AutoFarm.locked then
+                                            CharacterLock.unlock()
+                                            State.AutoFarm.locked = false
+                                        end
+                                        updateUI({
+                                            "Status: Waiting for Deposit/Water",
+                                            "Active Target: " .. item
+                                        })
+                                        Utility.createNotification("Waiting for deposit/water in " .. waypoint .. "...", 3)
+                                        task.wait(1.5)
+                                    end
+                                else
+                                    task.wait(0.5)
                                 end
                             end
                             
-                             if nearestDeposit and nearestWater then
-                                 State.AutoFarm.sandCFrame = nearestDeposit
-                                 State.AutoFarm.waterCFrame = nearestWater
-                                 
-                                 -- Start Auto Farm if active but not running
-                                 if State.AutoFarm.active and not State.AutoFarm.running then
-                                     AutoFarmModule.start()
-                                 end
-                                 
-                                 local uiLines = {
-                                     "Status: " .. (State.AutoFarm.active and "Farming Quest Items" or "Auto Farm Paused"),
-                                     "Active Target: " .. item .. " (" .. tostring(cur) .. "/" .. tostring(tot) .. ")"
-                                 }
-                                if candidates and #candidates > 0 then
-                                    table.insert(uiLines, "All Quest Tasks:")
-                                    for _, c in ipairs(candidates) do
-                                        local statusStr = c.cur >= c.tot and "Completed" or (c.item == item and "Farming" or "Pending")
-                                        table.insert(uiLines, string.format("- %s: %d/%d (%s)", c.item, c.cur, c.tot, statusStr))
-                                    end
+                            task.wait(0.01)
+                            
+                            -- Re-evaluate quest status and area match
+                            item, cur, tot, candidates = getActiveQuestDetails()
+                            currentArea = Player:GetAttribute("CurrentArea") or ""
+                            areaMatch = string.find(currentArea:lower(), waypoint:lower())
+                            
+                            -- Sync status UI
+                            local uiLines = {
+                                "Status: Farming Quest Items",
+                                "Active Target: " .. (item or "None") .. " (" .. tostring(cur or 0) .. "/" .. tostring(tot or 0) .. ")"
+                            }
+                            if candidates and #candidates > 0 then
+                                table.insert(uiLines, "All Quest Tasks:")
+                                for _, c in ipairs(candidates) do
+                                    local statusStr = c.cur >= c.tot and "Completed" or (c.item == item and "Farming" or "Pending")
+                                    table.insert(uiLines, string.format("- %s: %d/%d (%s)", c.item, c.cur, c.tot, statusStr))
                                 end
-                                updateUI(uiLines)
-                            else
-                                -- Stop Auto Farm since we don't have both
-                                AutoFarmModule.stop()
-                                
-                                local uiLines = {
-                                    "Status: Waiting for Deposit/Water",
-                                    "Active Target: " .. item
-                                }
-                                if candidates and #candidates > 0 then
-                                    table.insert(uiLines, "All Quest Tasks:")
-                                    for _, c in ipairs(candidates) do
-                                        local statusStr = c.cur >= c.tot and "Completed" or "Pending"
-                                        table.insert(uiLines, string.format("- %s: %d/%d (%s)", c.item, c.cur, c.tot, statusStr))
-                                    end
-                                end
-                                updateUI(uiLines)
-                                Utility.createNotification("Waiting for deposit/water in " .. waypoint .. "...", 3)
                             end
+                            updateUI(uiLines)
+                        end
+                        
+                        State.Quest.isFarming = false
+                        if State.AutoFarm.locked then
+                            CharacterLock.unlock()
+                            State.AutoFarm.locked = false
                         end
                     end
                 end
@@ -14524,13 +14511,12 @@ do
 
     function AutoQuestModule.stop()
         running = false
+        State.Quest.isFarming = false
         if questThread then
             pcall(task.cancel, questThread)
             questThread = nil
         end
         updateUI({"Status: Idle", "Target: None"})
-        -- Stop Auto Farm when Auto Quest is stopped
-        AutoFarmModule.stop()
     end
 end
 
@@ -14806,7 +14792,6 @@ local function initializeMainTab()
     end)
 
     autoFarmToggle1 = EngProject:CreateToggle(AutoFarmSection.Container, "Enable Auto Farm", false, function(state)
-        if settingToggleState then return end
         if state then
             AutoFarmModule.start()
         else
@@ -14857,13 +14842,8 @@ local function initializeMainTab()
         end
     end)
 
-    autoFarmToggle2 = EngProject:CreateToggle(AutoQuestSection.Container, "Enable Auto Farm", false, function(state)
-        if settingToggleState then return end
-        if state then
-            AutoFarmModule.start()
-        else
-            AutoFarmModule.stop()
-        end
+    EngProject:CreateToggle(AutoQuestSection.Container, "Enable Auto Farm (Quest)", true, function(state)
+        State.Quest.autoFarm = state
     end)
 
     EngProject:CreateSlider(AutoQuestSection.Container, "Quest Check Interval (s)", 5, 120, State.Quest.interval, function(val)
