@@ -1862,7 +1862,8 @@ if not ShoppingMart then
     ShoppingMart = ShoppingMartMock
 end
 
-local amazong = ShoppingMart.new(EngProject.Utility:IsMobile() and 0.5 or 0.90)
+local isMobileDevice = UserInputService.TouchEnabled and not UserInputService.MouseEnabled
+local amazong = ShoppingMart.new(isMobileDevice and 0.5 or 0.90)
 
 -- ============================================================
 --  BACKEND MODULES - GROUP A
