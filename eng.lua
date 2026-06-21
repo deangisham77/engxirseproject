@@ -243,7 +243,8 @@ local State = {
         isFarming = false,
         interval = 10,
         running = false,
-        statusUI = nil
+        statusUI = nil,
+        dirty = false
     }
 }
 
@@ -12434,7 +12435,22 @@ do
     end
 end
 
+local scanCache = {}
 _G.scanRegionPos = function(centerPos, targetRegion)
+    if not centerPos then return nil end
+    local x = math.round(centerPos.X)
+    local y = math.round(centerPos.Y)
+    local z = math.round(centerPos.Z)
+    local cacheKey = string.format("%d,%d,%d:%s", x, y, z, targetRegion)
+    if scanCache[cacheKey] ~= nil then
+        local val = scanCache[cacheKey]
+        if val == "nil" then
+            return nil
+        else
+            return val
+        end
+    end
+
     local ok, PointToRegion = pcall(function()
         return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Location"):WaitForChild("PointToRegion"))
     end)
@@ -12459,7 +12475,9 @@ _G.scanRegionPos = function(centerPos, targetRegion)
                             local testPos = centerPos + Vector3.new(x, yOffset, z)
                             local region, _ = PointToRegion.GetPanningRegion(testPos)
                             if region == targetRegion then
-                                return CFrame.new(testPos)
+                                local cf = CFrame.new(testPos)
+                                scanCache[cacheKey] = cf
+                                return cf
                             end
                         end
                     end
@@ -12467,6 +12485,7 @@ _G.scanRegionPos = function(centerPos, targetRegion)
             end
         end
     end
+    scanCache[cacheKey] = "nil"
     return nil
 end
 
@@ -12500,16 +12519,31 @@ do
 
         local controller
 
-        if State.AutoFarm.travelMode == "Legit" then
+        local travelMode = State.AutoFarm.travelMode
+        local char = Player.Character
+        local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+        if playerHrp then
+            local dist = (playerHrp.Position - targetCFrame.Position).Magnitude
+            if dist < 20 or State.Quest.isFarming then
+                travelMode = "Legit"
+            end
+        end
+
+        local stopDist = 5
+        if routeType == "Wash" then
+            stopDist = 1.5
+        end
+
+        if travelMode == "Legit" then
             success = Movement.walkToTarget(targetObj, {
                 Route = LegitWaypointReader:buildRoute(routeType or "Dig", targetCFrame),
-                StopDistance = 5,
+                StopDistance = stopDist,
                 ShouldContinue = function()
                     return isFarmingActive() and not State.AutoFarm.interrupted
                 end
             })
             completed = true
-        elseif State.AutoFarm.travelMode == "Tween" then
+        elseif travelMode == "Tween" then
             controller = Movement.tweenToTarget(targetObj, {
                 CruiseHeight = 4,
                 MinHeight = 1,
@@ -12520,16 +12554,16 @@ do
                 UseDirectFlight = true,
                 HoverDuration = 0,
                 LandingDuration = 0.3,
-                StopDistance = 5,
+                StopDistance = stopDist,
                 OnComplete = function(ok)
                     success = ok or false
                     completed = true
                 end
             })
-        elseif State.AutoFarm.travelMode == "Visual" then
+        elseif travelMode == "Visual" then
             success = Movement.pathfindTween(targetCFrame, {
                 Speed = State.Speed or 24,
-                StopDistance = 8,
+                StopDistance = routeType == "Wash" and 1.5 or 8,
                 ShouldContinue = function()
                     return isFarmingActive() and not State.AutoFarm.interrupted
                 end
@@ -14009,8 +14043,76 @@ do
     local running = false
     local questThread = nil
     
+    local function isDialogueQuest(itemName)
+        if not itemName then return false end
+        local lower = itemName:lower()
+        local dialogueKeywords = {
+            "talk to", "speak to", "report to", "claim from", 
+            "talk", "speak", "report", "claim", "master", "npc", "dredge"
+        }
+        for _, kw in ipairs(dialogueKeywords) do
+            if lower:find(kw, 1, true) then
+                return true
+            end
+        end
+        return false
+    end
+
+    local scanRegionPos = _G.scanRegionPos or scanRegionPos or function(pos, regionType)
+        local searchName = regionType:lower()
+        local closest = nil
+        local minDist = math.huge
+        
+        local function check(obj)
+            if not obj:IsA("BasePart") then return end
+            local name = obj.Name:lower()
+            local matches = name:find(searchName, 1, true)
+            
+            if not matches then
+                local materialAttr = obj:GetAttribute("Material") or obj:GetAttribute("Type") or obj:GetAttribute("Name")
+                if materialAttr and tostring(materialAttr):lower():find(searchName, 1, true) then
+                    matches = true
+                end
+            end
+            
+            if matches then
+                local dist = (obj.Position - pos).Magnitude
+                if dist < minDist then
+                    minDist = dist
+                    closest = obj
+                end
+            end
+        end
+
+        local folders = {"Deposits", "Water", "Map", "Terrain", "Ores"}
+        for _, fName in ipairs(folders) do
+            local folder = workspace:FindFirstChild(fName)
+            if folder then
+                for _, obj in ipairs(folder:GetDescendants()) do
+                    check(obj)
+                end
+            end
+        end
+        
+        if not closest then
+            for _, obj in ipairs(workspace:GetChildren()) do
+                check(obj)
+                if not obj:IsA("Folder") and not obj:IsA("Model") then
+                    for _, child in ipairs(obj:GetDescendants()) do
+                        check(child)
+                    end
+                end
+            end
+        end
+        
+        if closest and minDist < 150 then
+            return closest.CFrame
+        end
+        return nil
+    end
+    
     local ItemToWaypoint = {
-        ["amethyst"] = "Crystal Cavern",
+        ["amethyst"] = "Rubble Creek",
         ["crystal"] = "Crystal Cavern",
         ["gold"] = "Fortune River",
         ["obsidian"] = "Volcano",
@@ -14027,7 +14129,7 @@ do
         
         -- Additional items / ores mappings for Prospecting!
         ["silver"] = "Sunset Beach",
-        ["copper"] = "Crystal Cavern",
+        ["copper"] = "Volcano",
         ["pyrite"] = "Rubble Creek",
         ["platinum"] = "Rubble Creek",
         ["seashell"] = "Sunset Beach",
@@ -14037,9 +14139,9 @@ do
         ["neodymium"] = "Rubble Creek",
         ["topaz"] = "Rubble Creek",
         ["nickel"] = "Starfall River",
-        ["ruby"] = "Crystal Cavern",
+        ["ruby"] = "Fortune River",
         ["sapphire"] = "Sunset Beach",
-        ["diamond"] = "Crystal Cavern",
+        ["diamond"] = "Fortune River",
         ["emerald"] = "Fortune River",
         ["uranium"] = "Overgrown Grotto",
         ["sulfur"] = "Volcano",
@@ -14052,7 +14154,7 @@ do
         ["celestium"] = "Astral Caverns",
         ["cryonic"] = "Frozen Peak",
         ["umbrite"] = "Abyssal Depths",
-        ["malachite"] = "Crystal Caverns",
+        ["malachite"] = "Overgrown Grotto",
         ["astral spore"] = "Fungal Marsh",
         ["bloodstone"] = "Rotwood Swamp",
         ["voidstone"] = "The Void",
@@ -14140,38 +14242,318 @@ do
         return nil
     end
 
+    local lastTargetScan = 0
+    local cachedTarget = nil
+    local cachedItem = nil
+
     local function findQuestTarget(item)
         if not item then return nil end
+        local now = os.clock()
+        if cachedItem == item and (now - lastTargetScan) < 4 then
+            if cachedTarget and cachedTarget.Parent then
+                return cachedTarget
+            end
+            if not cachedTarget then
+                return nil
+            end
+        end
+
+        cachedItem = item
+        lastTargetScan = now
+        cachedTarget = nil
+
         local query = item:lower()
-        local attributes = {"ItemName", "OreName", "MineralName", "ResourceName", "DisplayName", "Name", "Type"}
+        local attributes = {
+            "ItemName", "OreName", "MineralName", "ResourceName", "DisplayName", 
+            "Name", "Type", "OreType", "ItemType", "ResourceType", "Ore", "Mineral"
+        }
         
         local function isMatch(str)
             if not str then return false end
             local s = tostring(str):lower()
-            if s:find(query, 1, true) or query:find(s, 1, true) then
+            if s:find(query, 1, true) then
                 return true
             end
             local qSingular = query:gsub("s$", "")
             local sSingular = s:gsub("s$", "")
-            if sSingular:find(qSingular, 1, true) or qSingular:find(sSingular, 1, true) then
+            if sSingular:find(qSingular, 1, true) then
                 return true
             end
             return false
         end
 
-        for _, obj in ipairs(workspace:GetDescendants()) do
-            if obj:IsA("BasePart") or obj:IsA("Model") then
-                if isMatch(obj.Name) then
-                    return obj
+        local function checkObject(obj)
+            if not (obj:IsA("BasePart") or obj:IsA("Model")) then return false end
+            local model = obj:FindFirstAncestorOfClass("Model")
+            if model then
+                if Players:GetPlayerFromCharacter(model) then
+                    return false
                 end
-                for _, attr in ipairs(attributes) do
-                    if isMatch(obj:GetAttribute(attr)) then
+                local modelParent = model.Parent
+                if modelParent and modelParent:IsA("Model") and Players:GetPlayerFromCharacter(modelParent) then
+                    return false
+                end
+            end
+            if isMatch(obj.Name) then return true end
+            for _, attr in ipairs(attributes) do
+                if isMatch(obj:GetAttribute(attr)) then return true end
+            end
+            for _, child in ipairs(obj:GetChildren()) do
+                if child:IsA("BillboardGui") or child:IsA("SurfaceGui") then
+                    for _, lbl in ipairs(child:GetDescendants()) do
+                        if lbl:IsA("TextLabel") and isMatch(lbl.Text) then
+                            return true
+                        end
+                    end
+                elseif child:IsA("TextLabel") and isMatch(child.Text) then
+                    return true
+                end
+            end
+            return false
+        end
+
+        local searchFolders = {"Ores", "Deposits", "Minerals", "Filter", "Resources", "Map", "Debris", "Spawned", "SpawnedItems"}
+        for _, folderName in ipairs(searchFolders) do
+            local folder = workspace:FindFirstChild(folderName)
+            if folder then
+                for _, obj in ipairs(folder:GetChildren()) do
+                    if checkObject(obj) then
+                        cachedTarget = obj
+                        return obj
+                    end
+                end
+                for _, obj in ipairs(folder:GetDescendants()) do
+                    if checkObject(obj) then
+                        cachedTarget = obj
                         return obj
                     end
                 end
             end
         end
+
+        for _, obj in ipairs(workspace:GetChildren()) do
+            if checkObject(obj) then
+                cachedTarget = obj
+                return obj
+            end
+        end
+
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if checkObject(obj) then
+                cachedTarget = obj
+                return obj
+            end
+        end
+
+        cachedTarget = nil
         return nil
+    end
+
+    local function isAreaMatch(currentArea, targetZone)
+        if not currentArea or not targetZone then return false end
+        local cur = currentArea:lower()
+        local tgt = targetZone:lower()
+        if cur:find(tgt, 1, true) or tgt:find(cur, 1, true) then
+            return true
+        end
+        local cleanCur = cur:gsub("[%s%p]", "")
+        local cleanTgt = tgt:gsub("[%s%p]", "")
+        if cleanCur:find(cleanTgt, 1, true) or cleanTgt:find(cleanCur, 1, true) then
+            return true
+        end
+        local cleanCurS = cleanCur:gsub("s$", "")
+        local cleanTgtS = cleanTgt:gsub("s$", "")
+        if cleanCurS:find(cleanTgtS, 1, true) or cleanTgtS:find(cleanCurS, 1, true) then
+            return true
+        end
+        return false
+    end
+
+    local zoneCache = {}
+    local function getBestZoneForItem(itemName)
+        if not itemName then return nil end
+        local itemLower = itemName:lower()
+        if zoneCache[itemLower] ~= nil then
+            return zoneCache[itemLower] == "nil" and nil or zoneCache[itemLower]
+        end
+
+        local function saveAndReturnZone(zone)
+            zoneCache[itemLower] = zone or "nil"
+            return zone
+        end
+        
+        -- 1. Try to search game ReplicatedStorage modules for data
+        for _, module in ipairs(ReplicatedStorage:GetDescendants()) do
+            if module:IsA("ModuleScript") and (module.Name:lower():find("ore") or module.Name:lower():find("mineral") or module.Name:lower():find("resource") or module.Name:lower():find("item")) then
+                local ok, data = pcall(require, module)
+                if ok and type(data) == "table" then
+                    for k, v in pairs(data) do
+                        if type(k) == "string" and k:lower() == itemLower then
+                            if type(v) == "table" then
+                                local zone = v.BestFoundIn or v.Location or v.Area or v.Region or v.Zone
+                                if zone then return saveAndReturnZone(tostring(zone)) end
+                            end
+                        end
+                        if type(v) == "table" then
+                            local name = v.Name or v.ItemName or v.OreName
+                            if type(name) == "string" and name:lower() == itemLower then
+                                local zone = v.BestFoundIn or v.Location or v.Area or v.Region or v.Zone
+                                if zone then return saveAndReturnZone(tostring(zone)) end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- 2. Try to search inside the Collection UI itself!
+        local playerGui = Player:FindFirstChild("PlayerGui")
+        if playerGui then
+            for _, gui in ipairs(playerGui:GetDescendants()) do
+                if gui:IsA("TextLabel") and gui.Text ~= "" then
+                    local txt = gui.Text:lower()
+                    if txt:find("best%s*found%s*in") or txt:find("found%s*in") then
+                        -- Check if a sibling or parent relates to this item
+                        -- Or we can just parse the UI text if we find it
+                    end
+                end
+            end
+        end
+        
+        -- 3. Hardcoded comprehensive mappings for all Prospecting ores/minerals!
+        local masterItemMap = {
+            -- Common
+            ["amethyst"] = "Rubble Creek",
+            ["blue ice"] = "Frozen Peak",
+            ["copper"] = "Volcano",
+            ["gold"] = "Fortune River",
+            ["obsidian"] = "Volcano",
+            ["pearl"] = "Sunset Beach",
+            ["platinum"] = "Rubble Creek",
+            ["pyrite"] = "Rubble Creek",
+            ["seashell"] = "Sunset Beach",
+            ["silver"] = "Sunset Beach",
+            ["sand"] = "Rubble Creek",
+            ["dollar"] = "Fortune River",
+            ["crystal"] = "Crystal Cavern",
+
+            -- Uncommon
+            ["coral"] = "Sunset Beach",
+            ["electrum"] = "Rotwood Swamp",
+            ["glowberry"] = "Deeproot Spring",
+            ["malachite"] = "Overgrown Grotto",
+            ["neodymium"] = "Rubble Creek",
+            ["nickel"] = "Starfall River",
+            ["rock candy"] = "Haunted Creek",
+            ["sapphire"] = "Frozen Peak",
+            ["smoky quartz"] = "Sunset Beach",
+            ["titanium"] = "Rubble Creek",
+            ["topaz"] = "Rubble Creek",
+            ["zircon"] = "Volcano",
+
+            -- Rare
+            ["amber"] = "Deeproot Spring",
+            ["azuralite"] = "Overgrown Grotto",
+            ["candy cane"] = "North Pole",
+            ["diopside"] = "Rotwood Swamp",
+            ["glacial quartz"] = "Frozen Peak",
+            ["gloomberry"] = "Abyssal Depths",
+            ["jade"] = "Fortune River",
+            ["lapis lazuli"] = "Frozen Peak",
+            ["meteoric iron"] = "Rubble Creek",
+            ["onyx"] = "Sunset Beach",
+            ["peridot"] = "Volcano",
+            ["pyrelith"] = "Volcano",
+            ["ruby"] = "Fortune River",
+            ["silver clamshell"] = "Sunset Beach",
+
+            -- Epic
+            ["ammonite fossil"] = "Windswept Beach",
+            ["ashvein"] = "Sunset Beach",
+            ["aurorite"] = "Fortune River",
+            ["bone"] = "Rotwood Swamp",
+            ["borealite"] = "Frozen Peak",
+            ["cobalt"] = "Rotwood Swamp",
+            ["emerald"] = "Fortune River",
+            ["glowmoss"] = "Deeproot Spring",
+            ["golden pearl"] = "Sunset Beach",
+            ["iridium"] = "Rubble Creek",
+            ["lightshard"] = "Deeproot Spring",
+            ["mercury"] = "Rotwood Swamp",
+            ["meteoric gold"] = "Starfall River",
+            ["moonstone"] = "Sunset Beach",
+            ["opal"] = "Sunset Beach",
+            ["osmium"] = "Rubble Creek",
+            ["pyronium"] = "Volcano",
+
+            -- Legendary
+            ["aetherite"] = "Fortune River",
+            ["aquamarine"] = "Frozen Peak",
+            ["bismuth"] = "Rotwood Swamp",
+            ["catseye"] = "Volcano",
+            ["cinnabar"] = "Volcano",
+            ["depleted shard"] = "Starfall River",
+            ["diamond"] = "Frozen Peak",
+            ["dragon bone"] = "Volcano",
+            ["fire opal"] = "Volcano",
+            ["firefly stone"] = "Deeproot Spring",
+            ["gloomcap"] = "Fungal Marsh",
+            ["lost soul"] = "Haunted Creek",
+            ["luminum"] = "Sunset Beach",
+            ["nautilus shell"] = "Seashell Beach",
+            ["palladium"] = "Fortune River",
+            ["peppermint prism"] = "North Pole",
+            ["radium"] = "Starfall River",
+            ["rose gold"] = "Volcano",
+            ["specterite"] = "Rotwood Swamp",
+            ["starshine"] = "Deeproot Spring",
+            ["tourmaline"] = "Frozen Peak",
+            ["uranium"] = "Fortune River",
+            ["volcanic key"] = "Volcano",
+
+            -- Mythic
+            ["aetherium"] = "Starfall River",
+            ["chrysoberyl"] = "Overgrown Grotto",
+            ["flarebloom"] = "Volcano",
+            ["frostshard"] = "Frozen Peak",
+            ["inferlume"] = "Volcano",
+            ["mythril"] = "Frozen Peak",
+            ["painite"] = "Fortune River",
+            ["pink diamond"] = "Fortune River",
+            ["prismara"] = "Overgrown Grotto",
+            ["radiant gold"] = "Deeproot Spring",
+            ["red beryl"] = "Fungal Marsh",
+            ["star garnet"] = "Rotwood Swamp",
+            ["sunstone"] = "Starfall River",
+            ["vortessence"] = "Windswept Beach",
+            ["volcanic core"] = "Volcano",
+
+            -- Exotic
+            ["adamantine"] = "Enchanted Ruins",
+            ["astral spore"] = "Fungal Marsh",
+            ["bloodstone"] = "Rotwood Swamp",
+            ["celestium"] = "Astral Caverns",
+            ["cryonic artifact"] = "Frozen Peak",
+            ["cryonic"] = "Frozen Peak",
+            ["dinosaur skull"] = "Volcano",
+            ["eternium"] = "Timelocked Sanctuary",
+            ["forgotten totem"] = "Seashell Beach",
+            ["north star"] = "North Pole",
+            ["pumpkin soul"] = "Haunted Creek",
+            ["singularium"] = "Starfall River",
+            ["starpiercer"] = "Meteor Valley",
+            ["umbrite"] = "Abyssal Depths",
+            ["vineheart"] = "Deeproot Spring",
+            ["voidstone"] = "The Void",
+        }
+        
+        for k, zone in pairs(masterItemMap) do
+            if itemLower:find(k, 1, true) or k:find(itemLower, 1, true) then
+                return saveAndReturnZone(zone)
+            end
+        end
+        
+        return saveAndReturnZone(nil)
     end
 
     local function isDredgeMaster(desc, text)
@@ -14206,9 +14588,26 @@ do
         return false
     end
 
+    local lastQuestScan = 0
+    local cachedItemVal, cachedCurVal, cachedTotVal, cachedCandidatesVal = nil, nil, nil, nil
+
     local function getActiveQuestDetails()
+        local now = os.clock()
+        if (now - lastQuestScan) < 1.5 then
+            return cachedItemVal, cachedCurVal, cachedTotVal, cachedCandidatesVal
+        end
+        lastQuestScan = now
+
+        local function saveAndReturn(item, cur, tot, candidates)
+            cachedItemVal = item
+            cachedCurVal = cur
+            cachedTotVal = tot
+            cachedCandidatesVal = candidates
+            return item, cur, tot, candidates
+        end
+        
         local playerGui = Player:FindFirstChild("PlayerGui")
-        if not playerGui then return nil, nil, nil end
+        if not playerGui then return saveAndReturn(nil, nil, nil, nil) end
         
         local candidates = {}
         local seenItems = {}
@@ -14314,16 +14713,14 @@ do
             
             if #incomplete > 0 then
                 local best = incomplete[1]
-                print("[AutoQuest] Selected Incomplete Task: '" .. tostring(best.text) .. "' -> Parsed Item: '" .. tostring(best.item) .. "' (" .. tostring(best.cur) .. "/" .. tostring(best.tot) .. ")")
-                return best.item, best.cur, best.tot, candidates
+                return saveAndReturn(best.item, best.cur, best.tot, candidates)
             else
                 local best = complete[1]
-                print("[AutoQuest] All tasks completed! Selected: '" .. tostring(best.text) .. "' -> Parsed Item: '" .. tostring(best.item) .. "' (" .. tostring(best.cur) .. "/" .. tostring(best.tot) .. ")")
-                return best.item, best.cur, best.tot, candidates
+                return saveAndReturn(best.item, best.cur, best.tot, candidates)
             end
         end
         
-        return nil, nil, nil, nil
+        return saveAndReturn(nil, nil, nil, nil)
     end
 
     local function processDialogue()
@@ -14331,48 +14728,54 @@ do
             local playerGui = Player:FindFirstChild("PlayerGui")
             if not playerGui then return end
             
-            for _, child in ipairs(playerGui:GetChildren()) do
-                if child:IsA("ScreenGui") and (child.Name:lower():find("dialog") or child.Name:lower():find("quest") or child.Name:lower():find("chat") or child.Name:lower():find("npc")) then
-                    for _, desc in ipairs(child:GetDescendants()) do
-                        local isClickable = desc:IsA("TextButton") or desc:IsA("ImageButton")
-                        local textObj = nil
-                        if desc:IsA("TextLabel") then
-                            textObj = desc
-                        elseif desc:IsA("TextButton") then
-                            textObj = desc
-                        end
-                        
-                        if textObj and textObj.Text ~= "" and textObj.Visible then
-                            local txt = textObj.Text:lower()
-                            if txt:find("accept") or txt:find("yes") or txt:find("sure") or txt:find("complete") or txt:find("claim") or txt:find("turn in") or txt:find("ok") or txt:find("next") or txt:find("confirm") then
-                                local button = nil
-                                if isClickable then
-                                    button = desc
-                                else
-                                    local p = desc.Parent
-                                    while p and p ~= child do
-                                        if p:IsA("TextButton") or p:IsA("ImageButton") then
-                                            button = p
-                                            break
+            for i = 1, 10 do
+                local processed = false
+                for _, child in ipairs(playerGui:GetChildren()) do
+                    if child:IsA("ScreenGui") and child.Enabled and (child.Name:lower():find("dialog") or child.Name:lower():find("chat") or child.Name:lower():find("npc")) then
+                        for _, desc in ipairs(child:GetDescendants()) do
+                            local isClickable = desc:IsA("TextButton") or desc:IsA("ImageButton")
+                            local textObj = nil
+                            if desc:IsA("TextLabel") then
+                                textObj = desc
+                            elseif desc:IsA("TextButton") then
+                                textObj = desc
+                            end
+                            
+                            if textObj and textObj.Text ~= "" and textObj.Visible then
+                                local txt = textObj.Text:lower()
+                                if txt:find("accept") or txt:find("yes") or txt:find("sure") or txt:find("complete") or txt:find("claim") or txt:find("turn in") or txt:find("ok") or txt:find("next") or txt:find("confirm") or txt:find("quest") or txt:find("deliver") or txt:find("dialog") or txt:find("give") or txt:find("talk") or txt:find("interact") or txt:find("close") or txt:find("exit") or txt:find("bye") or txt:find("leave") then
+                                    local button = nil
+                                    if isClickable then
+                                        button = desc
+                                    else
+                                        local p = desc.Parent
+                                        while p and p ~= child do
+                                            if p:IsA("TextButton") or p:IsA("ImageButton") then
+                                                button = p
+                                                break
+                                            end
+                                            p = p.Parent
                                         end
-                                        p = p.Parent
                                     end
-                                end
-                                
-                                if button and button.Visible then
-                                    pcall(function()
-                                        if firesignal then
-                                            firesignal(button.MouseButton1Click)
-                                            firesignal(button.Activated)
-                                        end
-                                        button:Activate()
-                                    end)
-                                    task.wait(0.2)
+                                    
+                                    if button and button.Visible then
+                                        pcall(function()
+                                            if firesignal then
+                                                firesignal(button.MouseButton1Click)
+                                                firesignal(button.Activated)
+                                            end
+                                            button:Activate()
+                                        end)
+                                        processed = true
+                                        break
+                                    end
                                 end
                             end
                         end
                     end
+                    if processed then break end
                 end
+                task.wait(0.3)
             end
         end)
     end
@@ -14392,8 +14795,15 @@ do
             while running do
                 local item, cur, tot, candidates = getActiveQuestDetails()
                 
-                if not item or (cur and tot and cur >= tot) then
-                    local targetStr = item and (item .. " (Complete!)") or "No Active Quest"
+                if not item or (cur and tot and cur >= tot) or isDialogueQuest(item) then
+                    local targetStr = item
+                    if isDialogueQuest(item) then
+                        targetStr = item
+                    elseif item then
+                        targetStr = item .. " (Complete!)"
+                    else
+                        targetStr = "No Active Quest"
+                    end
                     
                     local uiLines = {
                         "Status: Teleporting to NPC",
@@ -14469,216 +14879,251 @@ do
                     end
                 else
                     -- We have a quest and need more items!
-                    local targetObj = findQuestTarget(item)
-                    local areaMatch = false
-                    local waypoint = nil
-                    
-                    if targetObj then
-                        areaMatch = true
-                    else
-                        -- Fallback waypoint logic
-                        local itemLower = item:lower()
-                        for key, wp in pairs(ItemToWaypoint) do
-                            if itemLower:find(key) then
-                                waypoint = wp
-                                break
-                            end
-                        end
+                    if State.Quest.autoFarm then
+                        local targetObj = findQuestTarget(item)
+                        local areaMatch = false
+                        local waypoint = nil
                         
-                        waypoint = waypoint or "Fortune River"
-                        
-                        -- Match waypoint case-insensitively and partially against active game waypoints
-                        if WaypointModule and WaypointModule.getList then
-                            local list = WaypointModule.getList()
-                            local lowerWP = waypoint:lower()
-                            for _, wpName in ipairs(list) do
-                                local lowerName = wpName:lower()
-                                if lowerName:find(lowerWP, 1, true) or lowerWP:find(lowerName, 1, true) then
-                                    waypoint = wpName
-                                    break
-                                end
-                            end
-                        end
-                        
-                        local currentArea = Player:GetAttribute("CurrentArea") or ""
-                        areaMatch = string.find(currentArea:lower(), waypoint:lower())
-                    end
-                    
-                    if not areaMatch then
-                        -- Stop Auto Farm before teleporting
-                        AutoFarmModule.stop()
-                        
-                        local uiLines = {
-                            "Status: Traveling to Zone",
-                            "Target Zone: " .. (waypoint or "Unknown") .. " (for " .. item .. ")"
-                        }
-                        if candidates and #candidates > 0 then
-                            table.insert(uiLines, "Quest Tasks:")
-                            for _, c in ipairs(candidates) do
-                                local statusStr = c.cur >= c.tot and "Completed" or (c.item == item and "Traveling" or "Pending")
-                                table.insert(uiLines, string.format("- %s: %d/%d (%s)", c.item, c.cur, c.tot, statusStr))
-                            end
-                        end
-                        updateUI(uiLines)
-                        Utility.createNotification("Traveling to " .. (waypoint or "Target") .. " for " .. item .. "...", 4)
-                        if WaypointModule and WaypointModule.teleport and waypoint then
-                            WaypointModule.teleport(waypoint)
-                            task.wait(3.0)
+                        if targetObj then
+                            areaMatch = true
                         else
-                            Utility.createNotification("Waypoint teleport failed or not configured!", 3)
+                            -- Fallback waypoint logic using robust zone mapping
+                            waypoint = getBestZoneForItem(item) or "Fortune River"
+                            
+                            -- Match waypoint case-insensitively and partially against active game waypoints
+                            if WaypointModule and WaypointModule.getList then
+                                local list = WaypointModule.getList()
+                                local lowerWP = waypoint:lower()
+                                local foundExact = false
+                                for _, wpName in ipairs(list) do
+                                    if wpName:lower() == lowerWP then
+                                        waypoint = wpName
+                                        foundExact = true
+                                        break
+                                    end
+                                end
+                                if not foundExact then
+                                    for _, wpName in ipairs(list) do
+                                        local lowerName = wpName:lower()
+                                        if lowerName:find(lowerWP, 1, true) or lowerWP:find(lowerName, 1, true) then
+                                            waypoint = wpName
+                                            break
+                                        end
+                                    end
+                                end
+                            end
+                            
+                            local currentArea = Player:GetAttribute("CurrentArea") or ""
+                            areaMatch = isAreaMatch(currentArea, waypoint)
                         end
-                    else
-                        -- Stop manual Auto Farm to avoid conflicting movements
-                        AutoFarmModule.stop()
                         
-                        State.Quest.isFarming = true
-                        
-                        -- Inner loop for digging and washing dynamically
-                        while running and State.Quest.autoQuest and areaMatch and not (not item or (cur and tot and cur >= tot)) do
-                            if not State.Quest.autoFarm then
-                                if State.AutoFarm.locked then
-                                    CharacterLock.unlock()
-                                    State.AutoFarm.locked = false
-                                end
-                                updateUI({
-                                    "Status: Auto Farm Paused",
-                                    "Active Target: " .. item .. " (" .. tostring(cur) .. "/" .. tostring(tot) .. ")"
-                                })
-                                task.wait(1.0)
-                            elseif State.AutoFarm.interrupted then
-                                if State.AutoFarm.locked then
-                                    CharacterLock.unlock()
-                                    State.AutoFarm.locked = false
-                                end
-                                while State.AutoFarm.interrupted and running and State.Quest.autoQuest and State.Quest.autoFarm do
-                                    task.wait(0.1)
-                                end
-                            else
-                                -- Locate/scan target dynamically in workspace if workspace-aware
-                                local tObj = findQuestTarget(item)
-                                local tPos = nil
-                                if tObj then
-                                    if tObj:IsA("BasePart") then
-                                        tPos = tObj.Position
-                                    elseif tObj:IsA("Model") then
-                                        tPos = tObj.PrimaryPart and tObj.PrimaryPart.Position or tObj:GetPivot().Position
-                                    end
-                                end
-
-                                local char = Player.Character
-                                local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
-                                
-                                if playerHrp then
-                                    if tPos then
-                                        -- Move character close to the object
-                                        if (playerHrp.Position - tPos).Magnitude > 30 then
-                                            Utility.createNotification("Moving close to quest target mineral...", 3)
-                                            playerHrp.CFrame = CFrame.new(tPos + Vector3.new(0, 3, 0))
-                                            task.wait(0.5)
-                                        end
-                                        
-                                        -- Scan region pos around object position
-                                        local depositCF = scanRegionPos(tPos, "Deposit")
-                                        local waterCF = scanRegionPos(tPos, "Water")
-                                        if depositCF and waterCF then
-                                            State.AutoFarm.sandCFrame = depositCF
-                                            State.AutoFarm.waterCFrame = waterCF
-                                        end
-                                    else
-                                        -- Fallback: Scan around player position
-                                        local depositCF = scanRegionPos(playerHrp.Position, "Deposit")
-                                        local waterCF = scanRegionPos(playerHrp.Position, "Water")
-                                        if depositCF and waterCF then
-                                            State.AutoFarm.sandCFrame = depositCF
-                                            State.AutoFarm.waterCFrame = waterCF
-                                        end
-                                    end
-                                    
-                                    if State.AutoFarm.sandCFrame and State.AutoFarm.waterCFrame then
-                                        local acquired = TaskManager:requestTask("AutoFarm", 1)
-                                        if acquired then
-                                            local hasTurn = TaskManager:waitForTurn("AutoFarm", 5)
-                                            if hasTurn then
-                                                local started = TaskManager:startTask("AutoFarm")
-                                                if started then
-                                                    local panStatus = PanModule.getStatus()
-                                                    if panStatus then
-                                                        AutoFarmModule.checkAndDoSell()
-                                                        
-                                                        if panStatus.isFull then
-                                                            -- Wash
-                                                            AutoFarmModule.performTask("MovingToWater", "WashPan", State.AutoFarm.waterCFrame, "Wash", "Water")
-                                                        else
-                                                            -- Dig
-                                                            AutoFarmModule.performTask("MovingToSand", "DigSand", State.AutoFarm.sandCFrame, "Dig", "Deposit")
-                                                        end
-                                                    end
-                                                    TaskManager:finishTask("AutoFarm")
-                                                end
-                                            end
-                                        end
-                                    else
-                                        if State.AutoFarm.locked then
-                                            CharacterLock.unlock()
-                                            State.AutoFarm.locked = false
-                                        end
-                                        updateUI({
-                                            "Status: Waiting for Deposit/Water",
-                                            "Active Target: " .. item
-                                        })
-                                        Utility.createNotification("Waiting for deposit/water around target...", 3)
-                                        task.wait(1.5)
-                                    end
-                                else
-                                    task.wait(0.5)
-                                end
-                            end
+                        if not areaMatch then
+                            -- Stop Auto Farm before teleporting
+                            AutoFarmModule.stop()
                             
-                            task.wait(0.01)
-                            
-                            -- Re-evaluate quest status and area/target match
-                            item, cur, tot, candidates = getActiveQuestDetails()
-                            
-                            -- Update area match or target presence
-                            if item then
-                                tObj = findQuestTarget(item)
-                                if tObj then
-                                    areaMatch = true
-                                else
-                                    if waypoint then
-                                        currentArea = Player:GetAttribute("CurrentArea") or ""
-                                        areaMatch = string.find(currentArea:lower(), waypoint:lower())
-                                    else
-                                        areaMatch = false
-                                    end
-                                end
-                            else
-                                areaMatch = false
-                            end
-                            
-                            -- Sync status UI
                             local uiLines = {
-                                "Status: Farming Quest Items",
-                                "Active Target: " .. (item or "None") .. " (" .. tostring(cur or 0) .. "/" .. tostring(tot or 0) .. ")"
+                                "Status: Traveling to Zone",
+                                "Target Zone: " .. (waypoint or "Unknown") .. " (for " .. item .. ")"
                             }
                             if candidates and #candidates > 0 then
-                                table.insert(uiLines, "All Quest Tasks:")
+                                table.insert(uiLines, "Quest Tasks:")
                                 for _, c in ipairs(candidates) do
-                                    local statusStr = c.cur >= c.tot and "Completed" or (c.item == item and "Farming" or "Pending")
+                                    local statusStr = c.cur >= c.tot and "Completed" or (c.item == item and "Traveling" or "Pending")
                                     table.insert(uiLines, string.format("- %s: %d/%d (%s)", c.item, c.cur, c.tot, statusStr))
                                 end
                             end
                             updateUI(uiLines)
+                            Utility.createNotification("Traveling to " .. (waypoint or "Target") .. " for " .. item .. "...", 4)
+                            if WaypointModule and WaypointModule.teleport and waypoint then
+                                WaypointModule.teleport(waypoint)
+                                task.wait(3.0)
+                            else
+                                Utility.createNotification("Waypoint teleport failed or not configured!", 3)
+                            end
+                        else
+                            -- Stop manual Auto Farm to avoid conflicting movements
+                            AutoFarmModule.stop()
+                            
+                            State.Quest.isFarming = true
+                            
+                            -- Inner loop for digging and washing dynamically
+                            while running and State.Quest.autoQuest and State.Quest.autoFarm and areaMatch and not (not item or (cur and tot and cur >= tot) or isDialogueQuest(item)) do
+                                if State.AutoFarm.interrupted then
+                                    if State.AutoFarm.locked then
+                                        CharacterLock.unlock()
+                                        State.AutoFarm.locked = false
+                                    end
+                                    while State.AutoFarm.interrupted and running and State.Quest.autoQuest and State.Quest.autoFarm do
+                                        task.wait(0.1)
+                                    end
+                                else
+                                    -- Locate/scan target dynamically in workspace if workspace-aware
+                                    local tObj = findQuestTarget(item)
+                                    local tPos = nil
+                                    if tObj then
+                                        if tObj:IsA("BasePart") then
+                                            tPos = tObj.Position
+                                        elseif tObj:IsA("Model") then
+                                            tPos = tObj.PrimaryPart and tObj.PrimaryPart.Position or tObj:GetPivot().Position
+                                        end
+                                    end
+
+                                    local char = Player.Character
+                                    local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+                                    
+                                    if playerHrp then
+                                        local depositCF = nil
+                                        local waterCF = nil
+                                        
+                                        if tPos then
+                                            -- Detect around the quest mineral's position (finding water first, then sand closest to the water)
+                                            waterCF = scanRegionPos(tPos, "Water")
+                                            if waterCF then
+                                                depositCF = scanRegionPos(waterCF.Position, "Deposit")
+                                            else
+                                                depositCF = scanRegionPos(tPos, "Deposit")
+                                            end
+                                            
+                                            if depositCF and waterCF then
+                                                State.AutoFarm.sandCFrame = depositCF
+                                                State.AutoFarm.waterCFrame = waterCF
+                                                
+                                                -- Move character close to the object now that both are confirmed
+                                                local isNearFarmingSpot = false
+                                                if State.AutoFarm.sandCFrame and (playerHrp.Position - State.AutoFarm.sandCFrame.Position).Magnitude <= 25 then
+                                                    isNearFarmingSpot = true
+                                                end
+                                                if State.AutoFarm.waterCFrame and (playerHrp.Position - State.AutoFarm.waterCFrame.Position).Magnitude <= 25 then
+                                                    isNearFarmingSpot = true
+                                                end
+                                                
+                                                if not isNearFarmingSpot and (playerHrp.Position - tPos).Magnitude > 15 then
+                                                    Utility.createNotification("Quest mineral with sand & water found! Teleporting...", 3)
+                                                    playerHrp.CFrame = CFrame.new(tPos + Vector3.new(0, 3, 0))
+                                                    task.wait(0.5)
+                                                end
+                                            end
+                                        else
+                                            -- Fallback: Scan around player position (when mineral does not spawn as a specific model)
+                                            waterCF = scanRegionPos(playerHrp.Position, "Water")
+                                            if waterCF then
+                                                depositCF = scanRegionPos(waterCF.Position, "Deposit")
+                                            else
+                                                depositCF = scanRegionPos(playerHrp.Position, "Deposit")
+                                            end
+                                            if depositCF and waterCF then
+                                                State.AutoFarm.sandCFrame = depositCF
+                                                State.AutoFarm.waterCFrame = waterCF
+                                            end
+                                        end
+                                        
+                                        if State.AutoFarm.sandCFrame and State.AutoFarm.waterCFrame then
+                                            local acquired = TaskManager:requestTask("AutoFarm", 1)
+                                            if acquired then
+                                                local hasTurn = TaskManager:waitForTurn("AutoFarm", 5)
+                                                if hasTurn then
+                                                    local started = TaskManager:startTask("AutoFarm")
+                                                    if started then
+                                                        local panStatus = PanModule.getStatus()
+                                                        if panStatus then
+                                                            AutoFarmModule.checkAndDoSell()
+                                                            
+                                                            if panStatus.isFull then
+                                                                -- Wash
+                                                                AutoFarmModule.performTask("MovingToWater", "WashPan", State.AutoFarm.waterCFrame, "Wash", "Water")
+                                                            else
+                                                                -- Dig
+                                                                AutoFarmModule.performTask("MovingToSand", "DigSand", State.AutoFarm.sandCFrame, "Dig", "Deposit")
+                                                            end
+                                                        end
+                                                        TaskManager:finishTask("AutoFarm")
+                                                    end
+                                                end
+                                            end
+                                        else
+                                            if State.AutoFarm.locked then
+                                                CharacterLock.unlock()
+                                                State.AutoFarm.locked = false
+                                            end
+                                            updateUI({
+                                                "Status: Waiting for Deposit/Water",
+                                                "Active Target: " .. item
+                                            })
+                                            Utility.createNotification("Waiting for deposit/water around target...", 3)
+                                            task.wait(1.5)
+                                        end
+                                    else
+                                        task.wait(0.5)
+                                    end
+                                end
+                                
+                                task.wait(0.5)
+                                
+                                -- Re-evaluate quest status and area/target match
+                                item, cur, tot, candidates = getActiveQuestDetails()
+                                
+                                -- Update area match or target presence
+                                if item then
+                                    tObj = findQuestTarget(item)
+                                    if tObj then
+                                        areaMatch = true
+                                    else
+                                        if waypoint then
+                                            currentArea = Player:GetAttribute("CurrentArea") or ""
+                                            areaMatch = isAreaMatch(currentArea, waypoint)
+                                        else
+                                            areaMatch = false
+                                        end
+                                    end
+                                else
+                                    areaMatch = false
+                                end
+                                
+                                -- Sync status UI
+                                local uiLines = {
+                                    "Status: Farming Quest Items",
+                                    "Active Target: " .. (item or "None") .. " (" .. tostring(cur or 0) .. "/" .. tostring(tot or 0) .. ")"
+                                }
+                                if candidates and #candidates > 0 then
+                                    table.insert(uiLines, "All Quest Tasks:")
+                                    for _, c in ipairs(candidates) do
+                                        local statusStr = c.cur >= c.tot and "Completed" or (c.item == item and "Farming" or "Pending")
+                                        table.insert(uiLines, string.format("- %s: %d/%d (%s)", c.item, c.cur, c.tot, statusStr))
+                                    end
+                                end
+                                updateUI(uiLines)
+                            end
+                            
+                            State.Quest.isFarming = false
+                            if State.AutoFarm.locked then
+                                CharacterLock.unlock()
+                                State.AutoFarm.locked = false
+                            end
                         end
-                        
-                        State.Quest.isFarming = false
-                        if State.AutoFarm.locked then
-                            CharacterLock.unlock()
-                            State.AutoFarm.locked = false
-                        end
+                    else
+                        updateUI({
+                            "Status: Auto Farm (Quest) is Disabled",
+                            "Active Target: " .. item .. " (" .. tostring(cur) .. "/" .. tostring(tot) .. ")"
+                        })
+                        task.wait(1.0)
                     end
                 end
-                task.wait(State.Quest.interval or 10)
+                local waitTime = State.Quest.interval or 10
+                if not item or (cur and tot and cur >= tot) or isDialogueQuest(item) then
+                    waitTime = 3
+                end
+                local slept = 0
+                State.Quest.dirty = false
+                local lastItem, lastCur, lastTot = item, cur, tot
+                while running and slept < waitTime and not State.Quest.dirty do
+                    task.wait(1.0)
+                    slept = slept + 1.0
+                    local testItem, testCur, testTot = getActiveQuestDetails()
+                    if testItem ~= lastItem or testCur ~= lastCur or testTot ~= lastTot then
+                        State.Quest.dirty = true
+                    end
+                end
+                State.Quest.dirty = false
             end
         end)
     end
@@ -15009,6 +15454,7 @@ local function initializeMainTab()
 
     EngProject:CreateToggle(AutoQuestSection.Container, "Enable Auto Quest (Dredge Master)", false, function(state)
         State.Quest.autoQuest = state
+        State.Quest.dirty = true
         if state then
             AutoQuestModule.start()
         else
@@ -15016,8 +15462,34 @@ local function initializeMainTab()
         end
     end)
 
-    EngProject:CreateToggle(AutoQuestSection.Container, "Enable Auto Farm (Quest)", true, function(state)
-        State.Quest.autoFarm = state
+    EngProject:CreateButton(AutoQuestSection.Container, "Start Auto Farm (Quest)", function()
+        State.Quest.autoFarm = true
+        State.Quest.dirty = true
+        EngProject:CreateNotification({
+            Type = "Success",
+            Title = "Auto Farm (Quest) Started",
+            Description = "Farming for quest items has been enabled.",
+            Duration = 3
+        })
+    end)
+
+    EngProject:CreateButton(AutoQuestSection.Container, "Stop Auto Farm (Quest)", function()
+        State.Quest.autoFarm = false
+        State.Quest.dirty = true
+        AutoFarmModule.stop()
+        if State.Quest.isFarming then
+            State.Quest.isFarming = false
+        end
+        if State.AutoFarm.locked then
+            CharacterLock.unlock()
+            State.AutoFarm.locked = false
+        end
+        EngProject:CreateNotification({
+            Type = "Info",
+            Title = "Auto Farm (Quest) Stopped",
+            Description = "Farming for quest items has been disabled.",
+            Duration = 3
+        })
     end)
 
     EngProject:CreateSlider(AutoQuestSection.Container, "Quest Check Interval (s)", 5, 120, State.Quest.interval, function(val)
