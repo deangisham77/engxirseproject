@@ -30,16 +30,46 @@ local ReplicatedStorage = Services.ReplicatedStorage
 local BackpackTwo     = Player:WaitForChild("BackpackTwo", 15)
 
 --// Character binding
-local Character, HumanoidRootPart, Humanoid, Movement
+local Character, LocalCharacter, HumanoidRootPart, Humanoid, Animator, WashAnimation
+local Movement = {}
 
 local function bindCharacter(char)
-    Character        = char
-    Humanoid         = char:WaitForChild("Humanoid", 10)
-    HumanoidRootPart = char:WaitForChild("HumanoidRootPart", 10)
+    if not char then return end
+    Character = char
+    Humanoid = char:WaitForChild("Humanoid", 15)
+    HumanoidRootPart = char:WaitForChild("HumanoidRootPart", 15)
+    
+    task.spawn(pcall, function()
+        local workspaceCharacters = Services.Workspace:WaitForChild("Characters", 10)
+        if workspaceCharacters then
+            LocalCharacter = workspaceCharacters:WaitForChild(Player.Name, 10)
+        end
+    end)
+    
+    task.spawn(pcall, function()
+        if Humanoid then
+            Animator = Humanoid:WaitForChild("Animator", 10)
+            if Animator then
+                local PanningAnimations = ReplicatedStorage:FindFirstChild("Assets") 
+                    and ReplicatedStorage.Assets:FindFirstChild("Animations")
+                    and ReplicatedStorage.Assets.Animations:FindFirstChild("Panning")
+                if PanningAnimations then
+                    local washAnim = PanningAnimations:FindFirstChild("Wash")
+                    if washAnim then
+                        WashAnimation = Animator:LoadAnimation(washAnim)
+                    end
+                end
+            end
+        end
+    end)
 end
 
-bindCharacter(Player.Character or Player.CharacterAdded:Wait())
-Player.CharacterAdded:Connect(bindCharacter)
+if Player.Character then
+    task.spawn(bindCharacter, Player.Character)
+end
+Player.CharacterAdded:Connect(function(char)
+    task.spawn(bindCharacter, char)
+end)
 
 --// Safe helpers
 local function safeChildren(inst)
@@ -8922,19 +8952,7 @@ local PanningAnimations = ReplicatedStorage.Assets.Animations.Panning
 local Excavations = require(ReplicatedStorage.GameInfo.Excavations)
 local CraftingRemotes = ReplicatedStorage.Remotes.Crafting
 
-local Character, LocalCharacter, HumanoidRootPart, Humanoid, Animator, WashAnimation
-
-local function bindCharacter(char)
-    Character = char
-    LocalCharacter = Characters:WaitForChild(Player.Name)
-    Humanoid = char:WaitForChild("Humanoid")
-    HumanoidRootPart = char:WaitForChild("HumanoidRootPart")
-    Animator = Humanoid:WaitForChild("Animator")
-    WashAnimation = Animator:LoadAnimation(PanningAnimations.Wash)
-end
-
-bindCharacter(Player.Character or Player.CharacterAdded:Wait())
-Player.CharacterAdded:Connect(bindCharacter)
+--// Duplicate character setup block removed (handled at the top)
 
 
 local Config = {
@@ -9068,6 +9086,7 @@ end
 
 local PanModule = {}
 do
+    local PANNING_QUALITY_VALUE = 1
     function PanModule.equipPan()
         local function findPan(container)
             for _, v in ipairs(container:GetChildren()) do
@@ -9228,7 +9247,7 @@ do
                 end)
                 task.wait(0.25)
                 pcall(function()
-                    collectScript:InvokeServer(0)
+                    collectScript:InvokeServer(PANNING_QUALITY_VALUE)
                 end)
             end
 
@@ -9244,7 +9263,7 @@ do
             end)
             task.wait(0.25)
             pcall(function()
-                collectScript:InvokeServer(0)
+                collectScript:InvokeServer(PANNING_QUALITY_VALUE)
             end)
             return "SUCCESS"
         end
@@ -9356,7 +9375,7 @@ do
     end
 end
 
-Movement = {}
+Movement = Movement or {}
 do
     function Movement.tweenToTarget(target, config)
         local player = Services.Players.LocalPlayer
@@ -14049,18 +14068,106 @@ do
         ["cryonic"] = 5, ["umbrite"] = 5, ["cryonic artifact"] = 5
     }
 
-    local function findDredgeMaster()
-        local NPCs = workspace:FindFirstChild("NPCs")
-        if NPCs then
-            for _, folder in ipairs(NPCs:GetChildren()) do
-                local dm = folder:FindFirstChild("Dredge Master") or folder:FindFirstChild("DredgeMaster")
-                if dm then
-                    return dm
+    local function findDredgeMasterNPC()
+        local targets = {"NPCs", "NPC", "Characters", "Map"}
+        local keywords = {"dredge", "dregde", "master"}
+        
+        local function checkMatch(obj)
+            if not obj:IsA("Model") and not obj:IsA("BasePart") then return false end
+            local name = obj.Name:lower()
+            for _, kw in ipairs(keywords) do
+                if name:find(kw, 1, true) then
+                    return true
                 end
             end
-            for _, desc in ipairs(NPCs:GetDescendants()) do
-                if desc.Name == "Dredge Master" or desc.Name == "DredgeMaster" then
-                    return desc
+            local attributes = {"ItemName", "OreName", "MineralName", "ResourceName", "DisplayName", "Name", "Type"}
+            for _, attr in ipairs(attributes) do
+                local val = obj:GetAttribute(attr)
+                if val then
+                    local valStr = tostring(val):lower()
+                    for _, kw in ipairs(keywords) do
+                        if valStr:find(kw, 1, true) then
+                            return true
+                        end
+                    end
+                end
+            end
+            return false
+        end
+
+        for _, containerName in ipairs(targets) do
+            local folder = workspace:FindFirstChild(containerName)
+            if folder then
+                for _, desc in ipairs(folder:GetChildren()) do
+                    if checkMatch(desc) then
+                        return desc
+                    end
+                end
+                for _, desc in ipairs(folder:GetDescendants()) do
+                    if checkMatch(desc) then
+                        return desc
+                    end
+                end
+            end
+        end
+
+        for _, desc in ipairs(workspace:GetDescendants()) do
+            if checkMatch(desc) then
+                return desc
+            end
+        end
+
+        return nil
+    end
+
+    local function getCompleteQuestRemote()
+        local paths = {
+            ReplicatedStorage:FindFirstChild("Remotes") and ReplicatedStorage.Remotes:FindFirstChild("Quest"),
+            ReplicatedStorage:FindFirstChild("RemoteEvents") and ReplicatedStorage.RemoteEvents:FindFirstChild("Quest"),
+            ReplicatedStorage:FindFirstChild("Network") and ReplicatedStorage.Network:FindFirstChild("Quest"),
+        }
+        for _, parent in ipairs(paths) do
+            if parent then
+                local remote = parent:FindFirstChild("CompleteQuest")
+                if remote then return remote end
+            end
+        end
+        for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
+            if obj.Name == "CompleteQuest" and (obj:IsA("RemoteFunction") or obj:IsA("RemoteEvent")) then
+                return obj
+            end
+        end
+        return nil
+    end
+
+    local function findQuestTarget(item)
+        if not item then return nil end
+        local query = item:lower()
+        local attributes = {"ItemName", "OreName", "MineralName", "ResourceName", "DisplayName", "Name", "Type"}
+        
+        local function isMatch(str)
+            if not str then return false end
+            local s = tostring(str):lower()
+            if s:find(query, 1, true) or query:find(s, 1, true) then
+                return true
+            end
+            local qSingular = query:gsub("s$", "")
+            local sSingular = s:gsub("s$", "")
+            if sSingular:find(qSingular, 1, true) or qSingular:find(sSingular, 1, true) then
+                return true
+            end
+            return false
+        end
+
+        for _, obj in ipairs(workspace:GetDescendants()) do
+            if obj:IsA("BasePart") or obj:IsA("Model") then
+                if isMatch(obj.Name) then
+                    return obj
+                end
+                for _, attr in ipairs(attributes) do
+                    if isMatch(obj:GetAttribute(attr)) then
+                        return obj
+                    end
                 end
             end
         end
@@ -14304,19 +14411,42 @@ do
                     -- Stop Auto Farm before talking to NPC
                     AutoFarmModule.stop()
                     
-                    local dm = findDredgeMaster()
-                    if dm and dm:FindFirstChild("HumanoidRootPart") then
-                        local hrp = dm.HumanoidRootPart
+                    local dm = findDredgeMasterNPC()
+                    if not dm then
+                        -- Waypoint Fortune River fallback if NPC not found
+                        if WaypointModule and WaypointModule.teleport then
+                            Utility.createNotification("Dredge Master NPC not found! Teleporting to Fortune River fallback...", 3)
+                            WaypointModule.teleport("Fortune River")
+                            task.wait(3.0)
+                            dm = findDredgeMasterNPC()
+                        end
+                    end
+
+                    if dm then
+                        local hrp = dm:FindFirstChild("HumanoidRootPart") or (dm:IsA("Model") and dm.PrimaryPart) or (dm:IsA("BasePart") and dm)
                         local char = Player.Character
                         local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
                         
-                        if playerHrp then
-                            Utility.createNotification("Teleporting to Dredge Master...", 3)
+                        if playerHrp and hrp then
+                            Utility.createNotification("Teleporting to Dredge Master NPC...", 3)
                             pcall(function()
                                 playerHrp.CFrame = hrp.CFrame * CFrame.new(0, 0, -3)
                             end)
                             task.wait(1.5)
                             
+                            -- Call CompleteQuest remote
+                            local remote = getCompleteQuestRemote()
+                            if remote then
+                                Utility.createNotification("Calling CompleteQuest remote...", 3)
+                                pcall(function()
+                                    if remote:IsA("RemoteFunction") then
+                                        remote:InvokeServer("")
+                                    else
+                                        remote:FireServer("")
+                                    end
+                                end)
+                            end
+
                             local prompt = dm:FindFirstChildWhichIsA("ProximityPrompt", true) or hrp:FindFirstChildWhichIsA("ProximityPrompt", true)
                             if prompt then
                                 prompt.HoldDuration = 0
@@ -14332,41 +14462,47 @@ do
                                 
                                 processDialogue()
                                 task.wait(2.0)
-                            else
-                                Utility.createNotification("ProximityPrompt not found!", 3)
                             end
                         end
                     else
-                        Utility.createNotification("Dredge Master not found!", 3)
+                        Utility.createNotification("Dredge Master NPC not found even after fallback!", 3)
                     end
                 else
                     -- We have a quest and need more items!
+                    local targetObj = findQuestTarget(item)
+                    local areaMatch = false
                     local waypoint = nil
-                    local itemLower = item:lower()
-                    for key, wp in pairs(ItemToWaypoint) do
-                        if itemLower:find(key) then
-                            waypoint = wp
-                            break
-                        end
-                    end
                     
-                    waypoint = waypoint or "Fortune River"
-                    
-                    -- Match waypoint case-insensitively and partially against active game waypoints
-                    if WaypointModule and WaypointModule.getList then
-                        local list = WaypointModule.getList()
-                        local lowerWP = waypoint:lower()
-                        for _, wpName in ipairs(list) do
-                            local lowerName = wpName:lower()
-                            if lowerName:find(lowerWP, 1, true) or lowerWP:find(lowerName, 1, true) then
-                                waypoint = wpName
+                    if targetObj then
+                        areaMatch = true
+                    else
+                        -- Fallback waypoint logic
+                        local itemLower = item:lower()
+                        for key, wp in pairs(ItemToWaypoint) do
+                            if itemLower:find(key) then
+                                waypoint = wp
                                 break
                             end
                         end
+                        
+                        waypoint = waypoint or "Fortune River"
+                        
+                        -- Match waypoint case-insensitively and partially against active game waypoints
+                        if WaypointModule and WaypointModule.getList then
+                            local list = WaypointModule.getList()
+                            local lowerWP = waypoint:lower()
+                            for _, wpName in ipairs(list) do
+                                local lowerName = wpName:lower()
+                                if lowerName:find(lowerWP, 1, true) or lowerWP:find(lowerName, 1, true) then
+                                    waypoint = wpName
+                                    break
+                                end
+                            end
+                        end
+                        
+                        local currentArea = Player:GetAttribute("CurrentArea") or ""
+                        areaMatch = string.find(currentArea:lower(), waypoint:lower())
                     end
-                    
-                    local currentArea = Player:GetAttribute("CurrentArea") or ""
-                    local areaMatch = string.find(currentArea:lower(), waypoint:lower())
                     
                     if not areaMatch then
                         -- Stop Auto Farm before teleporting
@@ -14374,7 +14510,7 @@ do
                         
                         local uiLines = {
                             "Status: Traveling to Zone",
-                            "Target Zone: " .. waypoint .. " (for " .. item .. ")"
+                            "Target Zone: " .. (waypoint or "Unknown") .. " (for " .. item .. ")"
                         }
                         if candidates and #candidates > 0 then
                             table.insert(uiLines, "Quest Tasks:")
@@ -14384,12 +14520,12 @@ do
                             end
                         end
                         updateUI(uiLines)
-                        Utility.createNotification("Traveling to " .. waypoint .. " for " .. item .. "...", 4)
-                        if WaypointModule and WaypointModule.teleport then
+                        Utility.createNotification("Traveling to " .. (waypoint or "Target") .. " for " .. item .. "...", 4)
+                        if WaypointModule and WaypointModule.teleport and waypoint then
                             WaypointModule.teleport(waypoint)
                             task.wait(3.0)
                         else
-                            Utility.createNotification("WaypointModule not found!", 3)
+                            Utility.createNotification("Waypoint teleport failed or not configured!", 3)
                         end
                     else
                         -- Stop manual Auto Farm to avoid conflicting movements
@@ -14418,28 +14554,47 @@ do
                                     task.wait(0.1)
                                 end
                             else
+                                -- Locate/scan target dynamically in workspace if workspace-aware
+                                local tObj = findQuestTarget(item)
+                                local tPos = nil
+                                if tObj then
+                                    if tObj:IsA("BasePart") then
+                                        tPos = tObj.Position
+                                    elseif tObj:IsA("Model") then
+                                        tPos = tObj.PrimaryPart and tObj.PrimaryPart.Position or tObj:GetPivot().Position
+                                    end
+                                end
+
                                 local char = Player.Character
                                 local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+                                
                                 if playerHrp then
-                                    local nearestDeposit = scanRegionPos(playerHrp.Position, "Deposit")
-                                    local nearestWater = scanRegionPos(playerHrp.Position, "Water")
-                                    
-                                    if not nearestDeposit or not nearestWater then
-                                        for attempt = 1, 3 do
-                                            task.wait(1)
-                                            char = Player.Character
-                                            playerHrp = char and char:FindFirstChild("HumanoidRootPart")
-                                            if playerHrp then
-                                                nearestDeposit = nearestDeposit or scanRegionPos(playerHrp.Position, "Deposit")
-                                                nearestWater = nearestWater or scanRegionPos(playerHrp.Position, "Water")
-                                                if nearestDeposit and nearestWater then
-                                                    break
-                                                end
-                                            end
+                                    if tPos then
+                                        -- Move character close to the object
+                                        if (playerHrp.Position - tPos).Magnitude > 30 then
+                                            Utility.createNotification("Moving close to quest target mineral...", 3)
+                                            playerHrp.CFrame = CFrame.new(tPos + Vector3.new(0, 3, 0))
+                                            task.wait(0.5)
+                                        end
+                                        
+                                        -- Scan region pos around object position
+                                        local depositCF = scanRegionPos(tPos, "Deposit")
+                                        local waterCF = scanRegionPos(tPos, "Water")
+                                        if depositCF and waterCF then
+                                            State.AutoFarm.sandCFrame = depositCF
+                                            State.AutoFarm.waterCFrame = waterCF
+                                        end
+                                    else
+                                        -- Fallback: Scan around player position
+                                        local depositCF = scanRegionPos(playerHrp.Position, "Deposit")
+                                        local waterCF = scanRegionPos(playerHrp.Position, "Water")
+                                        if depositCF and waterCF then
+                                            State.AutoFarm.sandCFrame = depositCF
+                                            State.AutoFarm.waterCFrame = waterCF
                                         end
                                     end
                                     
-                                    if nearestDeposit and nearestWater then
+                                    if State.AutoFarm.sandCFrame and State.AutoFarm.waterCFrame then
                                         local acquired = TaskManager:requestTask("AutoFarm", 1)
                                         if acquired then
                                             local hasTurn = TaskManager:waitForTurn("AutoFarm", 5)
@@ -14452,10 +14607,10 @@ do
                                                         
                                                         if panStatus.isFull then
                                                             -- Wash
-                                                            AutoFarmModule.performTask("MovingToWater", "WashPan", nearestWater, "Wash", "Water")
+                                                            AutoFarmModule.performTask("MovingToWater", "WashPan", State.AutoFarm.waterCFrame, "Wash", "Water")
                                                         else
                                                             -- Dig
-                                                            AutoFarmModule.performTask("MovingToSand", "DigSand", nearestDeposit, "Dig", "Deposit")
+                                                            AutoFarmModule.performTask("MovingToSand", "DigSand", State.AutoFarm.sandCFrame, "Dig", "Deposit")
                                                         end
                                                     end
                                                     TaskManager:finishTask("AutoFarm")
@@ -14471,7 +14626,7 @@ do
                                             "Status: Waiting for Deposit/Water",
                                             "Active Target: " .. item
                                         })
-                                        Utility.createNotification("Waiting for deposit/water in " .. waypoint .. "...", 3)
+                                        Utility.createNotification("Waiting for deposit/water around target...", 3)
                                         task.wait(1.5)
                                     end
                                 else
@@ -14481,10 +14636,25 @@ do
                             
                             task.wait(0.01)
                             
-                            -- Re-evaluate quest status and area match
+                            -- Re-evaluate quest status and area/target match
                             item, cur, tot, candidates = getActiveQuestDetails()
-                            currentArea = Player:GetAttribute("CurrentArea") or ""
-                            areaMatch = string.find(currentArea:lower(), waypoint:lower())
+                            
+                            -- Update area match or target presence
+                            if item then
+                                tObj = findQuestTarget(item)
+                                if tObj then
+                                    areaMatch = true
+                                else
+                                    if waypoint then
+                                        currentArea = Player:GetAttribute("CurrentArea") or ""
+                                        areaMatch = string.find(currentArea:lower(), waypoint:lower())
+                                    else
+                                        areaMatch = false
+                                    end
+                                end
+                            else
+                                areaMatch = false
+                            end
                             
                             -- Sync status UI
                             local uiLines = {
