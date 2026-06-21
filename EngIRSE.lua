@@ -14,7 +14,7 @@ local cloneref = cloneref or clonereference or function(instance)
 end
 
 --// Forward declared UI elements
-local questStatusUI, treasureStatusUI, geodeStatusUI, sandStatusUI, inventoryDisplay
+local questStatusUI, treasureStatusUI, geodeStatusUI, sandStatusUI, inventoryDisplay, autoFarmToggle1
 
 --// Services
 local TweenService      = cloneref(game:GetService("TweenService"))
@@ -42,13 +42,32 @@ local ReplicatedStorage = Services.ReplicatedStorage
 local BackpackTwo     = Player:WaitForChild("BackpackTwo", 15)
 local PlayerGui       = Player:WaitForChild("PlayerGui", 15)
 
---// Character binding
-local Character, HumanoidRootPart, Humanoid
+--// Map & Character binding & Animation variables
+local Map        = Services.Workspace:WaitForChild("Map", 15)
+local Characters = Services.Workspace:WaitForChild("Characters", 15)
+local PanningAnimations = ReplicatedStorage:WaitForChild("Assets", 15)
+    and ReplicatedStorage.Assets:WaitForChild("Animations", 15)
+    and ReplicatedStorage.Assets.Animations:WaitForChild("Panning", 15)
+local Excavations = require(ReplicatedStorage:WaitForChild("GameInfo", 15):WaitForChild("Excavations", 15))
+local CraftingRemotes = ReplicatedStorage:WaitForChild("Remotes", 15):WaitForChild("Crafting", 15)
+
+local Character, LocalCharacter, HumanoidRootPart, Humanoid, Animator, WashAnimation
+local TaskManager, ShoppingMart, Movement
 
 local function bindCharacter(char)
     Character        = char
     Humanoid         = char:WaitForChild("Humanoid", 10)
     HumanoidRootPart = char:WaitForChild("HumanoidRootPart", 10)
+    
+    pcall(function()
+        LocalCharacter = Characters:WaitForChild(Player.Name, 10)
+        if Humanoid then
+            Animator = Humanoid:WaitForChild("Animator", 10)
+            if Animator and PanningAnimations and PanningAnimations:FindFirstChild("Wash") then
+                WashAnimation = Animator:LoadAnimation(PanningAnimations.Wash)
+            end
+        end
+    end)
 end
 
 bindCharacter(Player.Character or Player.CharacterAdded:Wait())
@@ -102,24 +121,109 @@ local State = {
     SandTotal     = 0,
     SandTarget    = "None",
     SandDist      = 0,
+    SandLastScan  = 0,
+    SandScanRoot  = "workspace",
     SandMagnetRunning = false,
 
     DigQuality = 1,
-
     EspEnabled    = false,
 
     AutoFarm = {
         active = false,
         actionMode = "Instant",
         travelMode = "Teleport",
+        sandCFrame = nil,
+        waterCFrame = nil,
+        locked = false,
+        interrupted = false,
+        interruptReason = nil,
         running = false
+    },
+
+    Sell = {
+        mode = "Teleport",
+        type = "Auto",
+        threshold = 300,
+        delay = 60,
+        autoSell = false,
+        _lastSell = nil,
+        _scheduledSell = nil
+    },
+
+    Excavation = {
+        selected = nil,
+        data = nil,
+        autoClaim = false,
+        autoStart = false,
+        autoStartRunning = false,
+        waiting = false
     },
 
     Crafting = {
         selectedEquipment = nil,
         selectedMaterials = {},
         targetQuality = 5,
-        forceMaxQuality = true
+        forceMaxQuality = true,
+        discoveredRecipes = {},
+        autocraft = false,
+        autocraftRunning = false,
+        selectBestOres = false
+    },
+
+    ESP = {
+        Players = {},
+        Totems = {},
+        Connections = {}
+    },
+
+    Barriers = {
+        vines = false,
+        abyssalGate = false,
+        peakObstruction = false
+    },
+
+    Pan = {
+        current = 0,
+        max = 100,
+        isFull = false
+    },
+
+    Geode = {
+        currentIndex = 1,
+        autoLoopEnabled = false,
+        lastTeleportTime = 0,
+        teleportConnection = nil
+    },
+
+    Rune = {
+        currentIndex = 0,
+        autoLoopEnabled = false,
+        lastTeleportTime = 0,
+        teleportConnection = nil
+    },
+
+    Hunting = {
+        autoGeode = false,
+        autoTreasure = false,
+        autoTreasureRunning = false,
+        autoTreasurePausedFarm = false
+    },
+
+    TravelMerchant = {
+        running = false,
+        selectedItems = {},
+        useMoney = true,
+        useShard = false,
+        totalBought = 0
+    },
+
+    Summer = {
+        progress = 0,
+        quality = 0,
+        deliveryTime = 0,
+        autoAddRunning = false,
+        selectedModifiers = {},
+        selectedRarities = {}
     },
 
     -- QUEST SYSTEM - FIXED
@@ -133,7 +237,8 @@ local State = {
         questNPC = "Dredge Master",
         skipNoWaypoint = true,
         questRetries = 0,
-        maxRetries = 3
+        maxRetries = 3,
+        statusUI = nil
     }
 }
 
@@ -1271,6 +1376,25 @@ end
 
 local CraftingModule = {}
 do
+    local Modifiers = require(ReplicatedStorage.GameInfo.Modifiers)
+
+    local function getTools()
+        local tools = {}
+        local bp = getBackpack()
+        local backpack = bp and bp:GetChildren() or {}
+        for i = 1, #backpack do
+            tools[#tools + 1] = backpack[i]
+        end
+        local char = Character
+        if char then
+            local t = char:FindFirstChildOfClass("Tool")
+            if t then
+                tools[#tools + 1] = t
+            end
+        end
+        return tools
+    end
+
     function CraftingModule.selectBestMaterials(recipe)
         local selected = {}
 
@@ -1330,6 +1454,236 @@ do
         local quality = math.clamp(math.floor(totalScore / totalCount), 1, 5)
         return quality
     end
+
+    function CraftingModule.getModifierNames()
+        local t = {}
+        for k in pairs(Modifiers) do
+            t[#t + 1] = k
+        end
+        return t
+    end
+
+    function CraftingModule.getOreNames()
+        local t = {}
+        for _, obj in ipairs(ReplicatedStorage.Items.Valuables:GetChildren()) do
+            t[#t + 1] = obj.Name
+        end
+        return t
+    end
+
+    function CraftingModule.getDiscoveredRecipes()
+        local ids = {}
+        local waiting = true
+        local conn
+        conn = ReplicatedStorage.Remotes.Crafting.UpdateDiscoveredEquipment.OnClientEvent:Connect(function(data)
+            ids = data
+            waiting = false
+            conn:Disconnect()
+        end)
+        ReplicatedStorage.Remotes.Crafting.UpdateDiscoveredEquipment:FireServer()
+        local t = 0
+        while waiting and t < 5 do
+            task.wait(0.1)
+            t = t + 0.1
+        end
+
+        local recipes = {}
+        for _, item in ipairs(ReplicatedStorage.Items.Equipment:GetChildren()) do
+            local equipData = item:FindFirstChild("EquipmentData")
+            if equipData and equipData:IsA("ModuleScript") then
+                local ok, data = pcall(require, equipData)
+                if ok and data.Materials then
+                    local hidden = item:GetAttribute("Hidden")
+                    local admin = item:GetAttribute("AdminLimited")
+                    local xmas = item:GetAttribute("ChristmasLimited")
+                    local add = false
+                    if hidden then
+                        if table.find(ids, item:GetAttribute("ItemID")) then
+                            add = true
+                        end
+                    elseif not admin and not xmas then
+                        add = true
+                    end
+                    if add then
+                        recipes[#recipes + 1] = {
+                            Name = item.Name,
+                            Item = item,
+                            Data = data
+                        }
+                    end
+                end
+            end
+        end
+
+        table.sort(recipes, function(a, b)
+            return a.Name < b.Name
+        end)
+        return recipes
+    end
+
+    function CraftingModule.getOwned(materialName, minWeight)
+        local owned = {}
+        local tools = getTools()
+        for i = 1, #tools do
+            local tool = tools[i]
+            if tool.Name == materialName then
+                local d = tool:FindFirstChild("ItemData")
+                if d then
+                    local w = d:GetAttribute("Weight") or 0
+                    if w >= (minWeight or 0) then
+                        owned[#owned + 1] = tool
+                    end
+                end
+            end
+        end
+        return owned
+    end
+
+    function CraftingModule.selectBest(recipe)
+        return CraftingModule.selectBestMaterials(recipe)
+    end
+
+    function CraftingModule.buildFields(eq, selected)
+        local recipe = eq.Data
+        local fields = {}
+        local LINE = "- - - - - - - - - - - - - -"
+
+        fields[#fields + 1] = eq.Name
+        fields[#fields + 1] = {
+            Text = "Price:" .. Utility.formatPrice(recipe.Price or 0),
+            IsSubField = true
+        }
+        fields[#fields + 1] = {
+            Text = LINE,
+            IsSubField = true
+        }
+
+        local allReady = true
+        local missingCount = 0
+
+        for materialName, req in pairs(recipe.Materials) do
+            local owned = CraftingModule.getOwned(materialName, req.MinWeight)
+            local sel = selected[materialName] or {}
+            local count = 0
+            for i = 1, #sel do
+                if sel[i] and sel[i].Parent then
+                    count = count + 1
+                end
+            end
+
+            if count < req.Amount then
+                allReady = false
+                missingCount = missingCount + (req.Amount - count)
+            end
+
+            local icon = count >= req.Amount and "[+]" or "[-]"
+            local label
+            if req.MinWeight and req.MinWeight > 0 then
+                label = string.format("%s %s [+%dkg]  %d/%d  (%d owned)", icon, materialName, req.MinWeight, count,
+                    req.Amount, #owned)
+            else
+                label = string.format("%s %s  %d/%d  (%d owned)", icon, materialName, count, req.Amount, #owned)
+            end
+            fields[#fields + 1] = {
+                Text = label,
+                IsSubField = true
+            }
+        end
+
+        fields[#fields + 1] = {
+            Text = LINE,
+            IsSubField = true
+        }
+
+        if allReady then
+            local quality = CraftingModule.calculateQuality(selected, recipe)
+
+            if quality then
+                local stars = string.rep("☆", quality) .. string.rep(".", 5 - quality)
+                local qualityNames = {"Poor", "Common", "Good", "Great", "Perfect"}
+                fields[#fields + 1] = "Quality: [" .. stars .. "]  " .. qualityNames[quality]
+
+                if recipe.Stats then
+                    local ok, ItemStatsInfo = pcall(require, ReplicatedStorage.GameInfo.ItemStatsInfo)
+                    local ok2, FormatNumber = pcall(require, ReplicatedStorage.Modules.Utility.FormatNumber)
+                    if ok and ok2 then
+                        for statName, statData in pairs(recipe.Stats) do
+                            local info = ItemStatsInfo[statName]
+                            if info then
+                                local minVal = statData.Min + statData.QualityStep * (quality - 1)
+                                local maxVal = statData.Min + statData.QualityStep * quality
+                                local statText
+                                if info.Percentage then
+                                    statText = string.format("  %s: %.0f%% - %.0f%%", info.DisplayName, minVal * 100,
+                                        maxVal * 100)
+                                else
+                                    statText = string.format("  %s: %s - %s", info.DisplayName,
+                                        FormatNumber.Format(minVal), FormatNumber.Format(maxVal))
+                                end
+                                fields[#fields + 1] = {
+                                    Text = statText,
+                                    IsSubField = true
+                                }
+                            end
+                        end
+                    end
+                end
+
+                if quality < 5 then
+                    fields[#fields + 1] = {
+                        Text = "Use heavier materials for better quality",
+                        IsSubField = true
+                    }
+                else
+                    fields[#fields + 1] = {
+                        Text = "Maximum quality achieved",
+                        IsSubField = true
+                    }
+                end
+            else
+                fields[#fields + 1] = "Quality: [.....]  Unknown"
+            end
+
+            fields[#fields + 1] = {
+                Text = LINE,
+                IsSubField = true
+            }
+            fields[#fields + 1] = "Ready to craft"
+        else
+            fields[#fields + 1] = "Missing " .. missingCount .. " material" .. (missingCount == 1 and "" or "s")
+        end
+
+        return fields
+    end
+
+    function CraftingModule.canCraft(recipe, selected)
+        for materialName, req in pairs(recipe.Materials) do
+            local sel = selected[materialName] or {}
+            local count = 0
+            for i = 1, #sel do
+                if sel[i] and sel[i].Parent then
+                    count = count + 1
+                end
+            end
+            if count < req.Amount then
+                return false
+            end
+        end
+        return true
+    end
+
+    function CraftingModule.craft(equipmentItem, selected)
+        local ok, result, _, craftedItem = pcall(function()
+            return ReplicatedStorage.Remotes.Crafting.CraftEquipment:InvokeServer(equipmentItem, selected)
+        end)
+        if not ok then
+            return false, "Remote failed"
+        end
+        if not result then
+            return false, "Server rejected"
+        end
+        return true, craftedItem
+    end
 end
 
 -- ============================================================
@@ -1338,6 +1692,15 @@ end
 
 local Utility = {}
 do
+    function Utility.createNotification(content, duration)
+        EngProject:CreateNotification({
+            Type = "Default",
+            Title = "Notification",
+            Description = content or "[DEBUG] TEST",
+            Duration = duration or 5
+        })
+    end
+
     function Utility.formatPrice(price, isShardPrice)
         local symbol = isShardPrice and "ƒ" or "$"
         local suffixes = {{1e21, "Sx"}, {1e18, "Q"}, {1e15, "qd"}, {1e12, "T"}, {1e9, "B"}, {1e6, "M"}, {1e3, "K"}}
@@ -1391,6 +1754,5207 @@ local EngIRSE = {
 }
 
 getgenv().EngIRSE = EngIRSE
+
+-- ============================================================
+--  TASK MANAGER & SHOPPING MART (EMBEDDED SHIMS)
+-- ============================================================
+
+local TaskManagerMock = {
+    _currentTask = nil,
+    _nextTask = nil,
+    _subTasks = {},
+}
+function TaskManagerMock:requestTask(name, priority) return true end
+function TaskManagerMock:waitForTurn(name, timeout) return true end
+function TaskManagerMock:startTask(name) self._currentTask = name; return true end
+function TaskManagerMock:finishTask(name) if self._currentTask == name then self._currentTask = nil end end
+function TaskManagerMock:setCurrentTask(name) self._currentTask = name end
+function TaskManagerMock:getCurrentTask() return self._currentTask end
+function TaskManagerMock:setNextTask(name) self._nextTask = name end
+function TaskManagerMock:getNextTask() return self._nextTask end
+function TaskManagerMock:getMainTask() return self._currentTask end
+function TaskManagerMock:clearSubTasks() table.clear(self._subTasks) end
+function TaskManagerMock:canRun(name) return true end
+
+local ShoppingMartMock = {}
+ShoppingMartMock.__index = ShoppingMartMock
+function ShoppingMartMock.new(scale)
+    return setmetatable({}, ShoppingMartMock)
+end
+function ShoppingMartMock:Toggle()
+    pcall(function()
+        local PlayerGui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+        local keywords = {"shop", "market", "amazong", "store", "buy", "merchant", "vendor", "toko", "mall"}
+        local found = nil
+        for _, gui in ipairs(PlayerGui:GetDescendants()) do
+            if gui:IsA("ScreenGui") or gui:IsA("Frame") or gui:IsA("ScrollingFrame") then
+                local nameLower = gui.Name:lower()
+                for _, kw in ipairs(keywords) do
+                    if nameLower:find(kw) then
+                        if not nameLower:find("button") and not nameLower:find("icon") and not nameLower:find("template") and not nameLower:find("item") then
+                            found = gui
+                            break
+                        end
+                    end
+                end
+            end
+            if found then break end
+        end
+        if found then
+            if found:IsA("ScreenGui") then
+                found.Enabled = not found.Enabled
+            else
+                found.Visible = not found.Visible
+            end
+        else
+            for _, gui in ipairs(PlayerGui:GetDescendants()) do
+                if gui:IsA("ScreenGui") and not gui.Enabled and not gui.Name:find("EngProject") and not gui.Name:find("Roblox") then
+                    gui.Enabled = true
+                    return
+                end
+            end
+        end
+    end)
+end
+
+local function getStorage()
+    local registry = getgenv().__PrereqStorageRegistry
+    if not registry then
+        return nil
+    end
+
+    for k, v in pairs(getgenv()) do
+        if type(k) == "userdata" and v == true and registry[k] then
+            return k
+        end
+    end
+    return nil
+end
+
+local proxy = getStorage()
+
+if proxy then
+    local storageRegistry = getgenv().__PrereqStorageRegistry
+    local moduleRegistry = getgenv().__PrereqModuleRegistry
+    if storageRegistry and moduleRegistry then
+        local data = storageRegistry[proxy]
+        local prereqs = data and data.Prereqs
+        if prereqs and next(prereqs) then
+            local function getPrerequisite(name)
+                for p in pairs(prereqs) do
+                    local info = moduleRegistry[p]
+                    if info and info.name == name then
+                        return info.module
+                    end
+                end
+                return nil
+            end
+            TaskManager = getPrerequisite("TaskManager")
+            ShoppingMart = getPrerequisite("ShoppingMart")
+        end
+    end
+end
+
+if not TaskManager then
+    TaskManager = TaskManagerMock
+end
+if not ShoppingMart then
+    ShoppingMart = ShoppingMartMock
+end
+
+local amazong = ShoppingMart.new(EngProject.Utility:IsMobile() and 0.5 or 0.90)
+
+-- ============================================================
+--  BACKEND MODULES - GROUP A
+-- ============================================================
+
+local PanModule = {}
+do
+    function PanModule.equipPan()
+        local function findPan(container)
+            for _, v in ipairs(container:GetChildren()) do
+                if v:GetAttribute("ItemType") == "Pan" then
+                    return v
+                end
+            end
+        end
+
+        local pan = findPan(Character) or findPan(Player.Backpack) or findPan(BackpackTwo)
+        if pan then
+            ReplicatedStorage.Remotes.CustomBackpack.EquipRemote:FireServer(pan)
+            return pan
+        end
+        return nil
+    end
+
+    function PanModule.getStatus()
+        local ToolUI = PlayerGui:WaitForChild("ToolUI")
+        local FillingPan = ToolUI:WaitForChild("FillingPan")
+        local FillText = FillingPan:WaitForChild("FillText")
+
+        local function getDefaultStatus()
+            return {
+                current = 0,
+                max = 100,
+                isFull = false,
+                isEmpty = true
+            }
+        end
+
+        local function cleanAndParseNumber(raw, fallback)
+            if not raw then
+                return fallback
+            end
+            local cleaned = string.gsub(string.gsub(string.gsub(tostring(raw), ",", ""), " ", ""), "%s+", ""):lower()
+            if cleaned == "" then
+                return fallback
+            end
+            local multiplier = 1
+            if string.find(cleaned, "k") then
+                multiplier = 1000
+                cleaned = string.gsub(cleaned, "k", "")
+            elseif string.find(cleaned, "m") then
+                multiplier = 1000000
+                cleaned = string.gsub(cleaned, "m", "")
+            elseif string.find(cleaned, "b") then
+                multiplier = 1000000000
+                cleaned = string.gsub(cleaned, "b", "")
+            elseif string.find(cleaned, "t") then
+                multiplier = 1000000000000
+                cleaned = string.gsub(cleaned, "t", "")
+            end
+            local parsed = tonumber(cleaned)
+            return parsed and math.max(0, math.floor(parsed * multiplier)) or fallback
+        end
+
+        if not FillText or not FillText.ContentText then
+            return getDefaultStatus()
+        end
+
+        local contentText = tostring(FillText.ContentText)
+        if contentText == "" then
+            return getDefaultStatus()
+        end
+
+        local fillNumbers = string.split(contentText, "/")
+        if not fillNumbers or #fillNumbers < 2 then
+            return getDefaultStatus()
+        end
+
+        local current = cleanAndParseNumber(fillNumbers[1], 0)
+        local max = math.max(1, cleanAndParseNumber(fillNumbers[2], 100))
+
+        return {
+            current = current,
+            max = max,
+            isFull = current >= max,
+            isEmpty = current <= 0
+        }
+    end
+
+    function PanModule.getRegion(rootPart)
+        local PointToRegion = require(ReplicatedStorage.Modules.Location.PointToRegion)
+        local region, _ = PointToRegion.GetPanningRegion(rootPart.Position)
+        return region
+    end
+
+    function PanModule.handleAction(mode, actionType, executeToCompletion, killSwitch)
+        executeToCompletion = executeToCompletion or false
+
+        local function validatePan()
+            local pan = PanModule.equipPan()
+            local folder = pan and pan:FindFirstChild("Scripts")
+            if not folder then
+                Utility.createNotification("No Pan found.")
+                return nil
+            end
+            local scripts = {}
+            for _, child in ipairs(folder:GetChildren()) do
+                if child:IsA("RemoteFunction") or child:IsA("RemoteEvent") then
+                    scripts[child.Name] = child
+                end
+            end
+
+            if next(scripts) then
+                return scripts
+            else
+                Utility.createNotification("Pan has no scripts.")
+                return nil
+            end
+        end
+
+        local function isInValidRegion(forWhat)
+            return true
+        end
+
+        local function shakeUntilNotPanning(shakeScript, killSwitch)
+            while LocalCharacter:GetAttribute("Panning") do
+                if killSwitch and not killSwitch() then
+                    return false
+                end
+                pcall(function()
+                    shakeScript:FireServer()
+                end)
+                task.wait()
+            end
+            return true
+        end
+
+        local function fillToCompletion(collectScript)
+            local scripts = validatePan()
+            local shakeScript = scripts and scripts.Shake
+
+            while task.wait() do
+                if killSwitch and not killSwitch() then
+                    return "KILLED"
+                end
+
+                if LocalCharacter:GetAttribute("Panning") then
+                    if shakeScript and not shakeUntilNotPanning(shakeScript, killSwitch) then
+                        return "KILLED"
+                    end
+                end
+
+                local status = PanModule.getStatus()
+                if status and status.isFull then
+                    break
+                end
+
+                if not isInValidRegion("Deposit") then
+                    break
+                end
+
+                pcall(function()
+                    collectScript:InvokeServer()
+                end)
+                task.wait(0.25)
+                pcall(function()
+                    collectScript:InvokeServer(0)
+                end)
+            end
+
+            return (not killSwitch or killSwitch()) and "SUCCESS" or "KILLED"
+        end
+
+        local function executeSingle(collectScript)
+            if killSwitch and not killSwitch() then
+                return "KILLED"
+            end
+            pcall(function()
+                collectScript:InvokeServer()
+            end)
+            task.wait(0.25)
+            pcall(function()
+                collectScript:InvokeServer(0)
+            end)
+            return "SUCCESS"
+        end
+
+        local function emptyToCompletion(shakeScript)
+            while task.wait() do
+                if killSwitch and not killSwitch() then
+                    WashAnimation:Stop()
+                    return "KILLED"
+                end
+
+                if not shakeUntilNotPanning(shakeScript, killSwitch) then
+                    WashAnimation:Stop()
+                    return "KILLED"
+                end
+
+                local status = PanModule.getStatus()
+                if not status or status.isEmpty then
+                    break
+                end
+
+                pcall(function()
+                    shakeScript:FireServer()
+                end)
+            end
+
+            WashAnimation:Stop()
+            return (not killSwitch or killSwitch()) and "SUCCESS" or "KILLED"
+        end
+
+        local handlers = {
+            Dig = function()
+                if killSwitch and not killSwitch() then
+                    return "KILLED"
+                end
+
+                local scripts = validatePan()
+                if not scripts then
+                    return "FAIL"
+                end
+
+                local collectScript = scripts.Collect
+                if not collectScript then
+                    return "FAIL"
+                end
+
+                local status = PanModule.getStatus()
+                if status and status.isFull then
+                    return "SUCCESS"
+                end
+
+                if mode == "Legit" then
+                    Utility.createNotification("Legit mode is Work In Progress!")
+                    return "FAIL"
+                elseif mode == "Instant" then
+                    if executeToCompletion then
+                        return fillToCompletion(collectScript)
+                    else
+                        return executeSingle(collectScript)
+                    end
+                end
+
+                return "FAIL"
+            end,
+
+            Wash = function()
+                if killSwitch and not killSwitch() then
+                    return "KILLED"
+                end
+
+                local scripts = validatePan()
+                if not scripts then
+                    return "FAIL"
+                end
+
+                local shakeScript = scripts.Shake
+                local panScript = scripts.Pan
+
+                if not shakeScript or not panScript then
+                    return "FAIL"
+                end
+
+                local status = PanModule.getStatus()
+                if status and status.isEmpty then
+                    return "SUCCESS"
+                end
+
+                pcall(function()
+                    panScript:InvokeServer()
+                end)
+
+                return emptyToCompletion(shakeScript)
+            end
+        }
+
+        local handler = handlers[actionType]
+        if not handler then
+            Utility.createNotification("Invalid action type! Use 'Dig' or 'Wash'.")
+            return "FAIL"
+        end
+
+        local ok, result = pcall(handler)
+        if not ok then
+            warn("PanAction failed: " .. tostring(result))
+            return "FAIL"
+        end
+
+        return result or "SUCCESS"
+    end
+end
+
+Movement = {}
+do
+    function Movement.tweenToTarget(target, config)
+        local player = Services.Players.LocalPlayer
+        local character = player.Character or player.CharacterAdded:Wait()
+        local hrp = character:WaitForChild("HumanoidRootPart")
+        local humanoid = character:WaitForChild("Humanoid")
+
+        config = config or {}
+        local offset = config.Offset or Vector3.new(0, 0, 0)
+        local stopDist = config.StopDistance or 20
+        local speed = config.Speed or 24
+        local cruiseHeight = config.CruiseHeight or 25
+        local minHeight = config.MinHeight or 15
+        local maxHeight = config.MaxHeight or 100
+        local agentRadius = config.AgentRadius or 3
+        local longDistanceThreshold = config.LongDistanceThreshold or 150
+        local directFlightThreshold = config.DirectFlightThreshold or 50
+        local waypointDistance = config.WaypointDistance or 12
+        local smoothness = config.Smoothness or 0.5
+        local landingDuration = config.LandingDuration or 1.2
+        local hoverDuration = config.HoverDuration or 0.3
+        local pathTimeout = config.PathTimeout or 8
+        local maxTimeout = config.MaxTimeout or 45
+        local adaptiveHeight = config.AdaptiveHeight ~= false
+        local useDirectFlight = config.UseDirectFlight ~= false
+
+        local isActive = true
+        local waypoints = {}
+        local currentWaypointIndex = 1
+        local lastWaypointTime = tick()
+        local startTime = tick()
+
+        local isLanding = false
+        local currentHeight = cruiseHeight
+        local bg, bv, bp
+        local originalPlatformStand
+
+        local TweenService = EngProject.Utility:GetService("TweenService")
+
+        local function setNoclip(state)
+            for _, v in pairs(character:GetDescendants()) do
+                if v:IsA("BasePart") then
+                    v.CanCollide = not state
+                end
+            end
+
+            if humanoid then
+                if state then
+                    originalPlatformStand = humanoid.PlatformStand
+                    humanoid.PlatformStand = true
+                else
+                    if originalPlatformStand ~= nil then
+                        humanoid.PlatformStand = originalPlatformStand
+                    end
+                end
+            end
+        end
+
+        local function cleanup()
+            isActive = false
+            if bg then
+                bg:Destroy()
+            end
+            if bv then
+                bv:Destroy()
+            end
+            if bp then
+                bp:Destroy()
+            end
+            setNoclip(false)
+            if humanoid and originalPlatformStand ~= nil then
+                humanoid.PlatformStand = originalPlatformStand
+            end
+        end
+
+        local function toVector3(t)
+            if typeof(t) == "Vector3" then
+                return t
+            elseif typeof(t) == "Instance" and t:IsA("BasePart") then
+                return t.Position
+            elseif typeof(t) == "CFrame" then
+                return t.Position
+            elseif typeof(t) == "table" then
+                if t.Position then
+                    return t.Position
+                elseif t.X and t.Y and t.Z then
+                    return Vector3.new(t.X, t.Y, t.Z)
+                end
+            end
+            error("Invalid target type")
+        end
+
+        local function getOptimalHeight(position, targetPos)
+            if not adaptiveHeight then
+                return currentHeight
+            end
+
+            local distance = (targetPos - position).Magnitude
+            local terrainHeight = 0
+
+            local rayParams = RaycastParams.new()
+            rayParams.FilterDescendantsInstances = {character}
+            rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+
+            local result = Services.Workspace:Raycast(position, Vector3.new(0, -200, 0), rayParams)
+            if result then
+                terrainHeight = result.Position.Y
+            end
+
+            local baseHeight = math.max(minHeight, terrainHeight + 10)
+
+            if distance > longDistanceThreshold then
+                return math.min(maxHeight, baseHeight + 30)
+            elseif distance > 75 then
+                return math.min(cruiseHeight + 15, baseHeight + 20)
+            else
+                return math.min(cruiseHeight, baseHeight + 15)
+            end
+        end
+
+        local function hasObstaclesBetween(start, destination, checkHeight)
+            local direction = (destination - start)
+            local distance = direction.Magnitude
+            local unit = direction.Unit
+
+            local rayParams = RaycastParams.new()
+            rayParams.FilterDescendantsInstances = {character}
+            rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+
+            local checkPoints = math.max(3, math.floor(distance / 10))
+
+            for i = 1, checkPoints do
+                local checkPos = start + unit * (distance * i / checkPoints)
+                checkPos = Vector3.new(checkPos.X, checkPos.Y + checkHeight, checkPos.Z)
+
+                local directions = {Vector3.new(0, 0, 0), Vector3.new(agentRadius, 0, 0),
+                                    Vector3.new(-agentRadius, 0, 0), Vector3.new(0, 0, agentRadius),
+                                    Vector3.new(0, 0, -agentRadius), Vector3.new(0, agentRadius, 0),
+                                    Vector3.new(0, -agentRadius, 0)}
+
+                for _, dir in pairs(directions) do
+                    local testPos = checkPos + dir
+                    local result = Services.Workspace:Raycast(testPos, Vector3.new(0, -checkHeight - 10, 0), rayParams)
+                    if result and result.Position.Y > testPos.Y - 5 then
+                        return true
+                    end
+
+                    local ceilingResult = Services.Workspace:Raycast(testPos, Vector3.new(0, 10, 0), rayParams)
+                    if ceilingResult and ceilingResult.Position.Y < testPos.Y + 6 then
+                        return true
+                    end
+
+                    local forwardRay = Services.Workspace:Raycast(testPos, unit * 10, rayParams)
+                    if forwardRay then
+                        return true
+                    end
+                end
+            end
+
+            return false
+        end
+
+        local function canDirectFly(start, destination)
+            if not useDirectFlight then
+                return false
+            end
+
+            local distance = (destination - start).Magnitude
+            if distance > directFlightThreshold then
+                return false
+            end
+
+            return not hasObstaclesBetween(start, destination, currentHeight)
+        end
+
+        local function createPath(destination)
+            local startPos = hrp.Position
+            local targetPos = destination
+
+            currentHeight = getOptimalHeight(startPos, targetPos)
+
+            if canDirectFly(startPos, targetPos) then
+                return {{
+                    Position = startPos
+                }, {
+                    Position = Vector3.new(targetPos.X, targetPos.Y + currentHeight, targetPos.Z),
+                    Action = Enum.PathWaypointAction.Walk
+                }}
+            end
+
+            local groundStart = Vector3.new(startPos.X, startPos.Y, startPos.Z)
+            local groundTarget = Vector3.new(targetPos.X, targetPos.Y, targetPos.Z)
+
+            local path = Services.PathfindingService:CreatePath({
+                AgentRadius = agentRadius,
+                AgentHeight = 6,
+                AgentCanJump = false,
+                AgentCanClimb = false,
+                WaypointSpacing = math.max(8, waypointDistance),
+                Costs = {
+                    Danger = math.huge
+                }
+            })
+
+            local success, err = pcall(function()
+                path:ComputeAsync(groundStart, groundTarget)
+            end)
+
+            if success and path.Status == Enum.PathStatus.Success then
+                local pathWaypoints = path:GetWaypoints()
+                local modifiedWaypoints = {}
+
+                for i, waypoint in ipairs(pathWaypoints) do
+                    local elevatedPos = Vector3.new(waypoint.Position.X, waypoint.Position.Y + currentHeight,
+                        waypoint.Position.Z)
+                    table.insert(modifiedWaypoints, {
+                        Position = elevatedPos,
+                        Action = waypoint.Action
+                    })
+                end
+
+                return modifiedWaypoints
+            else
+                local direction = (targetPos - startPos)
+                local distance = direction.Magnitude
+                local unit = direction.Unit
+
+                local fallbackWaypoints = {}
+                table.insert(fallbackWaypoints, {
+                    Position = startPos,
+                    Action = Enum.PathWaypointAction.Walk
+                })
+
+                local midPoint = startPos + unit * (distance * 0.5)
+                local highMidPoint = Vector3.new(midPoint.X, midPoint.Y + currentHeight + 20, midPoint.Z)
+                table.insert(fallbackWaypoints, {
+                    Position = highMidPoint,
+                    Action = Enum.PathWaypointAction.Walk
+                })
+
+                table.insert(fallbackWaypoints, {
+                    Position = Vector3.new(targetPos.X, targetPos.Y + currentHeight, targetPos.Z),
+                    Action = Enum.PathWaypointAction.Walk
+                })
+
+                return fallbackWaypoints
+            end
+        end
+
+        local function initializePhysics()
+            bg = Instance.new("BodyGyro")
+            bg.MaxTorque = Vector3.new(4000, 4000, 4000)
+            bg.P = 3000
+            bg.D = 500
+            bg.CFrame = hrp.CFrame
+            bg.Parent = hrp
+
+            bv = Instance.new("BodyVelocity")
+            bv.MaxForce = Vector3.new(4000, 4000, 4000)
+            bv.Velocity = Vector3.new(0, 0, 0)
+            bv.Parent = hrp
+
+            bp = Instance.new("BodyPosition")
+            bp.MaxForce = Vector3.new(4000, 4000, 4000)
+            bp.P = 3000
+            bp.D = 500
+            bp.Position = hrp.Position + Vector3.new(0, currentHeight, 0)
+            bp.Parent = hrp
+        end
+
+        local function performLanding(targetPos)
+            if isLanding then
+                return
+            end
+            isLanding = true
+
+            local rayParams = RaycastParams.new()
+            rayParams.FilterDescendantsInstances = {character}
+            rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+
+            local groundResult = Services.Workspace:Raycast(targetPos, Vector3.new(0, -200, 0), rayParams)
+            local landingY = groundResult and groundResult.Position.Y + 3 or targetPos.Y
+
+            local hoverPos = Vector3.new(targetPos.X, targetPos.Y + 8, targetPos.Z)
+            bp.Position = hoverPos
+            task.wait(hoverDuration)
+
+            local finalPos = Vector3.new(targetPos.X, landingY, targetPos.Z)
+
+            local landingTween = TweenService:Create(bp, TweenInfo.new(landingDuration, Enum.EasingStyle.Quart,
+                Enum.EasingDirection.Out), {
+                Position = finalPos
+            })
+
+            local velocityTween = TweenService:Create(bv, TweenInfo.new(landingDuration * 0.8, Enum.EasingStyle.Quart,
+                Enum.EasingDirection.Out), {
+                Velocity = Vector3.new(0, 0, 0)
+            })
+
+            landingTween:Play()
+            velocityTween:Play()
+
+            landingTween.Completed:Connect(function()
+                task.wait(0.3)
+                setNoclip(false)
+                hrp.Velocity = Vector3.new(0, 0, 0)
+            end)
+        end
+
+        local function updatePath(destination)
+            waypoints = createPath(destination)
+            currentWaypointIndex = 1
+            lastWaypointTime = tick()
+            return waypoints ~= nil
+        end
+
+        local function detectObstacles(position, direction, distance)
+            local rayParams = RaycastParams.new()
+            rayParams.FilterDescendantsInstances = {character}
+            rayParams.FilterType = Enum.RaycastFilterType.Blacklist
+
+            local obstacles = {}
+            local checkDistance = math.min(distance, 10)
+
+            local rayDirections = {direction, direction:Cross(Vector3.new(0, 1, 0)).Unit * 0.3 + direction * 0.954,
+                                   direction:Cross(Vector3.new(0, -1, 0)).Unit * 0.3 + direction * 0.954}
+
+            for i, rayDir in pairs(rayDirections) do
+                local result = Services.Workspace:Raycast(position, rayDir * checkDistance, rayParams)
+                if result and result.Distance > 2 then
+                    table.insert(obstacles, {
+                        position = result.Position,
+                        normal = result.Normal,
+                        distance = result.Distance,
+                        direction = i
+                    })
+                end
+            end
+
+            local upwardRay = Services.Workspace:Raycast(position, Vector3.new(0, 10, 0), rayParams)
+            if upwardRay and upwardRay.Distance < 8 then
+                table.insert(obstacles, {
+                    position = upwardRay.Position,
+                    normal = upwardRay.Normal,
+                    distance = upwardRay.Distance,
+                    direction = "ceiling"
+                })
+            end
+
+            return obstacles
+        end
+
+        local function calculateAvoidanceVector(obstacles, currentDirection)
+            if #obstacles == 0 then
+                return Vector3.new(0, 0, 0)
+            end
+
+            local avoidanceVector = Vector3.new(0, 0, 0)
+            local totalWeight = 0
+
+            for _, obstacle in pairs(obstacles) do
+                if obstacle.distance < 2 then
+                    local weight = (2 - obstacle.distance) / 6
+                    weight = weight * 0.3
+
+                    local pushDirection = obstacle.normal
+                    if obstacle.direction == "ceiling" then
+                        pushDirection = Vector3.new(0, -1, 0)
+                    elseif pushDirection.Y < 0.2 then
+                        pushDirection = pushDirection + Vector3.new(0, 0.4, 0)
+                        pushDirection = pushDirection.Unit
+                    end
+
+                    avoidanceVector = avoidanceVector + (pushDirection * weight)
+                    totalWeight = totalWeight + weight
+                end
+            end
+
+            if totalWeight > 0 then
+                avoidanceVector = avoidanceVector / totalWeight
+                avoidanceVector = avoidanceVector * math.min(0.4, totalWeight)
+            end
+
+            return avoidanceVector
+        end
+
+        local function moveToWaypoint(waypoint)
+            local currentPos = hrp.Position
+            local targetPos = waypoint.Position
+            local direction = (targetPos - currentPos)
+            local distance = direction.Magnitude
+
+            if distance <= waypointDistance then
+                currentWaypointIndex = currentWaypointIndex + 1
+                lastWaypointTime = tick()
+                return true
+            end
+
+            local baseDirection = direction.Unit
+            local obstacles = detectObstacles(currentPos, baseDirection, distance)
+            local avoidanceVector = calculateAvoidanceVector(obstacles, baseDirection)
+
+            local finalDirection = baseDirection + avoidanceVector
+            finalDirection = finalDirection.Unit
+
+            local velocity = finalDirection * speed
+            local currentVel = bv.Velocity
+            local smoothedVel = currentVel:lerp(velocity, smoothness)
+
+            bv.Velocity = smoothedVel
+            bp.Position = Vector3.new(targetPos.X, targetPos.Y, targetPos.Z)
+
+            local lookDirection = Vector3.new(smoothedVel.X, 0, smoothedVel.Z)
+            if lookDirection.Magnitude > 0.1 then
+                local targetCFrame = CFrame.lookAt(currentPos, currentPos + lookDirection)
+                bg.CFrame = bg.CFrame:lerp(targetCFrame, smoothness)
+            end
+
+            return false
+        end
+
+        local finalTarget = toVector3(target) + offset
+
+        initializePhysics()
+        setNoclip(true)
+
+        if not updatePath(finalTarget) then
+            cleanup()
+            if config.OnComplete then
+                config.OnComplete(false, "Initial pathfinding failed")
+            end
+            return
+        end
+
+        local conn = Services.RunService.Heartbeat:Connect(function()
+            if not isActive then
+                return
+            end
+
+            if typeof(target) == "Instance" and target:IsA("BasePart") then
+                local newTarget = target.Position + offset
+                if (newTarget - finalTarget).Magnitude > 10 then
+                    finalTarget = newTarget
+                    updatePath(finalTarget)
+                end
+            end
+
+            local currentPos = hrp.Position
+            local distToTarget = (finalTarget - currentPos).Magnitude
+
+            if distToTarget <= stopDist then
+                performLanding(finalTarget)
+                task.wait(landingDuration + hoverDuration)
+                cleanup()
+                if config.OnComplete then
+                    config.OnComplete(true, "Target reached successfully")
+                end
+                return
+            end
+
+            if tick() - startTime > maxTimeout then
+                cleanup()
+                if config.OnComplete then
+                    config.OnComplete(false, "Maximum timeout exceeded")
+                end
+                return
+            end
+
+            if tick() - lastWaypointTime > pathTimeout then
+                if not updatePath(finalTarget) then
+                    cleanup()
+                    if config.OnComplete then
+                        config.OnComplete(false, "Path recalculation failed")
+                    end
+                    return
+                end
+            end
+
+            if currentWaypointIndex <= #waypoints then
+                moveToWaypoint(waypoints[currentWaypointIndex])
+            else
+                if distToTarget > stopDist then
+                    if not updatePath(finalTarget) then
+                        local direction = (finalTarget - currentPos).Unit
+                        bv.Velocity = bv.Velocity:lerp(direction * speed, smoothness)
+                        bp.Position = finalTarget + Vector3.new(0, currentHeight, 0)
+                    end
+                end
+            end
+        end)
+
+        return {
+            connection = conn,
+            stop = function()
+                cleanup()
+            end,
+            setSpeed = function(newSpeed)
+                speed = math.max(5, math.min(50, newSpeed))
+            end,
+            setTarget = function(newTarget)
+                target = newTarget
+                finalTarget = toVector3(newTarget) + offset
+                updatePath(finalTarget)
+            end,
+            getProgress = function()
+                if #waypoints == 0 then
+                    return 0
+                end
+                return math.min(1, currentWaypointIndex / #waypoints)
+            end,
+            getCurrentHeight = function()
+                return currentHeight
+            end,
+            getDistanceRemaining = function()
+                return (finalTarget - hrp.Position).Magnitude
+            end,
+            getETA = function()
+                local distance = (finalTarget - hrp.Position).Magnitude
+                return distance / speed
+            end,
+            isActive = function()
+                return isActive
+            end,
+            pause = function()
+                if bv then
+                    bv.Velocity = Vector3.new(0, 0, 0)
+                end
+            end,
+            resume = function()
+            end,
+            result = (hrp.Position - finalTarget).Magnitude <= stopDist
+        }
+    end
+
+    function Movement.pathfindTween(target, config)
+        config = config or {}
+        local character = Player.Character or Player.CharacterAdded:Wait()
+        local hrp = character and character:WaitForChild("HumanoidRootPart", 10)
+        local humanoid = character and character:WaitForChild("Humanoid", 10)
+        if not hrp or not humanoid then
+            return false
+        end
+
+        local targetPos
+        if typeof(target) == "Vector3" then
+            targetPos = target
+        elseif typeof(target) == "CFrame" then
+            targetPos = target.Position
+        elseif typeof(target) == "Instance" and target:IsA("BasePart") then
+            targetPos = target.Position
+        elseif typeof(target) == "table" and target.Position then
+            targetPos = target.Position
+        else
+            targetPos = target
+        end
+
+        if not targetPos or typeof(targetPos) ~= "Vector3" then
+            return false
+        end
+
+        local speed = config.Speed or State.Speed or 24
+        local stopDist = config.StopDistance or 4
+        local shouldContinue = config.ShouldContinue or function() return true end
+        local onUpdate = config.OnUpdate
+
+        local startPos = hrp.Position
+        local distance = (startPos - targetPos).Magnitude
+
+        if distance <= stopDist then
+            return true
+        end
+
+        local PathfindingService = EngProject.Utility:GetService("PathfindingService")
+        local TweenService = EngProject.Utility:GetService("TweenService")
+        local RunService = EngProject.Utility:GetService("RunService")
+
+        local path
+        if PathfindingService then
+            pcall(function()
+                path = PathfindingService:CreatePath({
+                    AgentRadius = 2,
+                    AgentHeight = 5,
+                    AgentCanJump = true,
+                    WaypointSpacing = 4
+                })
+            end)
+        end
+
+        local success = false
+        if path then
+            success = pcall(function()
+                path:ComputeAsync(startPos, targetPos)
+            end)
+        end
+
+        local waypoints = {}
+        if success and path and path.Status == Enum.PathStatus.Success then
+            waypoints = path:GetWaypoints()
+        else
+            waypoints = {
+                { Position = targetPos }
+            }
+        end
+
+        local originalPlatformStand = humanoid.PlatformStand
+        humanoid.PlatformStand = true
+
+        local noclipConnection
+        if RunService then
+            noclipConnection = RunService.Stepped:Connect(function()
+                if character then
+                    for _, v in ipairs(character:GetDescendants()) do
+                        if v:IsA("BasePart") then
+                            v.CanCollide = false
+                        end
+                    end
+                end
+            end)
+        end
+
+        local tweenSuccess = true
+        for idx, waypoint in ipairs(waypoints) do
+            if not shouldContinue() then
+                tweenSuccess = false
+                break
+            end
+
+            local wpPos = waypoint.Position
+            local lookAt = Vector3.new(wpPos.X, hrp.Position.Y, wpPos.Z)
+            local targetWP_CFrame
+            if (lookAt - hrp.Position).Magnitude > 0.1 then
+                targetWP_CFrame = CFrame.lookAt(hrp.Position, lookAt)
+                targetWP_CFrame = CFrame.new(wpPos) * (targetWP_CFrame - targetWP_CFrame.Position)
+            else
+                targetWP_CFrame = CFrame.new(wpPos) * (hrp.CFrame - hrp.CFrame.Position)
+            end
+
+            local dist = (hrp.Position - wpPos).Magnitude
+            local duration = dist / speed
+            if duration > 0 and TweenService then
+                local tween = TweenService:Create(hrp, TweenInfo.new(duration, Enum.EasingStyle.Linear), {CFrame = targetWP_CFrame})
+                tween:Play()
+
+                while tween.PlaybackState == Enum.PlaybackState.Playing and shouldContinue() do
+                    if typeof(onUpdate) == "function" then
+                        onUpdate((hrp.Position - targetPos).Magnitude)
+                    end
+                    task.wait(0.02)
+                end
+
+                if tween.PlaybackState == Enum.PlaybackState.Playing then
+                    tween:Cancel()
+                    tweenSuccess = false
+                    break
+                end
+            elseif duration > 0 then
+                hrp.CFrame = targetWP_CFrame
+                task.wait(duration)
+            end
+        end
+
+        if noclipConnection then
+            noclipConnection:Disconnect()
+        end
+
+        for _, v in ipairs(character:GetDescendants()) do
+            if v:IsA("BasePart") then
+                v.CanCollide = true
+            end
+        end
+
+        if humanoid and originalPlatformStand ~= nil then
+            humanoid.PlatformStand = originalPlatformStand
+        end
+
+        return tweenSuccess and (hrp.Position - targetPos).Magnitude <= (stopDist + 5)
+    end
+
+    function Movement.walkToTarget(target, config)
+        config = config or {}
+        local character = Player.Character or Player.CharacterAdded:Wait()
+        local hrp = character:WaitForChild("HumanoidRootPart")
+        local humanoid = character:WaitForChild("Humanoid")
+        local route = config.Route or {target.Position or target}
+        local stopDist = config.StopDistance or 5
+        local shouldContinue = config.ShouldContinue or function()
+            return true
+        end
+
+        for _, point in ipairs(route) do
+            if not shouldContinue() then
+                return false
+            end
+
+            local position
+            if typeof(point) == "Vector3" then
+                position = point
+            elseif typeof(point) == "CFrame" then
+                position = point.Position
+            elseif typeof(point) == "table" and point.Position then
+                position = point.Position
+            end
+
+            if position then
+                local done = false
+                local reached = false
+                local connection
+                connection = humanoid.MoveToFinished:Connect(function(ok)
+                    reached = ok
+                    done = true
+                end)
+
+                humanoid:MoveTo(position)
+
+                local timeout = math.max(6, (hrp.Position - position).Magnitude / math.max(humanoid.WalkSpeed, 8) + 4)
+                local elapsed = 0
+                while not done and elapsed < timeout and shouldContinue() do
+                    if (hrp.Position - position).Magnitude <= stopDist then
+                        reached = true
+                        break
+                    end
+                    task.wait(0.1)
+                    elapsed = elapsed + 0.1
+                end
+
+                if connection then
+                    connection:Disconnect()
+                end
+
+                if not shouldContinue() or not reached then
+                    return false
+                end
+            end
+        end
+
+        return true
+    end
+
+    function Movement.teleportToTarget(target, options)
+        local character = Player.Character or Player.CharacterAdded:Wait()
+        local hrp = character:WaitForChild("HumanoidRootPart")
+
+        local targetPos
+        if typeof(target) == "Vector3" then
+            targetPos = target
+        elseif typeof(target) == "Instance" and target:IsA("BasePart") then
+            targetPos = target.Position
+        else
+            error("Invalid target type")
+        end
+
+        options = options or {}
+        local mode = options.Mode or "Standard"
+        local fireRemoteFunc = options.FireRemoteFunc
+        local timeout = options.Timeout or 10
+        local tpWaitTime = options.TeleportWaitTime or 0.03
+        local maxFiresPerTeleport = options.MaxFiresPerTeleport or 10
+        local offsetRange = options.OffsetRange or 0.25
+        local exitDelay = options.ExitDelay or 0.2
+        local onComplete = options.OnComplete
+        local rubberBandTolerance = options.RubberBandTolerance or 12
+        local rubberBandWaitTime = options.RubberBandWaitTime or 0.3
+
+        local success = false
+
+        local function handleRubberBand(expectedPos)
+            local currentPos = hrp.Position
+            local distance = (currentPos - expectedPos).Magnitude
+
+            if distance > rubberBandTolerance then
+                if (currentPos - expectedPos).Magnitude > 350 then
+                    EngProject:CreateNotification({
+                        Type = "Default",
+                        Title = "Notification",
+                        Description = "Distance is too long, try again while being closer to the target",
+                        Duration = 10
+                    })
+                    return false
+                end
+
+                local tweenConfig = {
+                    CruiseHeight = 6,
+                    MinHeight = 1,
+                    MaxHeight = 10,
+                    LongDistanceThreshold = 150,
+                    DirectFlightThreshold = 50,
+                    AdaptiveHeight = true,
+                    UseDirectFlight = true,
+                    HoverDuration = 0,
+                    LandingDuration = 1.2,
+                    StopDistance = 10,
+                    OnComplete = function(tweenSuccess, message)
+                        if typeof(onComplete) == "function" then
+                            onComplete(tweenSuccess)
+                        end
+                    end
+                }
+
+                Movement.tweenToTarget(expectedPos, tweenConfig)
+                return true
+            end
+
+            return false
+        end
+
+        if mode == "Standard" then
+            local maxAttempts = 10
+            local tolerance = 10
+
+            for attempt = 1, maxAttempts do
+                hrp.CFrame = CFrame.new(targetPos)
+                local startTime = tick()
+                local settled = false
+
+                task.wait(rubberBandWaitTime)
+                if handleRubberBand(targetPos) then
+                    return true
+                end
+
+                while tick() - startTime < 1 do
+                    task.wait(0.05)
+                    local distance = (hrp.Position - targetPos).Magnitude
+
+                    if distance <= tolerance then
+                        local stableStart = tick()
+                        local stable = true
+
+                        while tick() - stableStart < 0.2 do
+                            task.wait(0.05)
+                            if (hrp.Position - targetPos).Magnitude > tolerance then
+                                if handleRubberBand(targetPos) then
+                                    return true
+                                end
+                                stable = false
+                                break
+                            end
+                        end
+
+                        if stable then
+                            settled = true
+                            success = true
+                            break
+                        end
+                    end
+                end
+
+                if settled then
+                    break
+                end
+                if attempt < maxAttempts then
+                    task.wait(0.2)
+                end
+            end
+
+            if success then
+                task.wait(rubberBandWaitTime)
+                if handleRubberBand(targetPos) then
+                    return true
+                end
+            end
+
+        elseif mode == "Critical" then
+            if typeof(fireRemoteFunc) ~= "function" then
+                error("Critical mode requires FireRemoteFunc")
+            end
+
+            local originalPos = hrp.Position
+            local startTime = tick()
+            local remoteRunning = true
+
+            local remoteThread = task.spawn(function()
+                while task.wait() do
+                    local ok, result = pcall(fireRemoteFunc)
+                    if ok and typeof(result) == "number" and result > 0 then
+                        success = true
+                        hrp.CFrame = CFrame.new(originalPos)
+                        break
+                    end
+                end
+            end)
+
+            while tick() - startTime < timeout and not success do
+                for i = 1, 15 do
+                    if success then
+                        break
+                    end
+
+                    local offset = Vector3.new(math.random() * offsetRange - offsetRange / 2, math.random(5, 10),
+                        math.random() * offsetRange - offsetRange / 2)
+
+                    hrp.CFrame = CFrame.new(targetPos + offset)
+                    task.wait()
+                end
+
+                hrp.CFrame = CFrame.new(originalPos)
+                task.wait(1)
+            end
+
+            if remoteThread then
+                task.cancel(remoteThread)
+            end
+
+            hrp.CFrame = CFrame.new(originalPos)
+        end
+
+        if typeof(onComplete) == "function" then
+            onComplete(success)
+        end
+
+        return success
+    end
+end
+
+local CharacterLock = {}
+do
+    local storedValues = {}
+
+    function CharacterLock.lock(targetCFrame)
+        local char = Player.Character
+        if not char then
+            return
+        end
+
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then
+            return
+        end
+
+        hrp.CFrame = targetCFrame
+        hrp.Velocity = Vector3.new(0, 0, 0)
+        hrp.RotVelocity = Vector3.new(0, 0, 0)
+
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            storedValues[Player.UserId] = {
+                WalkSpeed = hum.WalkSpeed,
+                JumpPower = hum.JumpPower
+            }
+
+            hum.WalkSpeed = 0
+            hum.JumpPower = 0
+            hum:ChangeState(Enum.HumanoidStateType.Seated)
+        end
+    end
+
+    function CharacterLock.unlock()
+        local char = Player.Character
+        if not char then
+            return
+        end
+
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            local values = storedValues[Player.UserId] or {
+                WalkSpeed = 16,
+                JumpPower = 50
+            }
+
+            hum.WalkSpeed = values.WalkSpeed
+            hum.JumpPower = values.JumpPower
+            hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+            storedValues[Player.UserId] = nil
+        end
+    end
+end
+
+local MerchantModule = {}
+do
+    function MerchantModule.isMerchant(npc)
+        local imgPass = false
+        local icon = npc:FindFirstChild("IconUI")
+        local img = icon and icon:FindFirstChild("ImageLabel")
+        if img and img.Image == "rbxassetid://2246496691" then
+            imgPass = true
+        end
+
+        local objPass = false
+        local dialog = npc:FindFirstChild("Dialog")
+        if dialog and dialog.ClassName == "ObjectValue" and dialog.Value and dialog.Value.Name == "Seller" then
+            objPass = true
+        end
+
+        return imgPass and objPass
+    end
+
+    function MerchantModule.getClosest()
+        local NPCs = Services.Workspace:WaitForChild("NPCs")
+        local char = Player.Character
+        local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not playerHrp then
+            return nil, math.huge
+        end
+
+        local closest, closestDist = nil, math.huge
+
+        for _, folder in ipairs(NPCs:GetChildren()) do
+            for _, npc in ipairs(folder:GetChildren()) do
+                if MerchantModule.isMerchant(npc) and npc:FindFirstChild("HumanoidRootPart") then
+                    local hrp = npc.HumanoidRootPart
+                    local dist = (playerHrp.Position - hrp.Position).Magnitude
+                    if dist < closestDist then
+                        closestDist = dist
+                        closest = hrp
+                    end
+                end
+            end
+        end
+
+        return closest, closestDist
+    end
+
+    function MerchantModule.getSellPosition(merchantHrp, options)
+        options = options or {}
+        if not merchantHrp then
+            return nil
+        end
+
+        local basePosition = merchantHrp.Position
+        local outwardDistance = options.OutwardDistance or 5
+        local verticalOffset = options.VerticalOffset or 3
+        local char = Player.Character
+        local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+
+        local direction = -merchantHrp.CFrame.LookVector
+
+        local horizontalDirection = Vector3.new(direction.X, 0, direction.Z)
+        if horizontalDirection.Magnitude < 1 then
+            horizontalDirection = Vector3.new(0, 0, -1)
+        end
+
+        return basePosition + (horizontalDirection.Unit * outwardDistance) + Vector3.new(0, verticalOffset, 0)
+    end
+
+    function MerchantModule.getAllMerchants()
+        local results = {}
+        local ok, NPCs = pcall(function()
+            return Services.Workspace:FindFirstChild("NPCs")
+        end)
+        if not ok or not NPCs then return results end
+
+        for _, folder in ipairs(NPCs:GetChildren()) do
+            for _, npc in ipairs(folder:GetChildren()) do
+                local isSeller = false
+
+                local dialog = npc:FindFirstChild("Dialog")
+                if dialog and dialog.ClassName == "ObjectValue" and dialog.Value then
+                    local valName = dialog.Value.Name or ""
+                    if valName == "Seller" or valName:lower():find("sell") or valName:lower():find("merchant") then
+                        isSeller = true
+                    end
+                end
+
+                if not isSeller then
+                    local icon = npc:FindFirstChild("IconUI")
+                    local img = icon and icon:FindFirstChild("ImageLabel")
+                    if img and img.Image == "rbxassetid://2246496691" then
+                        isSeller = true
+                    end
+                end
+
+                if not isSeller then
+                    local n = npc.Name:lower()
+                    if n:find("merchant") or n:find("seller") or n:find("vendor") or n:find("shop") then
+                        isSeller = true
+                    end
+                end
+
+                if not isSeller then
+                    local sp = npc:FindFirstChildWhichIsA("ProximityPrompt", true)
+                    if sp and (sp.ActionText:lower():find("sell") or sp.ObjectText:lower():find("sell")) then
+                        isSeller = true
+                    end
+                end
+
+                if isSeller and npc:FindFirstChild("HumanoidRootPart") then
+                    table.insert(results, {
+                        npc = npc,
+                        hrp = npc.HumanoidRootPart,
+                        name = npc.Name,
+                        folder = folder.Name
+                    })
+                end
+            end
+        end
+        return results
+    end
+
+    function MerchantModule.directTeleportAndSell()
+        local char = Player.Character
+        local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not playerHrp then
+            Utility.createNotification("Character not found!", 3)
+            return false
+        end
+
+        local allMerchants = MerchantModule.getAllMerchants()
+
+        if #allMerchants == 0 then
+            local closestHrp, dist = MerchantModule.getClosest()
+            if not closestHrp then
+                Utility.createNotification("Tidak ada merchant ditemukan di peta ini!", 4)
+                return false
+            end
+            table.insert(allMerchants, { hrp = closestHrp, name = "Merchant" })
+        end
+
+        table.sort(allMerchants, function(a, b)
+            local da = (playerHrp.Position - a.hrp.Position).Magnitude
+            local db = (playerHrp.Position - b.hrp.Position).Magnitude
+            return da < db
+        end)
+
+        local nearest = allMerchants[1]
+        local sellPos = MerchantModule.getSellPosition(nearest.hrp)
+
+        if not sellPos then
+            Utility.createNotification("Gagal hitung posisi merchant!", 3)
+            return false
+        end
+
+        local originCF = playerHrp.CFrame
+
+        Utility.createNotification("Teleport ke merchant: " .. nearest.name, 3)
+        pcall(function()
+            playerHrp.CFrame = CFrame.new(sellPos)
+        end)
+
+        task.wait(0.6)
+
+        local ok, result = pcall(function()
+            return ReplicatedStorage.Remotes.Shop.SellAll:InvokeServer()
+        end)
+
+        if ok then
+            local itemsSold = type(result) == "number" and result or (type(result) == "table" and result[1]) or 0
+            Utility.createNotification("Berhasil dijual! Items: " .. tostring(itemsSold), 4)
+        else
+            pcall(function()
+                ReplicatedStorage.Remotes.Shop.SellAll:FireServer()
+            end)
+            Utility.createNotification("Sell dikirim (fallback)!", 3)
+        end
+
+        task.wait(1.5)
+        Utility.createNotification("Teleport kembali ke posisi asal...", 3)
+        pcall(function()
+            playerHrp.CFrame = originCF
+        end)
+        return true
+    end
+end
+
+local SellModule = {}
+do
+    function SellModule.getInventoryCount()
+        local count = 0
+        local bp = getBackpack()
+        if bp then
+            for _, item in ipairs(bp:GetChildren()) do
+                local t = item:GetAttribute("ItemType")
+                if t == "Valuable" or t == "Equipment" then
+                    count = count + 1
+                end
+            end
+        end
+
+        local character = Player.Character
+        if character then
+            local equipped = character:FindFirstChildOfClass("Tool")
+            if equipped then
+                local t = equipped:GetAttribute("ItemType")
+                if t == "Valuable" or t == "Equipment" then
+                    count = count + 1
+                end
+            end
+        end
+
+        return count
+    end
+
+    function SellModule.getBackpackSpaceFromLabel()
+        local toolUI = PlayerGui and PlayerGui:FindFirstChild("ToolUI")
+        local fillingPan = toolUI and toolUI:FindFirstChild("FillingPan")
+        local inventorySpace = fillingPan and fillingPan:FindFirstChild("InventorySpace")
+
+        if not inventorySpace or not inventorySpace:IsA("TextLabel") then
+            return nil, nil, nil
+        end
+
+        local text = inventorySpace.Text or ""
+        local currentRaw, maxRaw = text:match("([^/]+)%s*/%s*(.+)")
+        if not currentRaw or not maxRaw then
+            return nil, nil, text
+        end
+
+        local function parseValue(raw)
+            local cleaned = string.gsub(string.gsub(string.gsub(tostring(raw), ",", ""), " ", ""), "%s+", ""):lower()
+            local multiplier = 1
+            if string.find(cleaned, "k") then
+                multiplier = 1000
+                cleaned = string.gsub(cleaned, "k", "")
+            elseif string.find(cleaned, "m") then
+                multiplier = 1000000
+                cleaned = string.gsub(cleaned, "m", "")
+            elseif string.find(cleaned, "b") then
+                multiplier = 1000000000
+                cleaned = string.gsub(cleaned, "b", "")
+            elseif string.find(cleaned, "t") then
+                multiplier = 1000000000000
+                cleaned = string.gsub(cleaned, "t", "")
+            end
+            local parsed = tonumber(cleaned)
+            return parsed and math.max(0, math.floor(parsed * multiplier)) or nil
+        end
+
+        local current = parseValue(currentRaw)
+        local max = parseValue(maxRaw)
+
+        if not current or not max then
+            return nil, nil, text
+        end
+
+        return current, max, text
+    end
+
+    function SellModule.isBackpackAtCapacity()
+        local current, max = SellModule.getBackpackSpaceFromLabel()
+        return current ~= nil and max ~= nil and max > 0 and current >= max
+    end
+
+    function SellModule.execute()
+        return ReplicatedStorage.Remotes.Shop.SellAll:InvokeServer()
+    end
+
+    function SellModule.handleVoidRequest(config, mode)
+        Utility.createNotification("Exiting The Void to find merchant...", 5)
+
+        HumanoidRootPart.CFrame = CFrame.new(Map.EventStuff["The Void"].Model.ExitPortal.CFrame.Position +
+                                                 Vector3.new(0, 3, 0))
+
+        local maxWait = tick() + 7
+        repeat
+            task.wait(0.1)
+        until (Player:GetAttribute("CurrentArea") == "Fortune River" and Player:GetAttribute("GameplayPaused") == false) or
+            tick() > maxWait
+
+        if Player:GetAttribute("CurrentArea") ~= "Fortune River" then
+            Utility.createNotification("Failed to exit The Void properly.", 5)
+            return false
+        end
+
+        task.wait(2)
+
+        local closestHrp
+        for i = 1, 4 do
+            closestHrp = MerchantModule.getClosest()
+            if closestHrp then
+                break
+            end
+            if i < 4 then
+                task.wait(1)
+            end
+        end
+
+        if not closestHrp then
+            Utility.createNotification("No merchant found after exiting void.", 5)
+            HumanoidRootPart.CFrame = CFrame.new(Map.EventStuff.VoidPortal.Part.CFrame.Position + Vector3.new(0, 3, 0))
+            return false
+        end
+
+        Utility.createNotification("Found merchant, teleporting and selling..", 5)
+
+        local sellPosition = MerchantModule.getSellPosition(closestHrp)
+        local sellSuccess = Movement.teleportToTarget(sellPosition, {
+            Mode = "Critical",
+            FireRemoteFunc = function()
+                Utility.createNotification("Selling all valuables...", 3)
+                return SellModule.execute()
+            end,
+            Timeout = 90
+        })
+
+        if sellSuccess then
+            local success
+            task.wait(3)
+            Utility.createNotification("Returning to The Void...", 5)
+
+            local voidportal = Map.EventStuff.VoidPortal
+            Movement.teleportToTarget(voidportal.WorldPivot.Position, {
+                Mode = "Standard",
+                OnComplete = function(moveSuccess)
+                    success = moveSuccess or false
+                end
+            })
+
+            task.wait()
+            return success
+        end
+
+        return sellSuccess
+    end
+
+    function SellModule.sell(config, mode)
+        local closestHrp, dist = MerchantModule.getClosest()
+
+        local ServerTime = Services.Workspace:GetServerTimeNow()
+        local trialTime = Player:GetAttribute("SellAnywhereTrialTime")
+        local requiredDistance = config.RequiredDistance or 45
+
+        if Player:GetAttribute("SellAnywhere") == true or (trialTime and trialTime + 600 > ServerTime) then
+            local itemsSold, _ = SellModule.execute()
+            if itemsSold and itemsSold > 0 then
+                return true
+            end
+        end
+
+        if not closestHrp and Player:GetAttribute("CurrentArea") == "The Void" then
+            return SellModule.handleVoidRequest(config, mode)
+        end
+
+        if closestHrp and dist <= requiredDistance then
+            SellModule.execute()
+            return true
+        end
+
+        if not closestHrp then
+            EngProject:CreateNotification({
+                Type = "Error",
+                Title = "Notification",
+                Description = "No merchant found nearby.",
+                Duration = 5
+            })
+            return false
+        end
+
+        local function applyDefaults(cfg, m)
+            local defaults = {}
+            if m == "Tween" then
+                defaults = {
+                    StopDistance = 20,
+                    CruiseHeight = 6,
+                    MaxHeight = 10,
+                    MinHeight = 1,
+                    LongDistanceThreshold = 150,
+                    DirectFlightThreshold = 50,
+                    AdaptiveHeight = true,
+                    UseDirectFlight = true,
+                    HoverDuration = 0.3,
+                    LandingDuration = 1.2
+                }
+            else
+                defaults = {
+                    Mode = "Critical",
+                    Timeout = 90
+                }
+            end
+
+            for k, v in pairs(defaults) do
+                if cfg[k] == nil then
+                    cfg[k] = v
+                end
+            end
+        end
+
+        applyDefaults(config, mode)
+        local sellPosition = MerchantModule.getSellPosition(closestHrp)
+
+        if mode == "Tween" then
+            local completed = false
+            local successSell = false
+
+            config.OnStart = function()
+                EngProject:CreateNotification({
+                    Type = "Default",
+                    Title = "Notification",
+                    Description = "Tweening to merchant...",
+                    Duration = 5
+                })
+            end
+
+            config.OnComplete = function()
+                task.wait(1)
+                local _, finalDistance = MerchantModule.getClosest()
+                if finalDistance and finalDistance <= requiredDistance then
+                    SellModule.execute()
+                    successSell = true
+                else
+                    EngProject:CreateNotification({
+                        Type = "Error",
+                        Title = "Notification",
+                        Description = "Could not reach merchant via tween",
+                        Duration = 5
+                    })
+                end
+                completed = true
+            end
+
+            Movement.tweenToTarget(sellPosition, config)
+
+            repeat
+                task.wait()
+            until completed
+
+            return successSell
+        else
+            config.FireRemoteFunc = function()
+                return SellModule.execute()
+            end
+            return Movement.teleportToTarget(sellPosition, config)
+        end
+    end
+end
+
+local ExcavationModule = {}
+do
+    function ExcavationModule.refreshData()
+        if State.Excavation.waiting then
+            return
+        end
+        State.Excavation.waiting = true
+
+        local UpdateRemote = ReplicatedStorage.Remotes.Excavation.UpdateExcavationData
+        local con
+
+        con = UpdateRemote.OnClientEvent:Connect(function(d)
+            State.Excavation.data = d
+            State.Excavation.waiting = false
+            con:Disconnect()
+        end)
+
+        UpdateRemote:FireServer()
+    end
+
+    function ExcavationModule.getCurrentStatus()
+        if not State.Excavation.data then
+            ExcavationModule.refreshData()
+        end
+
+        repeat
+            task.wait()
+        until State.Excavation.data
+
+        local d = State.Excavation.data
+        local ce = d.CurrentExcavation
+        local marker = Services.Workspace:FindFirstChild("Marker")
+
+        if marker then
+            local ui = marker:FindFirstChild("UI")
+            if ui then
+                local n = ui:FindFirstChild("ExcavationName")
+                if n and typeof(n.Text) == "string" and n.Text ~= "" then
+                    return "Finished", n.Text
+                end
+            end
+        end
+
+        if ce and ce ~= "" then
+            return "Active", ce
+        end
+
+        return "None", nil
+    end
+
+    function ExcavationModule.canStart()
+        local status = ExcavationModule.getCurrentStatus()
+        return status == "None"
+    end
+
+    function ExcavationModule.claim()
+        local status, name = ExcavationModule.getCurrentStatus()
+        if status ~= "Finished" or not name then
+            return false
+        end
+
+        local ClaimRemote = ReplicatedStorage.Remotes.Excavation.ClaimExcavation
+        local ok = ClaimRemote:InvokeServer(name)
+
+        if ok then
+            task.wait(2)
+            ExcavationModule.refreshData()
+            return true
+        end
+
+        return false
+    end
+
+    function ExcavationModule.start()
+        if not State.Excavation.selected then
+            return false, "No excavation selected."
+        end
+
+        local d = State.Excavation.data
+        if not d then
+            ExcavationModule.refreshData()
+            repeat
+                task.wait()
+            until State.Excavation.data
+            d = State.Excavation.data
+        end
+
+        local unlocked = d.UnlockedExcavationSites
+        if not table.find(unlocked, State.Excavation.selected) then
+            return false, "You haven't unlocked this excavation."
+        end
+
+        if not ExcavationModule.canStart() then
+            if d.CurrentExcavation and d.CurrentExcavation ~= "" then
+                return false, "Cannot start — active excavation: " .. d.CurrentExcavation
+            else
+                return false, "Cannot start — check for unclaimed excavation."
+            end
+        end
+
+        local StartRemote = ReplicatedStorage.Remotes.Excavation.StartExcavation
+        local ok = StartRemote:InvokeServer(State.Excavation.selected)
+
+        if ok then
+            ExcavationModule.refreshData()
+            return true
+        end
+
+        return false, "Server rejected the request."
+    end
+
+    function ExcavationModule.autoStartCycle()
+        local status = ExcavationModule.getCurrentStatus()
+
+        if status == "Finished" then
+            ExcavationModule.claim()
+            task.wait(1)
+            status = ExcavationModule.getCurrentStatus()
+        end
+
+        if status == "None" then
+            return ExcavationModule.start()
+        end
+
+        return false, status == "Active" and "Excavation already active." or "Waiting for excavation state."
+    end
+
+    function ExcavationModule.getNames()
+        local t = {}
+        for name in pairs(Excavations.Sites) do
+            table.insert(t, name)
+        end
+        return t
+    end
+end
+
+local GeodeModule = {}
+do
+    function GeodeModule.isCollected(geode)
+        return not geode or not geode.Parent
+    end
+
+    function GeodeModule.getModels()
+        local geodeFolder = Services.Workspace:FindFirstChild("Geode")
+        if not geodeFolder then
+            return {}
+        end
+
+        local geodeModels = {}
+        for _, child in pairs(geodeFolder:GetChildren()) do
+            if child:IsA("Model") then
+                table.insert(geodeModels, child)
+            end
+        end
+
+        return geodeModels
+    end
+
+    function GeodeModule.getBoundingBox(geodeModel)
+        local cf, size = geodeModel:GetBoundingBox()
+        return cf.Position
+    end
+
+    function GeodeModule.teleportToPosition(position)
+        local character = Player.Character
+        if not character then
+            return false
+        end
+
+        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+        if not humanoidRootPart then
+            return false
+        end
+
+        humanoidRootPart.CFrame = CFrame.new(position)
+        return true
+    end
+
+    function GeodeModule.teleportToNext(geodeStatus)
+        local geodeModels = GeodeModule.getModels()
+
+        if #geodeModels == 0 then
+            if geodeStatus then
+                geodeStatus:SetFields({"No geodes found"})
+            end
+            return false
+        end
+
+        if State.Geode.currentIndex > #geodeModels then
+            State.Geode.currentIndex = 1
+        end
+
+        local targetGeode = geodeModels[State.Geode.currentIndex]
+
+        if GeodeModule.isCollected(targetGeode) then
+            State.Geode.currentIndex = State.Geode.currentIndex + 1
+            return false
+        end
+
+        local geodePosition = GeodeModule.getBoundingBox(targetGeode)
+
+        if GeodeModule.teleportToPosition(geodePosition) then
+            if geodeStatus then
+                geodeStatus:SetFields({string.format("Teleported to: %s (%d/%d)", targetGeode.Name,
+                    State.Geode.currentIndex, #geodeModels)})
+            end
+            return true
+        else
+            if geodeStatus then
+                geodeStatus:SetFields({"Failed to teleport – Character not found"})
+            end
+            return false
+        end
+    end
+end
+
+local RuneModule = {}
+do
+    function RuneModule.getList()
+        local folder = Map:FindFirstChild("FindableRunes")
+        return folder and folder:GetChildren() or {}
+    end
+
+    function RuneModule.teleportToNext(runeStatus)
+        local list = RuneModule.getList()
+
+        if #list == 0 then
+            if runeStatus then
+                runeStatus:SetFields({"No runes found in workspace"})
+            end
+            return
+        end
+
+        State.Rune.currentIndex = State.Rune.currentIndex + 1
+        if State.Rune.currentIndex > #list then
+            State.Rune.currentIndex = 1
+        end
+
+        local rune = list[State.Rune.currentIndex]
+        if not rune or not rune:IsA("Model") then
+            if runeStatus then
+                runeStatus:SetFields({"Invalid rune"})
+            end
+            return
+        end
+
+        local target = rune:FindFirstChild("MainPart")
+        if not target or not target:IsA("BasePart") then
+            if runeStatus then
+                runeStatus:SetFields({"Rune has no MainPart"})
+            end
+            return
+        end
+
+        local char = Character
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if not root then
+            if runeStatus then
+                runeStatus:SetFields({"No HumanoidRootPart"})
+            end
+            return
+        end
+
+        root.CFrame = target.CFrame + Vector3.new(0, 3, 0)
+
+        if runeStatus then
+            runeStatus:SetFields({string.format("Teleported to rune %d/%d", State.Rune.currentIndex, #list)})
+        end
+    end
+end
+
+-- ============================================================
+--  BACKEND MODULES - GROUP B & C
+-- ============================================================
+
+local EnchantModule = {}
+do
+    function EnchantModule.getNames(type)
+        if type == "pan" then
+            local enchantsModule = require(ReplicatedStorage.GameInfo.Enchants)
+            local names = {}
+            for name in pairs(enchantsModule) do
+                names[#names + 1] = name
+            end
+            table.sort(names)
+            return names
+        elseif type == "shovel" then
+            local shovelEnchantsModule = require(ReplicatedStorage.GameInfo.ShovelEnchants)
+            local names = {}
+            for name in pairs(shovelEnchantsModule) do
+                names[#names + 1] = name
+            end
+            table.sort(names)
+            return names
+        end
+        return {}
+    end
+
+    function EnchantModule.findPanMaterial(materialName)
+        local bp = getBackpack()
+        if not bp then
+            return nil
+        end
+        return bp:FindFirstChild(materialName)
+    end
+
+    function EnchantModule.findShovelMaterial(modifier)
+        local bp = getBackpack()
+        if not bp then
+            return nil
+        end
+
+        for _, tool in ipairs(bp:GetChildren()) do
+            if tool:IsA("Tool") and tool.Name == "Aetherite" then
+                local itemData = tool:FindFirstChild("ItemData")
+                if itemData and itemData:GetAttribute("Modifier") == modifier then
+                    return tool
+                end
+            end
+        end
+
+        return nil
+    end
+
+    function EnchantModule.enchant(remote, item, itemName)
+        local ok, result = pcall(function()
+            return remote:InvokeServer(item)
+        end)
+
+        if ok then
+            Utility.createNotification("Successfully enchanted with " .. tostring(result) .. " using " .. itemName, 4)
+            return result
+        else
+            Utility.createNotification("Error enchanting " .. itemName, 3)
+            return nil
+        end
+    end
+
+    function EnchantModule.performAuto(findFunc, remote, itemName, target, flag)
+        task.spawn(function()
+            while flag[1] do
+                local item = findFunc()
+                if not item then
+                    flag[1] = false
+                    Utility.createNotification("Item not found: " .. itemName, 3)
+                    break
+                end
+
+                local enchant = EnchantModule.enchant(remote, item, itemName)
+                if enchant then
+                    if enchant == target then
+                        flag[1] = false
+                        Utility.createNotification("Got target enchant: " .. enchant, 5)
+                        break
+                    end
+                end
+
+                task.wait(1.5)
+            end
+        end)
+    end
+end
+
+local FavouriteModule = {}
+do
+    function FavouriteModule.isLocked(item)
+        return item:GetAttribute("Locked") == true
+    end
+
+    function FavouriteModule.toggle(item)
+        ReplicatedStorage.Remotes.Inventory.ToggleLock:FireServer(item)
+    end
+
+    function FavouriteModule.favourite(item)
+        if not FavouriteModule.isLocked(item) then
+            FavouriteModule.toggle(item)
+        end
+    end
+
+    function FavouriteModule.matchesModifier(item, modifier)
+        return item:FindFirstChild("ItemData"):GetAttribute("Modifier") == modifier
+    end
+
+    function FavouriteModule.matchesOre(item, oreName)
+        return item.Name == oreName
+    end
+
+    function FavouriteModule.isValuable(item)
+        return item:GetAttribute("ItemType") == "Valuable"
+    end
+end
+
+local ReforgeModule = {}
+do
+    function ReforgeModule.updateInfo(guid, infoDisplay)
+        local function safeSetFields(fields)
+            pcall(function()
+                infoDisplay:SetFields(fields)
+            end)
+        end
+
+        if not guid then
+            safeSetFields({"No equipment selected"})
+            return
+        end
+
+        local bp = getBackpack()
+        if not bp then
+            safeSetFields({"Backpack unavailable"})
+            return
+        end
+
+        local equipment
+        for _, child in ipairs(bp:GetChildren() or {}) do
+            if child and child.GetAttribute and child:GetAttribute("GUID") == guid then
+                equipment = child
+                break
+            end
+        end
+
+        if not equipment then
+            safeSetFields({"Equipment not found"})
+            return
+        end
+
+        local fields = {}
+        table.insert(fields, "Name: " .. tostring(equipment.Name or "Unknown"))
+
+        local reforges = (equipment:FindFirstChild("ItemData") and equipment.ItemData:GetAttribute("Reforges")) or 0
+        table.insert(fields, "Reforges: " .. tostring(reforges))
+
+        local cost
+        pcall(function()
+            cost = ReplicatedStorage.Remotes.Crafting.GetReforgeCost:InvokeServer(equipment)
+        end)
+        table.insert(fields, "Price: " .. Utility.formatPrice(cost or 0))
+
+        local statRolls
+        pcall(function()
+            statRolls = equipment:FindFirstChild("StatRolls")
+        end)
+
+        if statRolls and statRolls.GetAttributes then
+            table.insert(fields, "Stats:")
+            local attributes = {}
+            pcall(function()
+                attributes = statRolls:GetAttributes()
+            end)
+
+            for attrName, attrValue in pairs(attributes or {}) do
+                table.insert(fields, {
+                    Text = tostring(attrName) .. ": " .. tostring(attrValue),
+                    IsSubField = true
+                })
+            end
+        end
+
+        safeSetFields(fields)
+    end
+
+    function ReforgeModule.perform(guid)
+        if not guid then
+            Utility.createNotification("Select an Equipment from your Backpack first!")
+            return
+        end
+
+        local bp = getBackpack()
+        if not bp then
+            Utility.createNotification("Backpack unavailable.")
+            return
+        end
+
+        local equipment
+        for _, child in ipairs(bp:GetChildren() or {}) do
+            if child and child.GetAttribute and child:GetAttribute("GUID") == guid then
+                equipment = child
+                break
+            end
+        end
+
+        if not equipment then
+            Utility.createNotification("Selected equipment not found.")
+            return
+        end
+
+        local success, result = pcall(function()
+            return CraftingRemotes.ReforgeEquipment:InvokeServer(equipment)
+        end)
+
+        if not success then
+            Utility.createNotification("Reforge failed: " .. tostring(result))
+            return
+        end
+
+        Utility.createNotification("Reforge successful!")
+
+        local newEquipment
+        local timeout = 2
+        local startTime = os.clock()
+
+        while os.clock() - startTime < timeout do
+            local bp = getBackpack()
+            if bp then
+                for _, child in ipairs(bp:GetChildren() or {}) do
+                    if child and child.GetAttribute and child:GetAttribute("GUID") == guid then
+                        newEquipment = child
+                        break
+                    end
+                end
+            end
+            if newEquipment then
+                break
+            end
+            task.wait(0.1)
+        end
+
+        if not newEquipment then
+            Utility.createNotification("Reforge succeeded, but updated item not found.")
+            return
+        end
+
+        pcall(function()
+            CraftingRemotes.GetReforgeCost:InvokeServer(newEquipment)
+        end)
+
+        return guid
+    end
+end
+
+local FireflyModule = {}
+do
+    function FireflyModule.craft(amount)
+        if typeof(amount) ~= "number" or amount < 1 or amount >= 1000 then
+            EngProject:CreateNotification({
+                Type = "Error",
+                Title = "Invalid Amount",
+                Description = "Craft amount must be between 1 and 999."
+            })
+            return false
+        end
+
+        local stones = {}
+        local bp = getBackpack()
+        if bp then
+            for _, tool in ipairs(bp:GetChildren()) do
+                if tool:IsA("Tool") and tool.Name == "Firefly Stone" then
+                    table.insert(stones, tool)
+                end
+            end
+        end
+
+        if #stones < amount then
+            EngProject:CreateNotification({
+                Type = "Error",
+                Title = "Insufficient Materials",
+                Description = "Not enough Firefly Stones."
+            })
+            return false
+        end
+
+        local flareTable = Map:WaitForChild("LushCaverns"):WaitForChild("AbyssAssets"):WaitForChild("FlareTable")
+        local prompt = flareTable:FindFirstChild("Prompt", true)
+
+        if not prompt or not fireproximityprompt then
+            EngProject:CreateNotification({
+                Type = "Error",
+                Title = "Executor Unsupported",
+                Description = "fireproximityprompt is unavailable."
+            })
+            return false
+        end
+
+        if not HumanoidRootPart then
+            return false
+        end
+
+        local distance = (HumanoidRootPart.Position - flareTable:GetPivot().Position).Magnitude
+
+        if distance > 20 then
+            EngProject:CreateNotification({
+                Type = "Warning",
+                Title = "Too Far Away",
+                Description = "Go to the Firefly crafting table."
+            })
+            return false
+        elseif distance > 10 then
+            EngProject:CreateNotification({
+                Type = "Info",
+                Title = "Get Closer",
+                Description = "Move closer to the crafting table."
+            })
+            return false
+        end
+
+        prompt.HoldDuration = 0
+
+        EngProject:CreateNotification({
+            Type = "Info",
+            Title = "Crafting Started",
+            Description = "Crafting Firefly Flares..."
+        })
+
+        local EquipRemote = ReplicatedStorage.Remotes.CustomBackpack.EquipRemote
+
+        for i = 1, amount do
+            if not Character or not HumanoidRootPart then
+                break
+            end
+
+            local currentDistance = (HumanoidRootPart.Position - flareTable:GetPivot().Position).Magnitude
+            if currentDistance > 20 then
+                break
+            end
+
+            local tool = stones[i]
+            if not tool or not tool.Parent then
+                break
+            end
+
+            pcall(function()
+                EquipRemote:FireServer(tool)
+            end)
+
+            task.wait(0.05)
+
+            pcall(function()
+                fireproximityprompt(prompt)
+            end)
+
+            task.wait(0.15)
+        end
+
+        EngProject:CreateNotification({
+            Type = "Success",
+            Title = "Crafting Complete",
+            Description = "Firefly crafting process finished."
+        })
+
+        return true
+    end
+end
+
+local ESPModule = {}
+do
+    function ESPModule.createBillboard(target, name, color, player)
+        local bb = Instance.new("BillboardGui")
+        bb.Name = "ESPBillboard"
+        bb.Adornee = target
+        bb.AlwaysOnTop = true
+        bb.StudsOffset = Vector3.new(0, 2.6, 0)
+        bb.Size = UDim2.fromOffset(200, 24)
+        bb.Parent = target
+
+        local frame = Instance.new("Frame")
+        frame.BackgroundTransparency = 1
+        frame.Size = UDim2.fromScale(1, 1)
+        frame.Parent = bb
+
+        local padding = Instance.new("UIPadding")
+        padding.PaddingLeft = UDim.new(0, 4)
+        padding.PaddingRight = UDim.new(0, 4)
+        padding.Parent = frame
+
+        local layout = Instance.new("UIListLayout")
+        layout.FillDirection = Enum.FillDirection.Horizontal
+        layout.VerticalAlignment = Enum.VerticalAlignment.Center
+        layout.Padding = UDim.new(0, 5)
+        layout.Parent = frame
+
+        if player then
+            local avatar = Instance.new("ImageLabel")
+            avatar.BackgroundTransparency = 1
+            avatar.Size = UDim2.fromOffset(16, 16)
+            avatar.Image = Services.Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot,
+                Enum.ThumbnailSize.Size48x48)
+            avatar.Parent = frame
+
+            local corner = Instance.new("UICorner")
+            corner.CornerRadius = UDim.new(1, 0)
+            corner.Parent = avatar
+        end
+
+        local nameLabel = Instance.new("TextLabel")
+        nameLabel.BackgroundTransparency = 1
+        nameLabel.Font = Enum.Font.GothamSemibold
+        nameLabel.TextSize = 13
+        nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+        nameLabel.TextColor3 = color or Color3.new(1, 1, 1)
+        nameLabel.Text = name
+        nameLabel.AutomaticSize = Enum.AutomaticSize.X
+        nameLabel.Parent = frame
+
+        local distLabel = Instance.new("TextLabel")
+        distLabel.BackgroundTransparency = 1
+        distLabel.Font = Enum.Font.Gotham
+        distLabel.TextSize = 11
+        distLabel.TextXAlignment = Enum.TextXAlignment.Left
+        distLabel.TextColor3 = Color3.fromRGB(170, 170, 170)
+        distLabel.AutomaticSize = Enum.AutomaticSize.X
+        distLabel.Parent = frame
+
+        local conn
+        conn = Services.RunService.RenderStepped:Connect(function()
+            if not bb.Parent or not target.Parent then
+                conn:Disconnect()
+                return
+            end
+            local d = (Camera.CFrame.Position - target.Position).Magnitude
+            distLabel.Text = string.format("%dm", d + 0.5)
+        end)
+
+        return bb
+    end
+
+    function ESPModule.enablePlayers()
+        local function attachESP(plr)
+            if plr == Player then
+                return
+            end
+
+            local char = plr.Character
+            if not char then
+                return
+            end
+
+            local head = char:FindFirstChild("Head")
+            if not head then
+                return
+            end
+
+            if State.ESP.Players[plr] then
+                State.ESP.Players[plr]:Destroy()
+            end
+
+            State.ESP.Players[plr] = ESPModule.createBillboard(head, plr.Name, Color3.fromRGB(255, 255, 255), plr)
+        end
+
+        local function hookPlayer(plr)
+            if plr == Player then
+                return
+            end
+
+            if plr.Character then
+                attachESP(plr)
+            end
+
+            State.ESP.Connections["Char_" .. plr.UserId] = plr.CharacterAdded:Connect(function()
+                attachESP(plr)
+            end)
+
+            plr.CharacterRemoving:Connect(function()
+                if State.ESP.Players[plr] then
+                    State.ESP.Players[plr]:Destroy()
+                    State.ESP.Players[plr] = nil
+                end
+            end)
+        end
+
+        for _, plr in ipairs(Services.Players:GetPlayers()) do
+            hookPlayer(plr)
+        end
+
+        State.ESP.Connections.PlayerAdded = Services.Players.PlayerAdded:Connect(hookPlayer)
+
+        State.ESP.Connections.PlayerRemoving = Services.Players.PlayerRemoving:Connect(function(plr)
+            if State.ESP.Players[plr] then
+                State.ESP.Players[plr]:Destroy()
+                State.ESP.Players[plr] = nil
+            end
+
+            local conn = State.ESP.Connections["Char_" .. plr.UserId]
+            if conn then
+                conn:Disconnect()
+                State.ESP.Connections["Char_" .. plr.UserId] = nil
+            end
+        end)
+    end
+
+    function ESPModule.disablePlayers()
+        for _, bb in pairs(State.ESP.Players) do
+            if bb then
+                bb:Destroy()
+            end
+        end
+
+        for _, conn in pairs(State.ESP.Connections) do
+            if typeof(conn) == "RBXScriptConnection" then
+                conn:Disconnect()
+            end
+        end
+
+        State.ESP.Players = {}
+        State.ESP.Connections = {}
+    end
+
+    function ESPModule.enableTotems()
+        local folder = Services.Workspace:FindFirstChild("ActiveTotems")
+        if not folder then
+            return
+        end
+
+        local function addTotem(model)
+            if model:IsA("Model") then
+                local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart")
+                if part then
+                    local color = model:GetAttribute("NameColor")
+                    if typeof(color) ~= "Color3" then
+                        color = Color3.fromRGB(150, 200, 255)
+                    end
+                    local bb = ESPModule.createBillboard(part, model.Name, color)
+                    State.ESP.Totems[model] = bb
+                end
+            end
+        end
+
+        for _, m in ipairs(folder:GetChildren()) do
+            addTotem(m)
+        end
+
+        State.ESP.Connections.TotemAdded = folder.ChildAdded:Connect(addTotem)
+        State.ESP.Connections.TotemRemoved = folder.ChildRemoved:Connect(function(m)
+            if State.ESP.Totems[m] then
+                State.ESP.Totems[m]:Destroy()
+                State.ESP.Totems[m] = nil
+            end
+        end)
+    end
+
+    function ESPModule.disableTotems()
+        for _, v in pairs(State.ESP.Totems) do
+            v:Destroy()
+        end
+
+        if State.ESP.Connections.TotemAdded then
+            State.ESP.Connections.TotemAdded:Disconnect()
+        end
+
+        if State.ESP.Connections.TotemRemoved then
+            State.ESP.Connections.TotemRemoved:Disconnect()
+        end
+
+        State.ESP.Totems = {}
+    end
+
+    function ESPModule.clearAll()
+        local function clearFromFolder(folder)
+            if not folder then
+                return
+            end
+            for _, obj in ipairs(folder:GetDescendants()) do
+                if obj:IsA("BillboardGui") and obj.Name == "ESPBillboard" then
+                    obj:Destroy()
+                end
+            end
+        end
+
+        clearFromFolder(Services.Workspace:FindFirstChild("ActiveTotems"))
+        clearFromFolder(Services.Workspace:FindFirstChild("Characters"))
+
+        for _, bb in pairs(State.ESP.Players or {}) do
+            if bb and bb.Parent then
+                bb:Destroy()
+            end
+        end
+        State.ESP.Players = {}
+
+        for _, bb in pairs(State.ESP.Totems or {}) do
+            if bb and bb.Parent then
+                bb:Destroy()
+            end
+        end
+        State.ESP.Totems = {}
+
+        for _, conn in pairs(State.ESP.Connections or {}) do
+            if typeof(conn) == "RBXScriptConnection" then
+                conn:Disconnect()
+            end
+        end
+        State.ESP.Connections = {}
+    end
+end
+
+local InventoryFilterModule = {}
+do
+    function InventoryFilterModule.create()
+        local inventory = PlayerGui.BackpackGui.Backpack.Inventory
+        local scrollingFrame = inventory.ScrollingFrame
+        local gridFrame = scrollingFrame.UIGridFrame
+
+        local existingPanel = inventory:FindFirstChild("FilterPanel")
+        if existingPanel then
+            existingPanel:Destroy()
+            task.wait()
+        end
+
+        local filterPanel = Instance.new("Frame")
+        filterPanel.Name = "FilterPanel"
+        filterPanel.Parent = inventory
+        filterPanel.AnchorPoint = Vector2.new(0, 0)
+        filterPanel.Position = UDim2.new(1, 0.02, 0, -30)
+        filterPanel.Size = UDim2.new(0.22, 0, 1.08, 0)
+        filterPanel.BackgroundTransparency = 1
+        filterPanel.BorderSizePixel = 0
+
+        local padding = Instance.new("UIPadding")
+        padding.PaddingTop = UDim.new(0, 0)
+        padding.PaddingBottom = UDim.new(0.04, 0)
+        padding.PaddingLeft = UDim.new(0.06, 0)
+        padding.PaddingRight = UDim.new(0.06, 0)
+        padding.Parent = filterPanel
+
+        local layout = Instance.new("UIListLayout")
+        layout.Padding = UDim.new(0.018, 0)
+        layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        layout.SortOrder = Enum.SortOrder.LayoutOrder
+        layout.Parent = filterPanel
+
+        local fontFace = Font.new("rbxasset://fonts/families/SourceSansPro.json", Enum.FontWeight.SemiBold,
+            Enum.FontStyle.Italic)
+
+        local title = Instance.new("TextLabel")
+        title.Name = "CurrentFilter"
+        title.Parent = filterPanel
+        title.Size = UDim2.new(1, 0, 0.16, 0)
+        title.BackgroundTransparency = 1
+        title.Text = "Filter: All Items"
+        title.TextWrapped = true
+        title.TextXAlignment = Enum.TextXAlignment.Left
+        title.TextYAlignment = Enum.TextYAlignment.Center
+        title.FontFace = fontFace
+        title.TextScaled = true
+        title.LineHeight = 1
+        title.TextColor3 = Color3.fromRGB(245, 245, 245)
+        title.LayoutOrder = 1
+
+        local titleStroke = Instance.new("UIStroke")
+        titleStroke.Color = Color3.fromRGB(0, 0, 0)
+        titleStroke.Thickness = 1
+        titleStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+        titleStroke.Parent = title
+
+        local function createFilterButton(text, color, order)
+            local button = Instance.new("TextButton")
+            button.Name = text .. "Filter"
+            button.Parent = filterPanel
+            button.Size = UDim2.new(1, 0, 0.075, 0)
+            button.BackgroundColor3 = Color3.fromRGB(47, 47, 47)
+            button.BorderSizePixel = 0
+            button.Text = text
+            button.FontFace = fontFace
+            button.TextScaled = true
+            button.LineHeight = 1
+            button.TextColor3 = color
+            button.AutoButtonColor = false
+            button.LayoutOrder = order
+
+            local stroke = Instance.new("UIStroke")
+            stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+            stroke.Color = color
+            stroke.Thickness = 1
+            stroke.Parent = button
+
+            return button
+        end
+
+        local FILTER_BUTTONS = {{"Ores", Color3.fromRGB(190, 190, 190)}, {"Equipments", Color3.fromRGB(255, 90, 90)},
+                                {"Totems/Relics", Color3.fromRGB(120, 220, 120)},
+                                {"Geodes", Color3.fromRGB(90, 170, 255)}, {"Maps", Color3.fromRGB(200, 160, 255)},
+                                {"Others", Color3.fromRGB(200, 120, 255)}, {"All Items", Color3.fromRGB(245, 245, 245)}}
+
+        local ICON_CATEGORY = {
+            ["rbxassetid://71590406800942"] = "Equipments",
+            ["rbxassetid://128090935503267"] = "Equipments",
+            ["rbxassetid://95192688083586"] = "Equipments",
+            ["rbxassetid://84287308918508"] = "Ores",
+            ["rbxassetid://18624930841"] = "Totems/Relics",
+            ["rbxassetid://6947202399"] = "Totems/Relics",
+            ["rbxassetid://9019175526"] = "Geodes",
+            ["rbxassetid://8360687671"] = "Maps"
+        }
+
+        local connections = {}
+        local itemCache = {}
+        local currentFilter = "All Items"
+        local isUpdating = false
+        local filterChanged = false
+
+        local PADDING = 10
+        local originalCanvasSize = scrollingFrame.CanvasSize
+
+        local function getCategory(button)
+            local icon = button:FindFirstChild("TypeIcon")
+            if icon and icon:IsA("ImageLabel") then
+                return ICON_CATEGORY[icon.Image] or "Others"
+            end
+            return "Others"
+        end
+
+        local function cacheItem(button)
+            if not itemCache[button] then
+                itemCache[button] = {
+                    pos = button.Position,
+                    vis = button.Visible,
+                    cat = getCategory(button)
+                }
+            end
+            return itemCache[button]
+        end
+
+        local function getAllItems()
+            local items = {}
+            for _, child in ipairs(gridFrame:GetChildren()) do
+                if child:IsA("TextButton") then
+                    table.insert(items, child)
+                end
+            end
+            return items
+        end
+
+        local function calculateLayout(visibleItems)
+            if #visibleItems == 0 then
+                return 0
+            end
+
+            local firstItem = visibleItems[1]
+            local itemWidth = firstItem.AbsoluteSize.X
+            local itemHeight = firstItem.AbsoluteSize.Y
+            local frameWidth = gridFrame.AbsoluteSize.X
+
+            local cols = math.max(1, math.floor((frameWidth + PADDING) / (itemWidth + PADDING)))
+            local rows = math.ceil(#visibleItems / cols)
+
+            for i, item in ipairs(visibleItems) do
+                local row = math.floor((i - 1) / cols)
+                local col = (i - 1) % cols
+                item.Position = UDim2.fromOffset(col * (itemWidth + PADDING), row * (itemHeight + PADDING))
+            end
+
+            return rows * (itemHeight + PADDING)
+        end
+
+        local function applyFilter(filter)
+            if isUpdating then
+                return
+            end
+            isUpdating = true
+
+            local savedScroll = scrollingFrame.CanvasPosition
+            currentFilter = filter
+            local items = getAllItems()
+
+            if filter == "All Items" then
+                for _, item in ipairs(items) do
+                    local cached = itemCache[item]
+                    if cached then
+                        item.Visible = cached.vis
+                        item.Position = cached.pos
+                    else
+                        item.Visible = true
+                    end
+                end
+                scrollingFrame.CanvasSize = originalCanvasSize
+            else
+                local visible = {}
+                for _, item in ipairs(items) do
+                    local cached = cacheItem(item)
+                    if cached.cat == filter then
+                        item.Visible = true
+                        table.insert(visible, item)
+                    else
+                        item.Visible = false
+                    end
+                end
+                local canvasHeight = calculateLayout(visible)
+                scrollingFrame.CanvasSize = UDim2.fromOffset(0, canvasHeight)
+            end
+
+            if filterChanged then
+                scrollingFrame.CanvasPosition = Vector2.zero
+                filterChanged = false
+            else
+                scrollingFrame.CanvasPosition = savedScroll
+            end
+
+            isUpdating = false
+        end
+
+        local debounce = false
+        local function onItemsChanged(child)
+            if debounce then
+                return
+            end
+            if not child:IsA("TextButton") then
+                return
+            end
+
+            debounce = true
+            task.wait(0.05)
+
+            for _, item in ipairs(getAllItems()) do
+                cacheItem(item)
+            end
+
+            applyFilter(currentFilter)
+            debounce = false
+        end
+
+        for _, item in ipairs(getAllItems()) do
+            cacheItem(item)
+        end
+
+        for i, data in ipairs(FILTER_BUTTONS) do
+            local text, color = data[1], data[2]
+            local button = createFilterButton(text, color, i + 1)
+
+            table.insert(connections, button.MouseButton1Click:Connect(function()
+                filterChanged = true
+                title.Text = "Filter: " .. text
+                applyFilter(text)
+            end))
+
+            table.insert(connections, button.MouseEnter:Connect(function()
+                button.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+            end))
+
+            table.insert(connections, button.MouseLeave:Connect(function()
+                button.BackgroundColor3 = Color3.fromRGB(47, 47, 47)
+            end))
+        end
+
+        table.insert(connections, gridFrame.ChildAdded:Connect(onItemsChanged))
+        table.insert(connections, gridFrame.ChildRemoved:Connect(onItemsChanged))
+
+        table.insert(connections, filterPanel.Destroying:Connect(function()
+            for _, conn in ipairs(connections) do
+                if conn.Connected then
+                    conn:Disconnect()
+                end
+            end
+            table.clear(connections)
+            table.clear(itemCache)
+        end))
+    end
+
+    function InventoryFilterModule.destroy()
+        local inventory = PlayerGui.BackpackGui.Backpack.Inventory
+        local existingPanel = inventory:FindFirstChild("FilterPanel")
+        if existingPanel then
+            existingPanel:Destroy()
+        end
+    end
+end
+
+local MobileUIModule = {}
+do
+    function MobileUIModule.createToggleButton(window, forceMobile)
+        if not forceMobile and not EngProject.Utility:IsMobile() then
+            return
+        end
+
+        local TweenService = EngProject.Utility:GetService("TweenService")
+        local UserInputService = EngProject.Utility:GetService("UserInputService")
+
+        local folderName = "Eng Project"
+        local fileName = folderName .. "/logo.png"
+        local iconUrl = "https://raw.githubusercontent.com/dawnpetal/website/refs/heads/main/assets/images/logo.png"
+        local logoAsset
+
+        local canUseFilesystem = makefolder and isfolder and listfiles and isfile and delfile and writefile and
+                                     getcustomasset
+
+        if canUseFilesystem then
+            if not isfolder(folderName) then
+                makefolder(folderName)
+            end
+
+            for _, file in ipairs(listfiles("")) do
+                local cleanFile = file:gsub("^/", "")
+                if cleanFile:lower():find("simpleui") and isfile(cleanFile) then
+                    delfile(cleanFile)
+                end
+            end
+
+            if not isfile(fileName) then
+                local success, imageData = pcall(function()
+                    return game:HttpGet(iconUrl)
+                end)
+                if success and imageData then
+                    writefile(fileName, imageData)
+                end
+            end
+
+            logoAsset = getcustomasset(fileName)
+        end
+
+        local toggleButton = Instance.new("ImageButton")
+        toggleButton.Name = "ToggleUIButton"
+        toggleButton.Size = UDim2.new(0, 40, 0, 40)
+        toggleButton.Position = UDim2.new(0, 30, 0.5, -20)
+        toggleButton.AnchorPoint = Vector2.new(0.5, 0.5)
+        toggleButton.BackgroundTransparency = 1
+        toggleButton.ImageColor3 = Color3.fromRGB(255, 255, 255)
+        toggleButton.ScaleType = Enum.ScaleType.Fit
+        toggleButton.Active = true
+        toggleButton.Image = logoAsset or "rbxassetid://10734900011"
+        toggleButton.Parent = window.Elements.ScreenGui
+
+        local dragging = false
+        local dragStart, startPos
+        local hasMoved = false
+        local normalSize = UDim2.new(0, 40, 0, 40)
+        local pressSize = UDim2.new(0, 50, 0, 50)
+        local tweenInfo = TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+
+        if toggleButton and TweenService then
+            toggleButton.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType ==
+                    Enum.UserInputType.Touch then
+                    dragging = true
+                    dragStart = input.Position
+                    startPos = toggleButton.Position
+                    hasMoved = false
+                    TweenService:Create(toggleButton, tweenInfo, {
+                        Size = pressSize
+                    }):Play()
+                end
+            end)
+
+            toggleButton.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType ==
+                    Enum.UserInputType.Touch then
+                    dragging = false
+                    TweenService:Create(toggleButton, tweenInfo, {
+                        Size = normalSize
+                    }):Play()
+                    if not hasMoved then
+                        if window.IsVisible() then
+                            window.Hide()
+                        else
+                            window.Show()
+                        end
+                    end
+                end
+            end)
+        end
+
+        if UserInputService then
+            UserInputService.InputChanged:Connect(function(input)
+                if dragging and
+                    (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType ==
+                        Enum.UserInputType.Touch) then
+                    local delta = input.Position - dragStart
+                    if math.abs(delta.X) > 5 or math.abs(delta.Y) > 5 then
+                        hasMoved = true
+                        toggleButton.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+                            startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+                    end
+                end
+            end)
+        end
+    end
+end
+
+local LegitWaypointReader = {}
+do
+    LegitWaypointReader.Routes = {
+        [tostring(game.PlaceId)] = {
+            Default = {
+                Dig = {},
+                Wash = {},
+                Merchant = {}
+            }
+        }
+    }
+
+    local function toPosition(point)
+        if typeof(point) == "Vector3" then
+            return point
+        elseif typeof(point) == "CFrame" then
+            return point.Position
+        elseif typeof(point) == "table" then
+            if point.Position then
+                return toPosition(point.Position)
+            elseif point.X and point.Y and point.Z then
+                return Vector3.new(point.X, point.Y, point.Z)
+            end
+        end
+        return nil
+    end
+
+    function LegitWaypointReader:getAreaKey()
+        local area = Player:GetAttribute("CurrentArea")
+        return area and tostring(area) or "Default"
+    end
+
+    function LegitWaypointReader:getAreaRoutes()
+        local placeRoutes = self.Routes[tostring(game.PlaceId)] or self.Routes[game.PlaceId] or {}
+        local areaKey = self:getAreaKey()
+        return placeRoutes[areaKey] or placeRoutes.Default or placeRoutes
+    end
+
+    function LegitWaypointReader:getVariants(category)
+        local routes = self:getAreaRoutes()
+        return routes[category] or routes[string.lower(category)] or {}
+    end
+
+    function LegitWaypointReader:buildRoute(category, targetCFrame)
+        local variants = self:getVariants(category)
+        local selected = {}
+
+        if type(variants) == "table" and #variants > 0 then
+            if type(variants[1]) == "table" and not variants[1].X and not variants[1].Position then
+                selected = variants[math.random(1, #variants)] or {}
+            else
+                selected = variants
+            end
+        end
+
+        local route = {}
+        for _, point in ipairs(selected) do
+            local position = toPosition(point)
+            if position then
+                table.insert(route, position)
+            end
+        end
+
+        table.insert(route, targetCFrame.Position)
+        return route
+    end
+end
+
+_G.scanRegionPos = function(centerPos, targetRegion)
+    local ok, PointToRegion = pcall(function()
+        return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Location"):WaitForChild("PointToRegion"))
+    end)
+    if not ok or not PointToRegion then return nil end
+    
+    local stages = {
+        {max = 150, step = 15},
+        {max = 500, step = 35},
+        {max = 1200, step = 60}
+    }
+    
+    for _, stage in ipairs(stages) do
+        local r = stage.max
+        local step = stage.step
+        for dist = 0, r, step do
+            for x = -dist, dist, step do
+                for z = -dist, dist, step do
+                    if math.abs(x) == dist or math.abs(z) == dist then
+                        for _, yOffset in ipairs({0, -10, 10, -30, 30, -60, 60}) do
+                            local testPos = centerPos + Vector3.new(x, yOffset, z)
+                            local region, _ = PointToRegion.GetPanningRegion(testPos)
+                            if region == targetRegion then
+                                return CFrame.new(testPos)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function updateManualToggle(state)
+    if autoFarmToggle1 then
+        pcall(function()
+            if autoFarmToggle1.Set then
+                autoFarmToggle1:Set(state)
+            elseif autoFarmToggle1.SetValue then
+                autoFarmToggle1:SetValue(state)
+            end
+        end)
+    end
+end
+
+local function isFarmingActive()
+    return State.AutoFarm.active or (State.Quest.autoQuest and State.Quest.isFarming)
+end
+
+local AutoFarmModule = {}
+do
+    function AutoFarmModule.moveToLocation(targetCFrame, routeType)
+        local completed = false
+        local success = false
+
+        local targetObj = {
+            Position = targetCFrame.Position,
+            CFrame = targetCFrame
+        }
+
+        local controller
+
+        if State.AutoFarm.travelMode == "Legit" then
+            success = Movement.walkToTarget(targetObj, {
+                Route = LegitWaypointReader:buildRoute(routeType or "Dig", targetCFrame),
+                StopDistance = 5,
+                ShouldContinue = function()
+                    return isFarmingActive() and not State.AutoFarm.interrupted
+                end
+            })
+            completed = true
+        elseif State.AutoFarm.travelMode == "Tween" then
+            controller = Movement.tweenToTarget(targetObj, {
+                CruiseHeight = 4,
+                MinHeight = 1,
+                MaxHeight = 6,
+                LongDistanceThreshold = 100,
+                DirectFlightThreshold = 30,
+                AdaptiveHeight = false,
+                UseDirectFlight = true,
+                HoverDuration = 0,
+                LandingDuration = 0.3,
+                StopDistance = 5,
+                OnComplete = function(ok)
+                    success = ok or false
+                    completed = true
+                end
+            })
+        elseif State.AutoFarm.travelMode == "Visual" then
+            success = Movement.pathfindTween(targetCFrame, {
+                Speed = State.Speed or 24,
+                StopDistance = 8,
+                ShouldContinue = function()
+                    return isFarmingActive() and not State.AutoFarm.interrupted
+                end
+            })
+            completed = true
+        else
+            Movement.teleportToTarget(targetObj.Position, {
+                Mode = "Standard",
+                OnComplete = function(ok)
+                    success = ok or false
+                    completed = true
+                end
+            })
+        end
+
+        local elapsed = 0
+        while not completed and elapsed < 45 and isFarmingActive() and not State.AutoFarm.interrupted do
+            task.wait(0.05)
+            elapsed = elapsed + 0.05
+        end
+
+        if not completed and controller and controller.stop then
+            controller.stop()
+        end
+
+        if success and not State.AutoFarm.interrupted then
+            CharacterLock.lock(targetCFrame)
+            State.AutoFarm.locked = true
+        end
+
+        return success and not State.AutoFarm.interrupted
+    end
+
+    function AutoFarmModule.doAction(actionType, expectedRegion)
+        local ok, result = pcall(function()
+            local pan = PanModule.equipPan()
+            if not pan then
+                return false
+            end
+
+            local killSwitch = function()
+                return isFarmingActive() and not State.AutoFarm.interrupted
+            end
+
+            local r = PanModule.handleAction(State.AutoFarm.actionMode, actionType, true, killSwitch)
+            return r ~= "MAX_RETRY_FAIL" and r ~= "KILLED"
+        end)
+
+        return ok and result
+    end
+
+    function AutoFarmModule.performTask(taskName, nextTask, targetCFrame, actionType, expectedRegion)
+        TaskManager:setCurrentTask(taskName)
+        TaskManager:setNextTask(nextTask)
+
+        if not AutoFarmModule.moveToLocation(targetCFrame, actionType) then
+            return false
+        end
+
+        task.wait(0.1)
+
+        if State.AutoFarm.interrupted then
+            return false
+        end
+
+        TaskManager:setCurrentTask(nextTask or actionType)
+        TaskManager:setNextTask("AutoFarm")
+
+        if not AutoFarmModule.doAction(actionType, expectedRegion) then
+            return false
+        end
+
+        TaskManager:setCurrentTask("AutoFarm")
+        return true
+    end
+
+    function AutoFarmModule.checkAndDoSell()
+        if not State.Sell.autoSell then
+            return
+        end
+
+        local shouldSell = false
+        local mode = State.Sell.type or "Auto"
+
+        if mode == "Auto" then
+            shouldSell = SellModule.isBackpackAtCapacity()
+        elseif mode == "Threshold" then
+            shouldSell = SellModule.getInventoryCount() >= (tonumber(State.Sell.threshold) or 50)
+        elseif mode == "Duration" then
+            shouldSell = State.Sell._scheduledSell or
+                             (os.clock() - (State.Sell._lastSell or 0) >= (tonumber(State.Sell.delay) or 300))
+        end
+
+        if shouldSell then
+            if SellModule.sell({}, State.Sell.mode or "Teleport") then
+                State.Sell._lastSell = os.clock()
+                State.Sell._scheduledSell = false
+
+                if Player and Player.Character and Player.Character:FindFirstChild("HumanoidRootPart") then
+                    CharacterLock.lock(Player.Character.HumanoidRootPart.CFrame)
+                    State.AutoFarm.locked = true
+                end
+            end
+        end
+    end
+
+    function AutoFarmModule.teardown()
+        if State.AutoFarm.locked then
+            CharacterLock.unlock()
+            State.AutoFarm.locked = false
+        end
+
+        State.AutoFarm.interrupted = false
+        State.AutoFarm.interruptReason = nil
+
+        if TaskManager:getMainTask() == "AutoFarm" then
+            TaskManager:finishTask("AutoFarm")
+        end
+
+        TaskManager:clearSubTasks()
+        State.AutoFarm.running = false
+        updateManualToggle(false)
+    end
+
+    function AutoFarmModule.pause(reason)
+        if not (State.AutoFarm.active and State.AutoFarm.running) then
+            return false
+        end
+
+        State.AutoFarm.interrupted = true
+        State.AutoFarm.interruptReason = reason or "Pause"
+
+        if State.AutoFarm.locked then
+            CharacterLock.unlock()
+            State.AutoFarm.locked = false
+        end
+
+        return true
+    end
+
+    function AutoFarmModule.resume(reason)
+        if reason and State.AutoFarm.interruptReason and State.AutoFarm.interruptReason ~= reason then
+            return false
+        end
+
+        if not State.AutoFarm.interrupted then
+            State.AutoFarm.interruptReason = nil
+            return false
+        end
+
+        State.AutoFarm.interrupted = false
+        State.AutoFarm.interruptReason = nil
+        return true
+    end
+
+    function AutoFarmModule.start()
+        if State.AutoFarm.running then
+            return
+        end
+
+        State.AutoFarm.active = true
+        State.AutoFarm.running = true
+        State.AutoFarm.interrupted = false
+        State.AutoFarm.interruptReason = nil
+
+        if not State.AutoFarm.travelMode or State.AutoFarm.travelMode == "" then
+            Utility.createNotification("❌ Select travel mode!")
+            State.AutoFarm.active = false
+            State.AutoFarm.running = false
+            updateManualToggle(false)
+            return
+        end
+
+        if not State.AutoFarm.actionMode or State.AutoFarm.actionMode == "" then
+            Utility.createNotification("❌ Select farming mode!")
+            State.AutoFarm.active = false
+            State.AutoFarm.running = false
+            updateManualToggle(false)
+            return
+        end
+
+        if not (State.AutoFarm.sandCFrame and State.AutoFarm.waterCFrame) then
+            Utility.createNotification("❌ Set locations!")
+            State.AutoFarm.active = false
+            State.AutoFarm.running = false
+            updateManualToggle(false)
+            return
+        end
+
+        updateManualToggle(true)
+        Utility.createNotification("🚀 Starting!")
+
+        task.spawn(function()
+            while State.AutoFarm.active do
+                local acquired = TaskManager:requestTask("AutoFarm", 1)
+
+                if acquired then
+                    local hasTurn = TaskManager:waitForTurn("AutoFarm", 5)
+
+                    if hasTurn then
+                        local started = TaskManager:startTask("AutoFarm")
+
+                        if started then
+                            while State.AutoFarm.active and TaskManager:canRun("AutoFarm") do
+                                if State.AutoFarm.interrupted then
+                                    if State.AutoFarm.locked then
+                                        CharacterLock.unlock()
+                                        State.AutoFarm.locked = false
+                                    end
+
+                                    while State.AutoFarm.interrupted and State.AutoFarm.active do
+                                        task.wait(0.1)
+                                    end
+                                end
+
+                                local ok = pcall(function()
+                                    local panStatus = PanModule.getStatus()
+                                    if not panStatus then
+                                        task.wait(0.05)
+                                        return
+                                    end
+
+                                    AutoFarmModule.checkAndDoSell()
+
+                                    if panStatus.isFull then
+                                        if not AutoFarmModule.performTask("MovingToWater", "WashPan",
+                                            State.AutoFarm.waterCFrame, "Wash", "Water") then
+                                            if not State.AutoFarm.interrupted then
+                                                State.AutoFarm.active = false
+                                            end
+                                        end
+                                    else
+                                        if not AutoFarmModule.performTask("MovingToSand", "DigSand",
+                                            State.AutoFarm.sandCFrame, "Dig", "Deposit") then
+                                            if not State.AutoFarm.interrupted then
+                                                State.AutoFarm.active = false
+                                            end
+                                        end
+                                    end
+                                end)
+
+                                if not ok then
+                                    if State.AutoFarm.locked then
+                                        CharacterLock.unlock()
+                                        State.AutoFarm.locked = false
+                                    end
+                                    task.wait(0.05)
+                                end
+
+                                task.wait(0.01)
+                            end
+
+                            TaskManager:finishTask("AutoFarm")
+                        else
+                            task.wait(0.1)
+                        end
+                    end
+                else
+                    task.wait(0.1)
+                end
+            end
+
+            AutoFarmModule.teardown()
+            Utility.createNotification("🛑 Stopped")
+        end)
+    end
+
+    function AutoFarmModule.stop()
+        if not State.AutoFarm.active and not State.AutoFarm.running then
+            return
+        end
+        State.AutoFarm.active = false
+        State.AutoFarm.interrupted = false
+        State.AutoFarm.interruptReason = nil
+        updateManualToggle(false)
+    end
+end
+
+local HuntingModule = {}
+do
+    HuntingModule.geodeState = {
+        isOpening = false,
+        currentGeode = nil,
+        startTime = nil,
+        cachedInventoryCount = 0,
+        cachedMaxCapacity = 0
+    }
+
+    HuntingModule.treasureState = {
+        isHunting = false,
+        mapsCompleted = 0,
+        currentMap = nil,
+        currentMapGUID = nil,
+        previousShovelName = nil,
+        previousShovelGUID = nil,
+        startTime = nil
+    }
+
+    function HuntingModule.getInventoryCount()
+        local count = 0
+        local bp = getBackpack()
+        if bp then
+            for _, item in ipairs(bp:GetChildren()) do
+                local t = item:GetAttribute("ItemType")
+                if t == "Valuable" or t == "Equipment" then
+                    count = count + 1
+                end
+            end
+        end
+        local character = Character
+        if character then
+            local equipped = character:FindFirstChildOfClass("Tool")
+            if equipped then
+                local t = equipped:GetAttribute("ItemType")
+                if t == "Valuable" or t == "Equipment" then
+                    count = count + 1
+                end
+            end
+        end
+        return count
+    end
+
+    function HuntingModule.updateInventoryCache()
+        HuntingModule.geodeState.cachedInventoryCount = HuntingModule.getInventoryCount()
+        HuntingModule.geodeState.cachedMaxCapacity = Player:GetAttribute("InventorySize") or 100
+    end
+
+    function HuntingModule.getCachedInventoryCount()
+        return HuntingModule.geodeState.cachedInventoryCount
+    end
+
+    function HuntingModule.getCachedMaxCapacity()
+        return HuntingModule.geodeState.cachedMaxCapacity
+    end
+
+    function HuntingModule.isBackpackFull()
+        return HuntingModule.getCachedInventoryCount() >= HuntingModule.getCachedMaxCapacity()
+    end
+
+    function HuntingModule.findGeodeInBackpack()
+        local bp = getBackpack()
+        if bp then
+            for _, item in ipairs(bp:GetChildren()) do
+                if item.Name == "Geode" then
+                    return item
+                end
+            end
+        end
+        return nil
+    end
+
+    function HuntingModule.isGeodeEquipped()
+        if not Character then
+            return false
+        end
+        for _, item in ipairs(Character:GetChildren()) do
+            if item:GetAttribute("ItemType") == "Geode" then
+                return true
+            end
+        end
+        return false
+    end
+
+    function HuntingModule.isGeodeInHotbar()
+        for _, item in ipairs(Player.Backpack:GetChildren()) do
+            if item.Name == "Geode" then
+                return true
+            end
+        end
+        return false
+    end
+
+    function HuntingModule.waitForGeodeInCharacter(timeout)
+        timeout = timeout or 50
+        if not Character then
+            return false
+        end
+        local elapsed = 0
+        while elapsed < timeout do
+            for _, item in ipairs(Character:GetChildren()) do
+                if item:GetAttribute("ItemType") == "Geode" then
+                    return true
+                end
+            end
+            task.wait(0.01)
+            elapsed = elapsed + 1
+        end
+        return false
+    end
+
+    function HuntingModule.isGeodeDepleted()
+        if not Character then
+            return true
+        end
+        for _, item in ipairs(Character:GetChildren()) do
+            if item:GetAttribute("ItemType") == "Geode" then
+                local stacks = item:GetAttribute("Stacks")
+                if stacks and stacks > 0 then
+                    return false
+                end
+            end
+        end
+        return true
+    end
+
+    function HuntingModule.waitForGeodes(maxWait)
+        maxWait = maxWait or 30
+        local elapsed = 0
+        while elapsed < maxWait do
+            if HuntingModule.findGeodeInBackpack() ~= nil then
+                return true
+            end
+            task.wait(0.5)
+            elapsed = elapsed + 0.5
+        end
+        return false
+    end
+
+    function HuntingModule.startGeodeOpening()
+        if HuntingModule.geodeState.isOpening then
+            return false
+        end
+
+        local geode = HuntingModule.findGeodeInBackpack()
+        if not geode and not HuntingModule.isGeodeEquipped() and not HuntingModule.isGeodeInHotbar() then
+            return false
+        end
+
+        HuntingModule.updateInventoryCache()
+        HuntingModule.geodeState.isOpening = true
+        HuntingModule.geodeState.startTime = tick()
+
+        task.spawn(function()
+            while HuntingModule.geodeState.isOpening do
+                if HuntingModule.isBackpackFull() then
+                    break
+                end
+
+                local geode = HuntingModule.findGeodeInBackpack()
+                if not geode then
+                    break
+                end
+
+                pcall(function()
+                    ReplicatedStorage.Remotes.CustomBackpack.EquipRemote:FireServer(geode)
+                end)
+
+                if not HuntingModule.waitForGeodeInCharacter() then
+                    break
+                end
+
+                local clickCount = 0
+                while HuntingModule.geodeState.isOpening do
+                    if HuntingModule.isGeodeDepleted() or HuntingModule.isBackpackFull() then
+                        break
+                    end
+                    Services.VirtualUser:ClickButton1(Vector2.new(math.random(100, 900), math.random(100, 700)))
+                    clickCount = clickCount + 1
+                    if clickCount % 100 == 0 then
+                        HuntingModule.updateInventoryCache()
+                    end
+                    task.wait(0.01)
+                end
+            end
+
+            HuntingModule.geodeState.isOpening = false
+            HuntingModule.geodeState.currentGeode = nil
+        end)
+
+        return true
+    end
+
+    function HuntingModule.stopGeodeOpening()
+        HuntingModule.geodeState.isOpening = false
+    end
+
+    function HuntingModule.isGeodeOpening()
+        return HuntingModule.geodeState.isOpening
+    end
+
+    function HuntingModule.getFormattedInventoryStatus()
+        local toolUI = Player.PlayerGui:FindFirstChild("ToolUI")
+        if toolUI then
+            local fillingPan = toolUI:FindFirstChild("FillingPan")
+            if fillingPan then
+                local inventorySpace = fillingPan:FindFirstChild("InventorySpace")
+                if inventorySpace and inventorySpace:IsA("TextLabel") then
+                    return inventorySpace.Text
+                end
+            end
+        end
+        return "Inventory: N/A"
+    end
+
+    function HuntingModule.getPan()
+        if not Character then
+            return nil
+        end
+        local equipped = Character:FindFirstChildOfClass("Tool")
+        if equipped and equipped:GetAttribute("ItemType") == "Pan" then
+            return equipped
+        end
+        local bp = getBackpack()
+        if bp then
+            for _, v in ipairs(bp:GetChildren()) do
+                if v:GetAttribute("ItemType") == "Pan" then
+                    ReplicatedStorage.Remotes.CustomBackpack.EquipRemote:FireServer(v)
+                    task.wait(0.5)
+                    return v
+                end
+            end
+        end
+        return nil
+    end
+
+    function HuntingModule.findNextMap()
+        local containers = {}
+        local bp = getBackpack()
+        if bp then table.insert(containers, bp) end
+        if Character then table.insert(containers, Character) end
+        for _, container in ipairs(containers) do
+            if container then
+                for _, v in ipairs(container:GetChildren()) do
+                    local name = v.Name:lower()
+                    if v:GetAttribute("ItemType") == "TreasureMap" or (name:find("treasure") and name:find("map")) then
+                        return v
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
+    function HuntingModule.findTool(predicate)
+        local containers = {}
+        if Character then table.insert(containers, Character) end
+        local bp = getBackpack()
+        if bp then table.insert(containers, bp) end
+        for _, container in ipairs(containers) do
+            if container then
+                for _, item in ipairs(container:GetChildren()) do
+                    if item:IsA("Tool") and predicate(item) then
+                        return item
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
+    function HuntingModule.equipTool(tool)
+        if not tool then
+            return false
+        end
+
+        if tool.Parent == Character then
+            return true
+        end
+
+        ReplicatedStorage.Remotes.CustomBackpack.EquipRemote:FireServer(tool)
+        
+        local start = tick()
+        while tool.Parent ~= Character and (tick() - start) < 2.5 do
+            task.wait(0.05)
+        end
+
+        return tool.Parent == Character
+    end
+
+    function HuntingModule.getEquippedShovel()
+        if not Character then
+            return nil
+        end
+
+        local equipped = Character:FindFirstChildOfClass("Tool")
+        if equipped and (equipped:GetAttribute("ItemType") == "Shovel" or equipped.Name:find("Shovel")) then
+            return equipped
+        end
+        return nil
+    end
+
+    function HuntingModule.storeCurrentShovel()
+        local shovel = HuntingModule.getEquippedShovel()
+        HuntingModule.treasureState.previousShovelName = shovel and shovel.Name or nil
+        HuntingModule.treasureState.previousShovelGUID = shovel and shovel:GetAttribute("GUID") or nil
+    end
+
+    function HuntingModule.restoreStoredShovel()
+        local guid = HuntingModule.treasureState.previousShovelGUID
+        local name = HuntingModule.treasureState.previousShovelName
+
+        if not guid and not name then
+            return false
+        end
+
+        local shovel = HuntingModule.findTool(function(tool)
+            return tool:GetAttribute("ItemType") == "Shovel" and
+                       ((guid and tool:GetAttribute("GUID") == guid) or (name and tool.Name == name))
+        end)
+
+        HuntingModule.treasureState.previousShovelName = nil
+        HuntingModule.treasureState.previousShovelGUID = nil
+        return HuntingModule.equipTool(shovel)
+    end
+
+    function HuntingModule.prepareTreasureTool()
+        HuntingModule.storeCurrentShovel()
+
+        local shovel = HuntingModule.findTool(function(tool)
+            return tool:GetAttribute("ItemType") == "Shovel" or tool.Name:find("Shovel")
+        end)
+
+        if shovel then
+            HuntingModule.equipTool(shovel)
+            return shovel
+        end
+
+        return HuntingModule.getPan()
+    end
+
+    function HuntingModule.getTreasureCollectTool()
+        local shovel = HuntingModule.findTool(function(tool)
+            return tool:GetAttribute("ItemType") == "Shovel" or tool.Name:find("Shovel")
+        end)
+
+        if shovel and shovel.Parent ~= Character then
+            HuntingModule.equipTool(shovel)
+        end
+
+        local equipped = Character and Character:FindFirstChildOfClass("Tool") or nil
+        if equipped and equipped:FindFirstChild("Scripts") and equipped.Scripts:FindFirstChild("Collect") then
+            return equipped
+        end
+
+        return HuntingModule.getPan()
+    end
+
+    function HuntingModule.huntSingleMap(map)
+        if not map or not map.Parent then
+            return false
+        end
+
+        local location = map:GetAttribute("Location")
+        local mapGUID = map:GetAttribute("GUID")
+
+        if not location or not mapGUID then
+            local bp = getBackpack()
+            if bp then
+                for _, v in ipairs(bp:GetChildren()) do
+                    local name = v.Name:lower()
+                    if v:GetAttribute("ItemType") == "TreasureMap" or (name:find("treasure") and name:find("map")) then
+                        local loc = v:GetAttribute("Location")
+                        local guid = v:GetAttribute("GUID")
+                        if loc and guid then
+                            location = loc
+                            mapGUID = guid
+                            map = v
+                            break
+                        end
+                    end
+                end
+            end
+        end
+
+        if not location or not mapGUID then
+            return false
+        end
+
+        local treasureTool = HuntingModule.getTreasureCollectTool()
+        if not treasureTool then
+            return false
+        end
+
+        local targetCFrame = typeof(location) == "CFrame" and location or CFrame.new(location)
+        local collect = treasureTool:FindFirstChild("Scripts") and treasureTool.Scripts:FindFirstChild("Collect")
+
+        if not collect then
+            return false
+        end
+
+        local startTime = tick()
+        local timeout = 120
+        local lastCollectTime = 0
+
+        local function findMapInContainers(mapName, guid)
+            local containers = {}
+            if Character then table.insert(containers, Character) end
+            local bp = getBackpack()
+            if bp then table.insert(containers, bp) end
+            for _, container in ipairs(containers) do
+                if container then
+                    for _, v in ipairs(container:GetChildren()) do
+                        local name = v.Name:lower()
+                        local isMap = v:GetAttribute("ItemType") == "TreasureMap" or (name:find("treasure") and name:find("map"))
+                        if isMap then
+                            local vGUID = v:GetAttribute("GUID")
+                            if guid and vGUID and vGUID == guid then
+                                return v
+                            end
+                            if not guid or not vGUID then
+                                return v
+                            end
+                        end
+                    end
+                end
+            end
+            return nil
+        end
+
+        local attempts = 0
+        while HuntingModule.treasureState.isHunting and (tick() - startTime) < timeout do
+            local currentMap = findMapInContainers(map.Name, mapGUID)
+
+            if not currentMap then
+                task.wait(0.5)
+                return true
+            end
+
+            if currentMap:GetAttribute("GUID") ~= mapGUID then
+                task.wait(0.5)
+                return true
+            end
+
+            if not Character or not Character:FindFirstChild("HumanoidRootPart") then
+                break
+            end
+
+            Character.HumanoidRootPart.CFrame = targetCFrame
+
+            if tick() - lastCollectTime > 0.02 then
+                pcall(function()
+                    collect:InvokeServer(0)
+                end)
+                lastCollectTime = tick()
+                attempts = attempts + 1
+                if attempts > 150 then
+                    local mapNameDisplay = map.Name:gsub(" Treasure Map", "")
+                    EngProject:CreateNotification({
+                        Type = "Warning",
+                        Title = "Wrong Map / Region",
+                        Description = "This treasure map belongs to another region. Please travel to " .. mapNameDisplay .. " to hunt it!",
+                        Duration = 8
+                    })
+                    break
+                end
+            end
+
+            task.wait(0.01)
+        end
+
+        return false
+    end
+
+    function HuntingModule.startTreasureHunting(options)
+        options = options or {}
+        if HuntingModule.treasureState.isHunting then
+            return false
+        end
+
+        HuntingModule.treasureState.isHunting = true
+        if not options.PreserveCount then
+            HuntingModule.treasureState.mapsCompleted = 0
+        end
+        HuntingModule.treasureState.currentMap = nil
+        HuntingModule.treasureState.currentMapGUID = nil
+        HuntingModule.treasureState.startTime = tick()
+        HuntingModule.prepareTreasureTool()
+
+        task.spawn(function()
+            while HuntingModule.treasureState.isHunting do
+                local map = HuntingModule.findNextMap()
+                if not map then
+                    break
+                end
+
+                HuntingModule.treasureState.currentMap = map.Name
+                HuntingModule.treasureState.currentMapGUID = map:GetAttribute("GUID")
+
+                local success = HuntingModule.huntSingleMap(map)
+
+                if success then
+                    HuntingModule.treasureState.mapsCompleted = HuntingModule.treasureState.mapsCompleted + 1
+                    task.wait(1)
+                else
+                    break
+                end
+            end
+
+            HuntingModule.treasureState.isHunting = false
+            HuntingModule.treasureState.currentMap = nil
+            HuntingModule.treasureState.currentMapGUID = nil
+            HuntingModule.restoreStoredShovel()
+        end)
+
+        return true
+    end
+
+    function HuntingModule.stopTreasureHunting()
+        HuntingModule.treasureState.isHunting = false
+        HuntingModule.treasureState.currentMap = nil
+        HuntingModule.treasureState.currentMapGUID = nil
+    end
+
+    function HuntingModule.isTreasureHunting()
+        return HuntingModule.treasureState.isHunting
+    end
+
+    function HuntingModule.getTreasureHuntStatus()
+        return {
+            isHunting = HuntingModule.treasureState.isHunting,
+            mapsCompleted = HuntingModule.treasureState.mapsCompleted,
+            currentMap = HuntingModule.treasureState.currentMap,
+            currentMapGUID = HuntingModule.treasureState.currentMapGUID,
+            duration = HuntingModule.treasureState.startTime and (tick() - HuntingModule.treasureState.startTime) or 0
+        }
+    end
+end
+
+local ServerUtilityModule = {}
+do
+    function ServerUtilityModule.rejoin()
+        if #Services.Players:GetPlayers() <= 1 then
+            Player:Kick("Rejoining...")
+            task.wait()
+            Services.TeleportService:Teleport(game.PlaceId, Player)
+        else
+            Services.TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, Player)
+        end
+    end
+
+    function ServerUtilityModule.serverHop()
+        local servers = {}
+        local req = Services.HttpService:JSONDecode(game:HttpGet(
+            "https://games.roblox.com/v1/games/" .. game.PlaceId ..
+                "/servers/Public?sortOrder=Desc&limit=100&excludeFullGames=true"))
+
+        for _, v in pairs(req.data or {}) do
+            if v.id ~= game.JobId and v.playing < v.maxPlayers then
+                table.insert(servers, v.id)
+            end
+        end
+
+        if #servers > 0 then
+            Services.TeleportService:TeleportToPlaceInstance(game.PlaceId, servers[math.random(#servers)], Player)
+        else
+            Utility.createNotification("No available servers found", 4)
+        end
+    end
+
+    function ServerUtilityModule.setupAntiAFK(enabled)
+        local GC = getconnections or get_signal_cons
+        local VU = cloneref and cloneref(game:GetService("VirtualUser")) or game:GetService("VirtualUser")
+
+        if getgenv().AntiAFKConnection then
+            pcall(function() getgenv().AntiAFKConnection:Disconnect() end)
+            getgenv().AntiAFKConnection = nil
+        end
+        if getgenv().AntiAFKHeartbeat then
+            pcall(function() getgenv().AntiAFKHeartbeat:Disconnect() end)
+            getgenv().AntiAFKHeartbeat = nil
+        end
+        getgenv().AntiAFKActive = false
+
+        if enabled then
+            getgenv().AntiAFKActive = true
+
+            if GC then
+                pcall(function()
+                    for _, c in pairs(GC(Player.Idled)) do
+                        if c.Disable then pcall(function() c:Disable() end) end
+                        if c.Disconnect then pcall(function() c:Disconnect() end) end
+                    end
+                end)
+            end
+
+            getgenv().AntiAFKConnection = Player.Idled:Connect(function()
+                pcall(function()
+                    VU:CaptureController()
+                    VU:ClickButton2(Vector2.new())
+                end)
+            end)
+
+            task.spawn(function()
+                while getgenv().AntiAFKActive do
+                    task.wait(270)
+                    if not getgenv().AntiAFKActive then break end
+                    pcall(function()
+                        VU:CaptureController()
+                        VU:ClickButton1(Vector2.new(512, 400))
+                        task.wait(0.05)
+                        VU:ClickButton2(Vector2.new(512, 400))
+                        local char = Player.Character
+                        local hum = char and char:FindFirstChildOfClass("Humanoid")
+                        if hum then
+                            hum.Jump = true
+                            task.wait(0.1)
+                            hum.Jump = false
+                        end
+                    end)
+                end
+            end)
+        end
+    end
+end
+
+local WaypointModule = {}
+do
+    function WaypointModule.getList()
+        local waypointFolder = Map:FindFirstChild("Waypoints")
+        if not waypointFolder then
+            return {}
+        end
+
+        local waypoints = {}
+        for _, wp in pairs(waypointFolder:GetChildren()) do
+            if wp:IsA("Model") then
+                table.insert(waypoints, wp.Name)
+            end
+        end
+
+        return waypoints
+    end
+
+    function WaypointModule.teleport(selection)
+        local waypointFolder = Map:FindFirstChild("Waypoints")
+        if not waypointFolder then
+            return
+        end
+
+        local attr = Player:GetAttribute("CurrentArea")
+        local currentWaypoint = nil
+
+        for _, w in pairs(waypointFolder:GetChildren()) do
+            if string.find(string.lower(attr), string.lower(w.Name)) then
+                currentWaypoint = w
+                break
+            end
+        end
+
+        currentWaypoint = currentWaypoint or waypointFolder["Museum"]
+        local targetWaypoint = waypointFolder:FindFirstChild(selection)
+
+        if currentWaypoint and targetWaypoint then
+            ReplicatedStorage.Remotes.Misc.FastTravel:FireServer(currentWaypoint, targetWaypoint)
+        end
+    end
+
+    function WaypointModule.unlockAll()
+        if not fireproximityprompt then
+            return EngProject:CreateNotification({
+                Title = "Not supported",
+                Type = "Error",
+                Description = "Your exploit does not support fireproximityprompt",
+                Duration = 4
+            })
+        end
+
+        local waypointFolder = Map:FindFirstChild("Waypoints")
+        if not waypointFolder then
+            return
+        end
+
+        local waypoints = waypointFolder:GetChildren()
+        local FastTravelDataRemote = ReplicatedStorage.Remotes.Misc.GetFastTravelData
+        local unlocked = {}
+
+        FastTravelDataRemote.OnClientEvent:Connect(function(data)
+            unlocked = data
+        end)
+
+        FastTravelDataRemote:FireServer()
+
+        local function unlock(model)
+            local prompt = model:FindFirstChild("WaypointPrompt", true)
+            if not prompt then
+                return
+            end
+
+            while unlocked[model.Name] ~= true do
+                HumanoidRootPart.CFrame = model:GetPivot() + Vector3.new(0, 5, 0)
+                fireproximityprompt(prompt)
+                Services.RunService.Heartbeat:Wait()
+            end
+        end
+
+        task.spawn(function()
+            while true do
+                for _, model in ipairs(waypoints) do
+                    if not unlocked[model.Name] then
+                        unlock(model)
+                    end
+                end
+
+                task.wait(1)
+                FastTravelDataRemote:FireServer()
+
+                if next(unlocked) and not table.find(unlocked, false) then
+                    break
+                end
+            end
+        end)
+    end
+end
+
+local BarrierRemovalModule = {}
+do
+    BarrierRemovalModule._states = {}
+
+    local function rememberPart(cache, part)
+        if cache[part] then
+            return
+        end
+
+        cache[part] = {
+            CanCollide = part.CanCollide,
+            CanTouch = part.CanTouch,
+            CanQuery = part.CanQuery,
+            Transparency = part.Transparency
+        }
+    end
+
+    function BarrierRemovalModule.getVines()
+        return Map and Map:FindFirstChild("Vines")
+    end
+
+    function BarrierRemovalModule.getAbyssalGate()
+        local abyssAssets = Map and Map:FindFirstChild("LushCaverns") and Map.LushCaverns:FindFirstChild("AbyssAssets")
+        return abyssAssets and abyssAssets:FindFirstChild("Gate")
+    end
+
+    function BarrierRemovalModule.getMountainBlock()
+        local mountains = Map and Map:FindFirstChild("Mountains")
+        local added = mountains and mountains:FindFirstChild("Added")
+        return added and added:FindFirstChild("GateBlockScript") and added.GateBlockScript:FindFirstChild("GateBlockage")
+    end
+
+    function BarrierRemovalModule.setBarrierEnabled(key, root, enabled)
+        if not root then
+            return false
+        end
+
+        local cache = BarrierRemovalModule._states[key] or {}
+        BarrierRemovalModule._states[key] = cache
+
+        local objects = root:IsA("BasePart") and {root} or root:GetDescendants()
+        for _, object in ipairs(objects) do
+            if object:IsA("BasePart") then
+                if enabled then
+                    local saved = cache[object]
+                    if saved then
+                        object.CanCollide = saved.CanCollide
+                        object.CanTouch = saved.CanTouch
+                        object.CanQuery = saved.CanQuery
+                        object.Transparency = saved.Transparency
+                    end
+                else
+                    rememberPart(cache, object)
+                    object.CanCollide = false
+                    object.CanTouch = false
+                    object.CanQuery = false
+                    object.Transparency = math.max(object.Transparency, 0.75)
+                end
+            end
+        end
+
+        if enabled then
+            for part in pairs(cache) do
+                if not part.Parent then
+                    cache[part] = nil
+                end
+            end
+        end
+
+        return true
+    end
+
+    function BarrierRemovalModule.toggleVines(disabled)
+        return BarrierRemovalModule.setBarrierEnabled("vines", BarrierRemovalModule.getVines(), not disabled)
+    end
+
+    function BarrierRemovalModule.toggleAbyssalGate(disabled)
+        return BarrierRemovalModule.setBarrierEnabled("abyssalGate", BarrierRemovalModule.getAbyssalGate(), not disabled)
+    end
+
+    function BarrierRemovalModule.toggleMountainBlock(disabled)
+        return BarrierRemovalModule.setBarrierEnabled("peakObstruction", BarrierRemovalModule.getMountainBlock(),
+            not disabled)
+    end
+
+    function BarrierRemovalModule.removeCrocodiles()
+        local crocsFolder = Map and Map:FindFirstChild("Crocodiles")
+        if crocsFolder then
+            crocsFolder:Destroy()
+            Utility.createNotification("Crocodiles removed!")
+            return
+        end
+        Utility.createNotification("Crocodiles not found, already removed?")
+    end
+end
+
+local TravelMerchantModule = {}
+do
+    TravelMerchantModule.running = false
+    TravelMerchantModule.selectedItems = {}
+    TravelMerchantModule.totalBought = 0
+    TravelMerchantModule.restockBindable = nil
+
+    local function getBuyItemRemote()
+        local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+        if not remotes then return nil end
+        local shop = remotes:FindFirstChild("Shop")
+        if not shop then return nil end
+        return shop:FindFirstChild("BuyItem")
+    end
+
+    TravelMerchantModule.KnownItems = {
+        "Blessed Enchant Book",
+        "Boosting Enchant Book",
+        "Cosmic Enchant Book",
+        "Destructive Enchant Book",
+        "Gigantic Enchant Book",
+        "Glowing Enchant Book",
+        "Greedy Enchant Book",
+        "Infernal Enchant Book",
+        "Midas Enchant Book",
+        "Prismatic Enchant Book",
+        "Titanic Enchant Book",
+        "Unstable Enchant Book",
+        "Meteor Shower Token",
+        "Rapid Rivers Token",
+        "Solar Token",
+        "Perfect Reforge Ticket",
+        "Perfect Reforge Token",
+        "Traveler's Backpack",
+        "Warp Device",
+        "Meteor Fragment",
+        "Instability Potion",
+        "Quake Potion",
+    }
+
+    function TravelMerchantModule.getShopItem(itemName)
+        local lowerItemName = itemName:lower()
+        for _, desc in ipairs(Services.Workspace:GetDescendants()) do
+            local isMatch = false
+            if desc.Name:lower() == lowerItemName then
+                isMatch = true
+            elseif desc:GetAttribute("ItemName") and desc:GetAttribute("ItemName"):lower() == lowerItemName then
+                isMatch = true
+            end
+
+            if isMatch then
+                if desc:GetAttribute("Price") ~= nil or desc:GetAttribute("ShardPrice") ~= nil or desc:GetAttribute("MerchantBaseStock") ~= nil then
+                    return desc
+                end
+
+                local si = desc:FindFirstChild("ShopItem")
+                if si then return si end
+
+                for _, ch in ipairs(desc:GetChildren()) do
+                    if ch:GetAttribute("Price") ~= nil or ch:GetAttribute("ShardPrice") ~= nil or ch:GetAttribute("MerchantBaseStock") ~= nil then
+                        return ch
+                    end
+                end
+            end
+
+            if desc.Name == "ShopItem" then
+                if desc:GetAttribute("ItemName") and desc:GetAttribute("ItemName"):lower() == lowerItemName then
+                    return desc
+                elseif desc.Parent and desc.Parent.Name:lower() == lowerItemName then
+                    return desc
+                end
+            end
+        end
+
+        local purchasable = Services.Workspace:FindFirstChild("Purchasable")
+        if purchasable then
+            local item = purchasable:FindFirstChild(itemName)
+            if item then return item:FindFirstChild("ShopItem") or item end
+        end
+
+        return nil
+    end
+
+    function TravelMerchantModule.getItemCurrency(shopItem)
+        if not shopItem then return "Unknown" end
+        if shopItem:GetAttribute("Price") then return "Money" end
+        if shopItem:GetAttribute("ShardPrice") then return "Shard" end
+        return "Unknown"
+    end
+
+    function TravelMerchantModule.matchesFilter(shopItem, useMoney, useShard)
+        if not shopItem then return false end
+        local hasPrice = shopItem:GetAttribute("Price") ~= nil
+        local hasShard = shopItem:GetAttribute("ShardPrice") ~= nil
+        if not hasPrice and not hasShard then return true end
+        if useMoney and hasPrice then return true end
+        if useShard and hasShard then return true end
+        return false
+    end
+
+    function TravelMerchantModule.buyAndValidate(itemName, useMoney, useShard)
+        local shopItem = TravelMerchantModule.getShopItem(itemName)
+        if not shopItem then return false, "not_found" end
+
+        local stock = shopItem:GetAttribute("MerchantBaseStock")
+        if stock ~= nil and stock <= 0 then return false, "no_stock" end
+
+        if not TravelMerchantModule.matchesFilter(shopItem, useMoney, useShard) then
+            return false, "filter_mismatch"
+        end
+
+        local BuyItemRemote = getBuyItemRemote()
+        if not BuyItemRemote then return false, "no_remote" end
+
+        local invBefore = 0
+        pcall(function()
+            local bp = Player:FindFirstChild("BackpackTwo") or Player:FindFirstChild("Backpack")
+            if bp then invBefore = #bp:GetChildren() end
+        end)
+        local stockBefore = stock or 0
+
+        local ok, result = pcall(function()
+            return BuyItemRemote:InvokeServer(shopItem, 1)
+        end)
+        if not ok then
+            pcall(function() BuyItemRemote:FireServer(shopItem, 1) end)
+        end
+
+        task.wait(0.6)
+
+        local stockAfter = shopItem:GetAttribute("MerchantBaseStock")
+        if stockAfter ~= nil and stockBefore ~= nil and stockAfter < stockBefore then
+            return true, "confirmed_stock"
+        end
+
+        local invAfter = 0
+        pcall(function()
+            local bp = Player:FindFirstChild("BackpackTwo") or Player:FindFirstChild("Backpack")
+            if bp then invAfter = #bp:GetChildren() end
+        end)
+        if invAfter > invBefore then
+            return true, "confirmed_inv"
+        end
+
+        if ok and stock == nil then
+            return true, "assumed_ok"
+        end
+
+        return false, "stock_unchanged"
+    end
+
+    function TravelMerchantModule.waitForRestock()
+        local bindable = Instance.new("BindableEvent")
+        TravelMerchantModule.restockBindable = bindable
+        local connections = {}
+
+        local function onRestock()
+            if TravelMerchantModule.restockBindable then
+                bindable:Fire()
+            end
+        end
+
+        for _, itemName in ipairs(TravelMerchantModule.selectedItems) do
+            local shopItem = TravelMerchantModule.getShopItem(itemName)
+            if shopItem then
+                local conn = shopItem:GetAttributeChangedSignal("MerchantBaseStock"):Connect(function()
+                    local newStock = shopItem:GetAttribute("MerchantBaseStock") or 0
+                    if newStock > 0 then onRestock() end
+                end)
+                table.insert(connections, conn)
+            end
+        end
+
+        local descConn = Services.Workspace.DescendantAdded:Connect(function(desc)
+            local nameLower = desc.Name:lower()
+            if nameLower:find("shop") or nameLower:find("merchant") then
+                task.wait(0.5)
+                onRestock()
+            else
+                for _, itemName in ipairs(TravelMerchantModule.selectedItems) do
+                    if nameLower:find(itemName:lower(), 1, true) then
+                        task.wait(0.5)
+                        onRestock()
+                        break
+                    end
+                end
+            end
+        end)
+        table.insert(connections, descConn)
+
+        task.spawn(function()
+            task.wait(300)
+            onRestock()
+        end)
+
+        bindable.Event:Wait()
+        for _, conn in ipairs(connections) do
+            pcall(function() conn:Disconnect() end)
+        end
+        pcall(function() bindable:Destroy() end)
+        TravelMerchantModule.restockBindable = nil
+    end
+end
+
+local SummerModule = {}
+do
+    local AddCauldronItem = ReplicatedStorage:FindFirstChild("Remotes")
+        and ReplicatedStorage.Remotes:FindFirstChild("TemporaryEvents")
+        and ReplicatedStorage.Remotes.TemporaryEvents:FindFirstChild("AddCauldronItem")
+
+    local UpdateCauldronData = ReplicatedStorage:FindFirstChild("Remotes")
+        and ReplicatedStorage.Remotes:FindFirstChild("TemporaryEvents")
+        and ReplicatedStorage.Remotes.TemporaryEvents:FindFirstChild("UpdateCauldronData")
+
+    local ClaimCauldron = ReplicatedStorage:FindFirstChild("Remotes")
+        and ReplicatedStorage.Remotes:FindFirstChild("TemporaryEvents")
+        and ReplicatedStorage.Remotes.TemporaryEvents:FindFirstChild("ClaimCauldron")
+
+    SummerModule.ModifierPriority = {"Hearthflame", "Tidal", "Summer"}
+    SummerModule.RarityPriority = {"Exotic", "Mythic", "Legendary", "Epic", "Rare", "Uncommon", "Common"}
+
+    function SummerModule.getAllRarities()
+        local rMod = require(ReplicatedStorage.GameInfo.Rarities)
+        local rarities = {}
+        local seen = {}
+        for _, item in ipairs(ReplicatedStorage.Items.Valuables:GetChildren()) do
+            local r = item:GetAttribute("Rarity")
+            if r and not seen[r] then
+                seen[r] = true
+                table.insert(rarities, r)
+            end
+        end
+        table.sort(rarities, function(a, b)
+            return (rMod.Rank[a] or 0) > (rMod.Rank[b] or 0)
+        end)
+        return rarities
+    end
+
+    local function isInList(list, value)
+        for _, v in ipairs(list) do
+            if v == value then return true end
+        end
+        return false
+    end
+
+    function SummerModule.summerEquipTool(tool)
+        local equipRemote = ReplicatedStorage:FindFirstChild("Remotes")
+            and ReplicatedStorage.Remotes:FindFirstChild("CustomBackpack")
+            and ReplicatedStorage.Remotes.CustomBackpack:FindFirstChild("EquipRemote")
+
+        if equipRemote then
+            pcall(function()
+                equipRemote:FireServer(tool)
+            end)
+        else
+            local character = Player.Character
+            if not character then return false end
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            if not humanoid then return false end
+            pcall(function() humanoid:EquipTool(tool) end)
+        end
+
+        task.wait(0.5)
+        local character = Player.Character
+        if not character then return false end
+        return character:FindFirstChild(tool.Name) ~= nil
+    end
+
+    function SummerModule.findBestToolByPriority()
+        local bp = getBackpack()
+        if not bp then return nil, nil, nil end
+
+        local Valuables = ReplicatedStorage.Items.Valuables
+
+        for _, modifier in ipairs(SummerModule.ModifierPriority) do
+            if not isInList(State.Summer.selectedModifiers, modifier) then continue end
+
+            for _, rarity in ipairs(SummerModule.RarityPriority) do
+                if not isInList(State.Summer.selectedRarities, rarity) then continue end
+
+                for _, tool in ipairs(bp:GetChildren()) do
+                    if tool:IsA("Tool") then
+                        local itemData = tool:FindFirstChild("ItemData")
+                        local mod = (itemData and itemData:GetAttribute("Modifier"))
+                            or tool:GetAttribute("Modifier")
+
+                        if mod == modifier then
+                            local valuable = Valuables:FindFirstChild(tool.Name)
+                            if valuable and valuable:GetAttribute("Rarity") == rarity then
+                                return tool, modifier, rarity
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        return nil, nil, nil
+    end
+
+    function SummerModule.countAllMatchingTools()
+        local bp = getBackpack()
+        if not bp then return 0 end
+
+        local Valuables = ReplicatedStorage.Items.Valuables
+        local count = 0
+
+        for _, tool in ipairs(bp:GetChildren()) do
+            if tool:IsA("Tool") then
+                local itemData = tool:FindFirstChild("ItemData")
+                local mod = (itemData and itemData:GetAttribute("Modifier"))
+                    or tool:GetAttribute("Modifier")
+
+                if isInList(State.Summer.selectedModifiers, mod) then
+                    local valuable = Valuables:FindFirstChild(tool.Name)
+                    local rarity = valuable and valuable:GetAttribute("Rarity")
+                    if rarity and isInList(State.Summer.selectedRarities, rarity) then
+                        count = count + 1
+                    end
+                end
+            end
+        end
+        return count
+    end
+
+    function SummerModule.init()
+        if UpdateCauldronData then
+            UpdateCauldronData.OnClientEvent:Connect(function(progress, quality, deliveryTime)
+                State.Summer.progress = progress or 0
+                State.Summer.quality = quality or 0
+                State.Summer.deliveryTime = deliveryTime or 0
+            end)
+
+            task.spawn(function()
+                repeat task.wait(1) until Player:GetAttribute("DataLoaded")
+                UpdateCauldronData:FireServer()
+            end)
+        end
+    end
+end
+
+local AutoQuestModule = {}
+do
+    local running = false
+    local questThread = nil
+    
+    local ItemToWaypoint = {
+        ["amethyst"] = "Crystal Cavern",
+        ["crystal"] = "Crystal Cavern",
+        ["gold"] = "Fortune River",
+        ["obsidian"] = "Volcano",
+        ["dragon"] = "Volcano",
+        ["fossil"] = "Windswept Beach",
+        ["ammonite"] = "Windswept Beach",
+        ["amber"] = "Fungal Marsh",
+        ["swamp"] = "Rotwood Swamp",
+        ["cinnabar"] = "Volcano",
+        ["ice"] = "Frozen Peak",
+        ["glacial"] = "Frozen Peak",
+        ["sand"] = "Rubble Creek",
+        ["dollar"] = "Fortune River",
+        ["silver"] = "Sunset Beach",
+        ["copper"] = "Crystal Cavern",
+        ["pyrite"] = "Rubble Creek",
+        ["platinum"] = "Rubble Creek",
+        ["seashell"] = "Sunset Beach",
+        ["pearl"] = "Sunset Beach",
+        ["blue ice"] = "Frozen Peak",
+        ["titanium"] = "Rubble Creek",
+        ["neodymium"] = "Rubble Creek",
+        ["topaz"] = "Rubble Creek",
+        ["nickel"] = "Starfall River",
+        ["ruby"] = "Crystal Cavern",
+        ["sapphire"] = "Sunset Beach",
+        ["diamond"] = "Crystal Cavern",
+        ["emerald"] = "Fortune River",
+        ["uranium"] = "Overgrown Grotto",
+        ["sulfur"] = "Volcano",
+        ["meteor"] = "Meteor Valley",
+        ["starfall"] = "Starfall River",
+        ["starpiercer"] = "Meteor Falls",
+        ["singularium"] = "Starfall River",
+        ["celestium"] = "Astral Caverns",
+        ["cryonic"] = "Frozen Peak",
+        ["umbrite"] = "Abyssal Depths",
+        ["malachite"] = "Crystal Caverns",
+        ["astral spore"] = "Fungal Marsh",
+        ["bloodstone"] = "Rotwood Swamp",
+        ["voidstone"] = "The Void",
+        ["dinosaur skull"] = "Infernal Heart",
+        ["vineheart"] = "Deeproot Spring"
+    }
+
+    local MineralDifficulty = {
+        ["sand"] = 1, ["fossil"] = 1, ["ammonite"] = 1, ["seashell"] = 1, ["pearl"] = 1, ["dollar"] = 1,
+        ["copper"] = 2, ["pyrite"] = 2, ["gold"] = 2, ["amethyst"] = 2, ["crystal"] = 2, ["malachite"] = 2, ["silver"] = 2, ["amber"] = 2, ["swamp"] = 2,
+        ["platinum"] = 3, ["blue ice"] = 3, ["ice"] = 3, ["glacial"] = 3, ["titanium"] = 3, ["neodymium"] = 3, ["topaz"] = 3, ["nickel"] = 3, ["ruby"] = 3, ["sapphire"] = 3, ["diamond"] = 3, ["emerald"] = 3, ["sulfur"] = 3,
+        ["uranium"] = 4, ["meteor"] = 4, ["starfall"] = 4, ["starpiercer"] = 4, ["singularium"] = 4, ["celestium"] = 4, ["astral spore"] = 4, ["bloodstone"] = 4, ["voidstone"] = 4, ["dinosaur skull"] = 4, ["vineheart"] = 4,
+        ["cryonic"] = 5, ["umbrite"] = 5, ["cryonic artifact"] = 5
+    }
+
+    local function findDredgeMaster()
+        local NPCs = workspace:FindFirstChild("NPCs")
+        if NPCs then
+            for _, folder in ipairs(NPCs:GetChildren()) do
+                local dm = folder:FindFirstChild("Dredge Master") or folder:FindFirstChild("DredgeMaster")
+                if dm then
+                    return dm
+                end
+            end
+            for _, desc in ipairs(NPCs:GetDescendants()) do
+                if desc.Name == "Dredge Master" or desc.Name == "DredgeMaster" then
+                    return desc
+                end
+            end
+        end
+        return nil
+    end
+
+    local function isDredgeMaster(desc, text)
+        local t = (text or ""):lower()
+        if t:find("dredge%s*master") or t:find("dredgemaster") then
+            return true
+        end
+        if desc.Parent then
+            for _, sibling in ipairs(desc.Parent:GetChildren()) do
+                if sibling:IsA("TextLabel") and sibling.Text ~= "" then
+                    local st = sibling.Text:lower()
+                    if st:find("dredge%s*master") or st:find("dredgemaster") then
+                        return true
+                    end
+                end
+            end
+        end
+        local p = desc.Parent
+        local playerGui = Player:FindFirstChild("PlayerGui")
+        for i = 1, 5 do
+            if not p or p == playerGui then break end
+            for _, child in ipairs(p:GetChildren()) do
+                if child:IsA("TextLabel") and child.Text ~= "" then
+                    local ct = child.Text:lower()
+                    if ct:find("dredge%s*master") or ct:find("dredgemaster") then
+                        return true
+                    end
+                end
+            end
+            p = p.Parent
+        end
+        return false
+    end
+
+    local function getActiveQuestDetails()
+        local playerGui = Player:FindFirstChild("PlayerGui")
+        if not playerGui then return nil, nil, nil end
+        
+        local candidates = {}
+        local seenItems = {}
+        for _, desc in ipairs(playerGui:GetDescendants()) do
+            if desc:IsA("TextLabel") and desc.Text ~= "" then
+                local text = desc.Text
+                local cur, tot = text:match("(%d+)%s*/%s*(%d+)")
+                if cur and tot then
+                    cur = tonumber(cur)
+                    tot = tonumber(tot)
+                    
+                    if isDredgeMaster(desc, text) then
+                        local cleanText = text:gsub("^%s*[%(%[]?%s*%d+%s*/%s*%d+%s*[%]%)]?%s*", "")
+                        cleanText = cleanText:gsub("%s*[%(%[]?%s*%d+%s*/%s*%d+%s*[%]%)]?%s*$", "")
+                        cleanText = cleanText:gsub("^%s*[^%w%s]+%s*", ""):gsub("%s*[^%w%s]+%s*$", ""):gsub("^%s+", ""):gsub("%s+$", "")
+                        
+                        if cleanText == "" and desc.Parent then
+                            for _, sibling in ipairs(desc.Parent:GetChildren()) do
+                                if sibling:IsA("TextLabel") and sibling ~= desc and sibling.Text ~= "" then
+                                    local sibText = sibling.Text
+                                    if not sibText:match("^%s*%d+%s*$") and not sibText:match("%d+%s*/%s*%d+") then
+                                        cleanText = sibText
+                                        cleanText = cleanText:gsub("^%s*[Dd]redge%s*[Mm]aster%s*[Qq]uest%s*:%s*", "")
+                                        cleanText = cleanText:gsub("^%s*[Qq]uest%s*:%s*", "")
+                                        cleanText = cleanText:gsub("^%s*[Tt]ask%s*:%s*", "")
+                                        cleanText = cleanText:gsub("^%s*[Mm]ission%s*:%s*", "")
+                                        cleanText = cleanText:gsub("^%s*[Aa]ctive%s*[Qq]uest%s*:%s*", "")
+                                        cleanText = cleanText:gsub("^%s*[^%w%s]+%s*", ""):gsub("%s*[^%w%s]+%s*$", ""):gsub("^%s+", ""):gsub("%s+$", "")
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                        
+                        local startPos, endPos = cleanText:lower():find("bring%s*%d*%s*")
+                        if not startPos then startPos, endPos = cleanText:lower():find("collect%s*%d*%s*") end
+                        if not startPos then startPos, endPos = cleanText:lower():find("find%s*%d*%s*") end
+                        if not startPos then startPos, endPos = cleanText:lower():find("get%s*%d*%s*") end
+                        if not startPos then startPos, endPos = cleanText:lower():find("deliver%s*%d*%s*") end
+                        if not startPos then startPos, endPos = cleanText:lower():find("gather%s*%d*%s*") end
+                        if not startPos then startPos, endPos = cleanText:lower():find("harvest%s*%d*%s*") end
+                        if not startPos then startPos, endPos = cleanText:lower():find("mine%s*%d*%s*") end
+                        if not startPos then startPos, endPos = cleanText:lower():find("fish%s*%d*%s*") end
+                        if not startPos then startPos, endPos = cleanText:lower():find("obtain%s*%d*%s*") end
+                        
+                        if startPos then
+                            cleanText = cleanText:sub(startPos)
+                        end
+                        
+                        local item = cleanText
+                        item = item:gsub("^%s*[Bb]ring%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Cc]ollect%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Ff]ind%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Gg]et%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Dd]eliver%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Gg]ather%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Hh]arvest%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Mm]ine%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Ff]ish%s*%d*%s*", "")
+                        item = item:gsub("^%s*[Oo]btain%s*%d*%s*", "")
+                        item = item:gsub("^%s*%d+%s*", "")
+                        item = item:gsub("[:;%.,]+%s*$", "")
+                        item = item:gsub("^%s+", ""):gsub("%s+$", "")
+                        
+                        local itemLower = item:lower()
+                        local difficulty = 3
+                        for k, diff in pairs(MineralDifficulty) do
+                            if itemLower:find(k) then
+                                difficulty = diff
+                                break
+                            end
+                        end
+                        
+                        if not seenItems[itemLower] then
+                            seenItems[itemLower] = true
+                            table.insert(candidates, {
+                                item = item,
+                                cur = cur,
+                                tot = tot,
+                                difficulty = difficulty,
+                                text = text
+                            })
+                        end
+                    end
+                end
+            end
+        end
+        
+        if #candidates > 0 then
+            local incomplete = {}
+            local complete = {}
+            for _, c in ipairs(candidates) do
+                if c.cur < c.tot then
+                    table.insert(incomplete, c)
+                else
+                    table.insert(complete, c)
+                end
+            end
+            
+            if #incomplete > 0 then
+                local best = incomplete[1]
+                print("[AutoQuest] Selected Incomplete Task: '" .. tostring(best.text) .. "' -> Parsed Item: '" .. tostring(best.item) .. "' (" .. tostring(best.cur) .. "/" .. tostring(best.tot) .. ")")
+                return best.item, best.cur, best.tot, candidates
+            else
+                local best = complete[1]
+                print("[AutoQuest] All tasks completed! Selected: '" .. tostring(best.text) .. "' -> Parsed Item: '" .. tostring(best.item) .. "' (" .. tostring(best.cur) .. "/" .. tostring(best.tot) .. ")")
+                return best.item, best.cur, best.tot, candidates
+            end
+        end
+        
+        return nil, nil, nil, nil
+    end
+
+    local function processDialogue()
+        task.spawn(function()
+            local playerGui = Player:FindFirstChild("PlayerGui")
+            if not playerGui then return end
+            
+            for _, child in ipairs(playerGui:GetChildren()) do
+                if child:IsA("ScreenGui") and (child.Name:lower():find("dialog") or child.Name:lower():find("quest") or child.Name:lower():find("chat") or child.Name:lower():find("npc")) then
+                    for _, desc in ipairs(child:GetDescendants()) do
+                        local isClickable = desc:IsA("TextButton") or desc:IsA("ImageButton")
+                        local textObj = nil
+                        if desc:IsA("TextLabel") then
+                            textObj = desc
+                        elseif desc:IsA("TextButton") then
+                            textObj = desc
+                        end
+                        
+                        if textObj and textObj.Text ~= "" and textObj.Visible then
+                            local txt = textObj.Text:lower()
+                            if txt:find("accept") or txt:find("yes") or txt:find("sure") or txt:find("complete") or txt:find("claim") or txt:find("turn in") or txt:find("ok") or txt:find("next") or txt:find("confirm") then
+                                local button = nil
+                                if isClickable then
+                                    button = desc
+                                else
+                                    local p = desc.Parent
+                                    while p and p ~= child do
+                                        if p:IsA("TextButton") or p:IsA("ImageButton") then
+                                            button = p
+                                            break
+                                        end
+                                        p = p.Parent
+                                    end
+                                end
+                                
+                                if button and button.Visible then
+                                    pcall(function()
+                                        if firesignal then
+                                            firesignal(button.MouseButton1Click)
+                                            firesignal(button.Activated)
+                                        end
+                                        button:Activate()
+                                    end)
+                                    task.wait(0.2)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+    end
+
+    local function updateUI(fields)
+        if State.Quest.statusUI and State.Quest.statusUI.SetFields then
+            pcall(function()
+                State.Quest.statusUI:SetFields(fields)
+            end)
+        end
+    end
+
+    function AutoQuestModule.start()
+        if running then return end
+        running = true
+        questThread = task.spawn(function()
+            while running do
+                local item, cur, tot, candidates = getActiveQuestDetails()
+                
+                if not item or (cur and tot and cur >= tot) then
+                    local targetStr = item and (item .. " (Complete!)") or "No Active Quest"
+                    
+                    local uiLines = {
+                        "Status: Teleporting to NPC",
+                        "Target: " .. targetStr
+                    }
+                    if candidates and #candidates > 0 then
+                        table.insert(uiLines, "Quest Tasks:")
+                        for _, c in ipairs(candidates) do
+                            local statusStr = c.cur >= c.tot and "Completed" or "Pending"
+                            table.insert(uiLines, string.format("- %s: %d/%d (%s)", c.item, c.cur, c.tot, statusStr))
+                        end
+                    end
+                    updateUI(uiLines)
+                    
+                    AutoFarmModule.stop()
+                    
+                    local dm = findDredgeMaster()
+                    if dm and dm:FindFirstChild("HumanoidRootPart") then
+                        local hrp = dm.HumanoidRootPart
+                        local char = Player.Character
+                        local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+                        
+                        if playerHrp then
+                            Utility.createNotification("Teleporting to Dredge Master...", 3)
+                            pcall(function()
+                                playerHrp.CFrame = hrp.CFrame * CFrame.new(0, 0, -3)
+                            end)
+                            task.wait(1.5)
+                            
+                            local prompt = dm:FindFirstChildWhichIsA("ProximityPrompt", true) or hrp:FindFirstChildWhichIsA("ProximityPrompt", true)
+                            if prompt then
+                                prompt.HoldDuration = 0
+                                updateUI({"Status: Talking to NPC", "Target: " .. targetStr})
+                                if fireproximityprompt then
+                                    fireproximityprompt(prompt)
+                                else
+                                    prompt:InputHoldBegin()
+                                    task.wait(0.1)
+                                    prompt:InputHoldEnd()
+                                end
+                                task.wait(0.5)
+                                
+                                processDialogue()
+                                task.wait(2.0)
+                            else
+                                Utility.createNotification("ProximityPrompt not found!", 3)
+                            end
+                        end
+                    else
+                        Utility.createNotification("Dredge Master not found!", 3)
+                    end
+                else
+                    local waypoint = nil
+                    local itemLower = item:lower()
+                    for key, wp in pairs(ItemToWaypoint) do
+                        if itemLower:find(key) then
+                            waypoint = wp
+                            break
+                        end
+                    end
+                    
+                    waypoint = waypoint or "Fortune River"
+                    
+                    if WaypointModule and WaypointModule.getList then
+                        local list = WaypointModule.getList()
+                        local lowerWP = waypoint:lower()
+                        for _, wpName in ipairs(list) do
+                            local lowerName = wpName:lower()
+                            if lowerName:find(lowerWP, 1, true) or lowerWP:find(lowerName, 1, true) then
+                                waypoint = wpName
+                                break
+                            end
+                        end
+                    end
+                    
+                    local currentArea = Player:GetAttribute("CurrentArea") or ""
+                    local areaMatch = string.find(currentArea:lower(), waypoint:lower())
+                    
+                    if not areaMatch then
+                        AutoFarmModule.stop()
+                        
+                        local uiLines = {
+                            "Status: Traveling to Zone",
+                            "Target Zone: " .. waypoint .. " (for " .. item .. ")"
+                        }
+                        if candidates and #candidates > 0 then
+                            table.insert(uiLines, "Quest Tasks:")
+                            for _, c in ipairs(candidates) do
+                                local statusStr = c.cur >= c.tot and "Completed" or (c.item == item and "Traveling" or "Pending")
+                                table.insert(uiLines, string.format("- %s: %d/%d (%s)", c.item, c.cur, c.tot, statusStr))
+                            end
+                        end
+                        updateUI(uiLines)
+                        Utility.createNotification("Traveling to " .. waypoint .. " for " .. item .. "...", 4)
+                        if WaypointModule and WaypointModule.teleport then
+                            WaypointModule.teleport(waypoint)
+                            task.wait(3.0)
+                        else
+                            Utility.createNotification("WaypointModule not found!", 3)
+                        end
+                    else
+                        AutoFarmModule.stop()
+                        
+                        State.Quest.isFarming = true
+                        
+                        while running and State.Quest.autoQuest and areaMatch and not (not item or (cur and tot and cur >= tot)) do
+                            if not State.Quest.autoFarm then
+                                if State.AutoFarm.locked then
+                                    CharacterLock.unlock()
+                                    State.AutoFarm.locked = false
+                                end
+                                updateUI({
+                                    "Status: Auto Farm Paused",
+                                    "Active Target: " .. item .. " (" .. tostring(cur) .. "/" .. tostring(tot) .. ")"
+                                })
+                                task.wait(1.0)
+                            elseif State.AutoFarm.interrupted then
+                                if State.AutoFarm.locked then
+                                    CharacterLock.unlock()
+                                    State.AutoFarm.locked = false
+                                end
+                                while State.AutoFarm.interrupted and running and State.Quest.autoQuest and State.Quest.autoFarm do
+                                    task.wait(0.1)
+                                end
+                            else
+                                local char = Player.Character
+                                local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+                                if playerHrp then
+                                    local nearestDeposit = scanRegionPos(playerHrp.Position, "Deposit")
+                                    local nearestWater = scanRegionPos(playerHrp.Position, "Water")
+                                    
+                                    if not nearestDeposit or not nearestWater then
+                                        for attempt = 1, 3 do
+                                            task.wait(1)
+                                            char = Player.Character
+                                            playerHrp = char and char:FindFirstChild("HumanoidRootPart")
+                                            if playerHrp then
+                                                nearestDeposit = nearestDeposit or scanRegionPos(playerHrp.Position, "Deposit")
+                                                nearestWater = nearestWater or scanRegionPos(playerHrp.Position, "Water")
+                                                if nearestDeposit and nearestWater then
+                                                    break
+                                                end
+                                            end
+                                        end
+                                    end
+                                    
+                                    if nearestDeposit and nearestWater then
+                                        local acquired = TaskManager:requestTask("AutoFarm", 1)
+                                        if acquired then
+                                            local hasTurn = TaskManager:waitForTurn("AutoFarm", 5)
+                                            if hasTurn then
+                                                local started = TaskManager:startTask("AutoFarm")
+                                                if started then
+                                                    local panStatus = PanModule.getStatus()
+                                                    if panStatus then
+                                                        AutoFarmModule.checkAndDoSell()
+                                                        
+                                                        if panStatus.isFull then
+                                                            AutoFarmModule.performTask("MovingToWater", "WashPan", nearestWater, "Wash", "Water")
+                                                        else
+                                                            AutoFarmModule.performTask("MovingToSand", "DigSand", nearestDeposit, "Dig", "Deposit")
+                                                        end
+                                                    end
+                                                    TaskManager:finishTask("AutoFarm")
+                                                end
+                                            end
+                                        end
+                                    else
+                                        if State.AutoFarm.locked then
+                                            CharacterLock.unlock()
+                                            State.AutoFarm.locked = false
+                                        end
+                                        updateUI({
+                                            "Status: Waiting for Deposit/Water",
+                                            "Active Target: " .. item
+                                        })
+                                        Utility.createNotification("Waiting for deposit/water in " .. waypoint .. "...", 3)
+                                        task.wait(1.5)
+                                    end
+                                else
+                                    task.wait(0.5)
+                                end
+                            end
+                            
+                            task.wait(0.01)
+                            
+                            item, cur, tot, candidates = getActiveQuestDetails()
+                            currentArea = Player:GetAttribute("CurrentArea") or ""
+                            areaMatch = string.find(currentArea:lower(), waypoint:lower())
+                            
+                            local uiLines = {
+                                "Status: Farming Quest Items",
+                                "Active Target: " .. (item or "None") .. " (" .. tostring(cur or 0) .. "/" .. tostring(tot or 0) .. ")"
+                            }
+                            if candidates and #candidates > 0 then
+                                table.insert(uiLines, "All Quest Tasks:")
+                                for _, c in ipairs(candidates) do
+                                    local statusStr = c.cur >= c.tot and "Completed" or (c.item == item and "Farming" or "Pending")
+                                    table.insert(uiLines, string.format("- %s: %d/%d (%s)", c.item, c.cur, c.tot, statusStr))
+                                end
+                            end
+                            updateUI(uiLines)
+                        end
+                        
+                        State.Quest.isFarming = false
+                        if State.AutoFarm.locked then
+                            CharacterLock.unlock()
+                            State.AutoFarm.locked = false
+                        end
+                    end
+                end
+                task.wait(State.Quest.interval or 10)
+            end
+        end)
+    end
+
+    function AutoQuestModule.stop()
+        running = false
+        State.Quest.isFarming = false
+        if questThread then
+            pcall(task.cancel, questThread)
+            questThread = nil
+        end
+        updateUI({"Status: Idle", "Target: None"})
+    end
+end
 
 -- ============================================================
 --  UI HELPERS & STATUS UPDATERS
@@ -9467,23 +15031,43 @@ local function initializeMainTab()
     })
 
     EngProject:CreateButton(AutoFarmSection.Container, "Save Dig Location", function()
-        showDummyWarning("Save Dig Location")
+        State.AutoFarm.sandCFrame = HumanoidRootPart.CFrame
+        State.AutoFarm.manualSand = true
+        State.AutoFarm.savedArea = Player:GetAttribute("CurrentArea")
+        EngProject:CreateNotification({
+            Type = "Success",
+            Title = "Location Saved",
+            Description = "Dig location has been saved successfully.",
+            Duration = 5
+        })
     end)
 
     EngProject:CreateButton(AutoFarmSection.Container, "Save Washing Location", function()
-        showDummyWarning("Save Washing Location")
+        State.AutoFarm.waterCFrame = HumanoidRootPart.CFrame
+        State.AutoFarm.manualWater = true
+        State.AutoFarm.savedArea = Player:GetAttribute("CurrentArea")
+        EngProject:CreateNotification({
+            Type = "Success",
+            Title = "Location Saved",
+            Description = "Washing location has been saved successfully.",
+            Duration = 5
+        })
     end)
 
-    EngProject:CreateToggle(AutoFarmSection.Container, "Enable Auto Farm", false, function(state)
-        showDummyWarning("Auto Farm")
+    autoFarmToggle1 = EngProject:CreateToggle(AutoFarmSection.Container, "Enable Auto Farm", false, function(state)
+        if state then
+            AutoFarmModule.start()
+        else
+            AutoFarmModule.stop()
+        end
     end)
 
     EngProject:CreateButton(AutoFarmSection.Container, "Unstuck Character", function()
-        showDummyWarning("Unstuck Character")
+        CharacterLock.unlock()
     end)
 
     EngProject:CreateButton(AutoFarmSection.Container, "Remove Crocodiles", function()
-        showDummyWarning("Remove Crocodiles")
+        BarrierRemovalModule.removeCrocodiles()
     end)
 
     EngProject:CreateParagraph(AutoFarmSection.Container, "How Automated Farm Works",
@@ -9568,7 +15152,8 @@ local function initializeMainTab()
 
     EngProject:CreateDropdown(SellSection.Container, "Selling Trigger Mode", {"Auto", "Threshold", "Duration"}, "Auto",
         function(selection)
-            showDummyWarning("Selling Trigger Mode")
+            State.Sell.type = selection
+            Utility.createNotification("Selling mode changed to: " .. selection)
         end, {
             Save = {
                 Key = "prospecting.sell.trigger_mode"
@@ -9576,27 +15161,91 @@ local function initializeMainTab()
         })
 
     EngProject:CreateTextInput(SellSection.Container, "Configure Threshold or Duration", nil, function(input)
-        showDummyWarning("Configure Threshold or Duration")
+        local result, kind = Utility.validateSellValue(input)
+        if result then
+            if kind == "time" then
+                State.Sell.delay = result
+                Utility.createNotification("Inventory will be sold every " .. result .. " seconds.", 10)
+            else
+                State.Sell.threshold = result
+                Utility.createNotification("Inventory will be sold after collecting " .. result .. " items.", 10)
+            end
+        else
+            Utility.createNotification("Enter a value between 10-2000 items or 30 seconds to 1 day.", 10)
+        end
     end, {
         Save = {
             Key = "prospecting.sell.trigger_value"
         }
     })
 
+    -- Tombol utama: teleport langsung ke merchant & jual
     EngProject:CreateButton(SellSection.Container, "⚡ Teleport ke Merchant & Jual Sekarang", function()
-        showDummyWarning("Teleport & Sell")
+        task.spawn(function()
+            MerchantModule.directTeleportAndSell()
+        end)
     end)
 
+    -- Tombol cari semua merchant di peta
     EngProject:CreateButton(SellSection.Container, "🔍 Cari Merchant di Peta Ini", function()
-        showDummyWarning("Scan Merchant")
+        task.spawn(function()
+            local all = MerchantModule.getAllMerchants()
+            if #all == 0 then
+                Utility.createNotification("Tidak ada merchant ditemukan! Cek workspace.NPCs", 5)
+                return
+            end
+
+            local char = Player.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            local lines = "Merchant ditemukan: " .. #all
+
+            for i, m in ipairs(all) do
+                local dist = hrp and math.floor((hrp.Position - m.hrp.Position).Magnitude) or 0
+                lines = lines .. "\n[" .. i .. "] " .. m.name .. " (" .. m.folder .. ") - " .. dist .. " studs"
+            end
+            Utility.createNotification(lines, 8)
+        end)
     end)
 
+    -- Tombol sell lama (pakai TaskManager)
     EngProject:CreateButton(SellSection.Container, "Sell All Items Now (TaskManager)", function()
-        showDummyWarning("Sell All Items Now")
+        if TaskManager:getMainTask() then
+            return Utility.createNotification("Please wait for the current task to finish before selling.", 5)
+        end
+
+        if not TaskManager:requestTask("ManualSell", 3) then
+            return Utility.createNotification("Unable to initiate selling sequence.", 5)
+        end
+
+        task.spawn(function()
+            if TaskManager:waitForTurn("ManualSell", 10) and TaskManager:startTask("ManualSell") then
+                TaskManager:setCurrentTask("Selling")
+                SellModule.sell({}, State.Sell.mode or "Teleport")
+                TaskManager:finishTask("ManualSell")
+            end
+        end)
     end)
 
     EngProject:CreateToggle(SellSection.Container, "Enable Automatic Selling", false, function(state)
-        showDummyWarning("Automatic Selling")
+        State.Sell.autoSell = state
+        State.Sell._lastSell = State.Sell._lastSell or 0
+        State.Sell._scheduledSell = false
+
+        if state then
+            task.spawn(function()
+                while State.Sell.autoSell do
+                    if State.Sell.type == "Duration" then
+                        local delay = tonumber(State.Sell.delay) or 300
+                        if os.clock() - State.Sell._lastSell >= delay then
+                            State.Sell._scheduledSell = true
+                        end
+                    end
+                    task.wait(5)
+                end
+            end)
+        end
+
+        Utility.createNotification(state and "Automatic Selling Enabled" or "Automatic Selling Disabled")
     end)
 
     EngProject:CreateParagraph(SellSection.Container, "Selling Configuration",
@@ -9629,7 +15278,83 @@ local function initializeHuntingTab()
 
     local treasureStatus = EngProject:CreateParagraph(TreasureSection.Container, "Hunt Status",
         {"Idle", "No maps detected"})
-    treasureStatusUI = treasureStatus
+
+    local function setTreasureStatus(status, detail)
+        treasureStatus:SetFields({"Status: " .. status, detail})
+    end
+
+    local function getTreasureStatusText()
+        local status = HuntingModule.getTreasureHuntStatus()
+        local mapText = status.currentMap and ("Current map: " .. status.currentMap) or "Searching for maps"
+        return "Maps completed: " .. status.mapsCompleted, mapText
+    end
+
+    local function isAutoFarmWashPending()
+        if not (State.AutoFarm.active and State.AutoFarm.running) then
+            return false
+        end
+
+        local currentTask = TaskManager:getCurrentTask()
+        local nextTask = TaskManager:getNextTask()
+        if currentTask == "WashPan" or nextTask == "WashPan" then
+            return true
+        end
+
+        local ok, panStatus = pcall(function()
+            return PanModule.getStatus()
+        end)
+
+        return ok and panStatus and panStatus.isFull == true
+    end
+
+    local function waitForAutoFarmWash()
+        if not isAutoFarmWashPending() then
+            return true
+        end
+
+        local startedAt = tick()
+        setTreasureStatus("Waiting", "Pan is ready to wash; finishing wash before treasure hunt")
+
+        while State.Hunting.autoTreasure and isAutoFarmWashPending() do
+            if tick() - startedAt > 120 then
+                setTreasureStatus("Waiting", "Wash has not completed yet; treasure hunt will retry soon")
+                return false
+            end
+            task.wait(0.5)
+        end
+
+        return State.Hunting.autoTreasure
+    end
+
+    local function pauseAutoFarmForTreasure()
+        if State.Hunting.autoTreasurePausedFarm then
+            return true
+        end
+
+        if not waitForAutoFarmWash() then
+            return false
+        end
+
+        if AutoFarmModule.pause("TreasureHunt") then
+            State.Hunting.autoTreasurePausedFarm = true
+            setTreasureStatus("Pausing Farm", "Treasure map found; auto farm is paused until maps are cleared")
+            task.wait(0.35)
+        end
+
+        return true
+    end
+
+    local function resumeAutoFarmFromTreasure()
+        if not State.Hunting.autoTreasurePausedFarm then
+            return
+        end
+
+        State.Hunting.autoTreasurePausedFarm = false
+        if AutoFarmModule.resume("TreasureHunt") and State.AutoFarm.active then
+            setTreasureStatus("Resuming Farm", "Treasure maps cleared; auto farm resumed")
+            task.wait(0.5)
+        end
+    end
 
     EngProject:CreateParagraph(TreasureSection.Container, "Treasure Hunt Instructions",
         {"Ensure you have a treasure map in your inventory before starting.", {
@@ -9641,15 +15366,155 @@ local function initializeHuntingTab()
         }})
 
     EngProject:CreateButton(TreasureSection.Container, "Start Treasure Hunt", function()
-        startTreasureHunting()
+        if State.Hunting.autoTreasure then
+            setTreasureStatus("Auto Running", "Disable auto treasure hunt before starting a manual hunt")
+            return
+        end
+
+        if HuntingModule.isTreasureHunting() then
+            setTreasureStatus("Already Running", "Hunt in progress")
+            return
+        end
+
+        local map = HuntingModule.findNextMap()
+        if not map then
+            setTreasureStatus("Failed", "No treasure maps found in inventory")
+            return
+        end
+
+        if HuntingModule.startTreasureHunting() then
+            setTreasureStatus("Active", "Hunting in progress")
+            task.spawn(function()
+                while HuntingModule.isTreasureHunting() do
+                    local progress, mapText = getTreasureStatusText()
+                    treasureStatus:SetFields({"Status: Active", progress, {
+                        Text = mapText,
+                        IsSubField = true
+                    }})
+                    task.wait(1)
+                end
+                setTreasureStatus("Completed", "Hunt finished - " .. HuntingModule.treasureState.mapsCompleted ..
+                    " maps hunted")
+            end)
+        else
+            setTreasureStatus("Failed", "Unable to start hunt")
+        end
     end)
 
     EngProject:CreateButton(TreasureSection.Container, "Stop Treasure Hunt", function()
-        stopTreasureHunting()
+        State.Hunting.autoTreasure = false
+
+        if not HuntingModule.isTreasureHunting() then
+            resumeAutoFarmFromTreasure()
+            setTreasureStatus("Idle", "No hunt in progress")
+            return
+        end
+        HuntingModule.stopTreasureHunting()
+        resumeAutoFarmFromTreasure()
+        setTreasureStatus("Stopped", "Hunt halted")
     end)
 
     EngProject:CreateToggle(TreasureSection.Container, "Enable Auto Treasure Hunt", false, function(state)
-        showDummyWarning("Auto Treasure Hunt")
+        State.Hunting.autoTreasure = state
+
+        if not state then
+            if HuntingModule.isTreasureHunting() then
+                HuntingModule.stopTreasureHunting()
+            end
+            resumeAutoFarmFromTreasure()
+            setTreasureStatus("Idle", "Auto treasure hunt disabled")
+            return
+        end
+
+        if State.Hunting.autoTreasureRunning then
+            setTreasureStatus("Already Running", "Auto treasure hunt is already active")
+            return
+        end
+
+        State.Hunting.autoTreasureRunning = true
+        setTreasureStatus("Starting", "Initializing auto treasure hunt...")
+
+        task.spawn(function()
+            while State.Hunting.autoTreasure do
+                local ok, err = pcall(function()
+                    if HuntingModule.isTreasureHunting() then
+                        local progress, mapText = getTreasureStatusText()
+                        treasureStatus:SetFields({"Status: Active", progress, {
+                            Text = mapText,
+                            IsSubField = true
+                        }})
+                        task.wait(1)
+                        return
+                    end
+
+                    local map = HuntingModule.findNextMap()
+                    if not map then
+                        resumeAutoFarmFromTreasure()
+                        setTreasureStatus("Waiting", "No treasure maps found, checking again soon")
+                        task.wait(3)
+                        return
+                    end
+
+                    if not pauseAutoFarmForTreasure() then
+                        task.wait(2)
+                        return
+                    end
+                    setTreasureStatus("Preparing", "Starting hunt on map: " .. map.Name)
+                    task.wait(0.25)
+
+                    if not HuntingModule.startTreasureHunting({
+                        PreserveCount = true
+                    }) then
+                        setTreasureStatus("Retrying", "Could not start hunt yet")
+                        task.wait(2)
+                        return
+                    end
+
+                    local deadline = tick() + 180
+                    local lastMapGUID = nil
+                    while State.Hunting.autoTreasure and HuntingModule.isTreasureHunting() do
+                        local status = HuntingModule.getTreasureHuntStatus()
+                        if status.currentMapGUID and status.currentMapGUID ~= lastMapGUID then
+                            lastMapGUID = status.currentMapGUID
+                            deadline = tick() + 180
+                        end
+
+                        local progress, mapText = getTreasureStatusText()
+                        treasureStatus:SetFields({"Status: Active", progress, {
+                            Text = mapText,
+                            IsSubField = true
+                        }})
+
+                        if tick() >= deadline then
+                            setTreasureStatus("Timeout", "Refreshed map duration or took too long, restarting cycle")
+                            HuntingModule.stopTreasureHunting()
+                            break
+                        end
+
+                        task.wait(1)
+                    end
+                end)
+
+                if not ok then
+                    warn("AutoTreasure Error: " .. tostring(err))
+                    resumeAutoFarmFromTreasure()
+                    State.Hunting.autoTreasure = false
+                    setTreasureStatus("Error", "Auto treasure hunt stopped after an error")
+                    break
+                end
+
+                task.wait(0.35)
+            end
+
+            if HuntingModule.isTreasureHunting() then
+                HuntingModule.stopTreasureHunting()
+            end
+
+            resumeAutoFarmFromTreasure()
+            State.Hunting.autoTreasure = false
+            State.Hunting.autoTreasureRunning = false
+            setTreasureStatus("Idle", "Auto treasure hunt disabled")
+        end)
     end)
 
     local GeodeSection = EngProject:CreateSection(RightPage, "Geode Extraction", {
@@ -9661,11 +15526,9 @@ local function initializeHuntingTab()
 
     local geodeStatus = EngProject:CreateParagraph(GeodeSection.Container, "Extraction Status",
         {"Idle", "No geodes located"})
-    geodeStatusUI = geodeStatus
 
-    local inventoryDisplayPara = EngProject:CreateParagraph(GeodeSection.Container, "Inventory Status",
-        {getFormattedInventoryStatus()})
-    inventoryDisplay = inventoryDisplayPara
+    local inventoryDisplay = EngProject:CreateParagraph(GeodeSection.Container, "Inventory Status",
+        {HuntingModule.getFormattedInventoryStatus()})
 
     EngProject:CreateParagraph(GeodeSection.Container, "Geode Extraction Guide",
         {"Geodes are automatically detected when available in your inventory.", {
@@ -9677,19 +15540,130 @@ local function initializeHuntingTab()
         }})
 
     EngProject:CreateButton(GeodeSection.Container, "Start Geode Opening", function()
-        startGeodeOpener()
+        if HuntingModule.isGeodeOpening() then
+            geodeStatus:SetFields({"Status: Already Running", "Geode extraction in progress"})
+            return
+        end
+
+        local hasGeode = HuntingModule.findGeodeInBackpack() ~= nil
+        local isEquipped = HuntingModule.isGeodeEquipped()
+        local inHotbar = HuntingModule.isGeodeInHotbar()
+
+        if not hasGeode and not isEquipped and not inHotbar then
+            geodeStatus:SetFields({"Status: Failed", "No geodes found in inventory, hotbar, or equipped"})
+            return
+        end
+
+        HuntingModule.updateInventoryCache()
+
+        if HuntingModule.isBackpackFull() then
+            geodeStatus:SetFields({"Status: Failed", "Backpack is full, cannot extract geodes"})
+            return
+        end
+
+        if HuntingModule.startGeodeOpening() then
+            geodeStatus:SetFields({"Status: Active", "Opening geodes"})
+            inventoryDisplay:SetFields({HuntingModule.getFormattedInventoryStatus()})
+
+            task.spawn(function()
+                while HuntingModule.isGeodeOpening() do
+                    inventoryDisplay:SetFields({HuntingModule.getFormattedInventoryStatus()})
+                    task.wait(0.5)
+                end
+                inventoryDisplay:SetFields({HuntingModule.getFormattedInventoryStatus()})
+            end)
+        else
+            geodeStatus:SetFields({"Status: Failed", "Unable to start geode opening"})
+        end
     end)
 
     EngProject:CreateButton(GeodeSection.Container, "Stop Geode Opening", function()
-        stopGeodeOpener()
+        if not HuntingModule.isGeodeOpening() then
+            geodeStatus:SetFields({"Status: Idle", "No extraction in progress"})
+            return
+        end
+
+        HuntingModule.stopGeodeOpening()
+        geodeStatus:SetFields({"Status: Stopped", "Extraction halted"})
+        HuntingModule.updateInventoryCache()
+        inventoryDisplay:SetFields({HuntingModule.getFormattedInventoryStatus()})
     end)
 
     EngProject:CreateButton(GeodeSection.Container, "Sell All Items", function()
-        showDummyWarning("Sell All Items")
+        if TaskManager:getMainTask() then
+            return Utility.createNotification("Please wait for current task to finish before selling.", 5)
+        end
+
+        if not TaskManager:requestTask("ManualSell", 3) then
+            return Utility.createNotification("Unable to initiate selling sequence.", 5)
+        end
+
+        task.spawn(function()
+            if TaskManager:waitForTurn("ManualSell", 10) and TaskManager:startTask("ManualSell") then
+                TaskManager:setCurrentTask("Selling")
+                SellModule.sell({}, State.Sell.mode or "Teleport")
+                TaskManager:finishTask("ManualSell")
+            end
+        end)
     end)
 
     EngProject:CreateToggle(GeodeSection.Container, "Enable Auto Opening", false, function(state)
-        showDummyWarning("Auto Opening Geodes")
+        State.Hunting.autoGeode = state
+
+        if state then
+            HuntingModule.updateInventoryCache()
+
+            task.spawn(function()
+                while State.Hunting.autoGeode do
+                    local hasGeode = HuntingModule.findGeodeInBackpack() ~= nil
+                    local isEquipped = HuntingModule.isGeodeEquipped()
+                    local inHotbar = HuntingModule.isGeodeInHotbar()
+                    local isFull = HuntingModule.isBackpackFull()
+
+                    inventoryDisplay:SetFields({HuntingModule.getFormattedInventoryStatus()})
+
+                    if isFull then
+                        if HuntingModule.isGeodeOpening() then
+                            HuntingModule.stopGeodeOpening()
+                        end
+                        geodeStatus:SetFields({"Status: Paused", "Backpack full, waiting for space"})
+                    elseif hasGeode or isEquipped or inHotbar then
+                        if not HuntingModule.isGeodeOpening() then
+                            HuntingModule.startGeodeOpening()
+                            geodeStatus:SetFields({"Status: Running", "Auto-opening in progress"})
+                        end
+                    else
+                        if HuntingModule.isGeodeOpening() then
+                            HuntingModule.stopGeodeOpening()
+                        end
+                        geodeStatus:SetFields({"Status: Waiting", "Waiting for geodes to arrive"})
+
+                        if HuntingModule.waitForGeodes(5) then
+                            if HuntingModule.startGeodeOpening() then
+                                geodeStatus:SetFields({"Status: Running", "Auto-opening in progress"})
+                            end
+                        end
+                    end
+
+                    HuntingModule.updateInventoryCache()
+                    task.wait(1)
+                end
+
+                if HuntingModule.isGeodeOpening() then
+                    HuntingModule.stopGeodeOpening()
+                end
+                HuntingModule.updateInventoryCache()
+                geodeStatus:SetFields({"Status: Idle", "Auto-opening disabled"})
+                inventoryDisplay:SetFields({HuntingModule.getFormattedInventoryStatus()})
+            end)
+        else
+            if HuntingModule.isGeodeOpening() then
+                HuntingModule.stopGeodeOpening()
+            end
+            HuntingModule.updateInventoryCache()
+            geodeStatus:SetFields({"Status: Idle", "Auto-opening disabled"})
+            inventoryDisplay:SetFields({HuntingModule.getFormattedInventoryStatus()})
+        end
     end)
 
     -- ── Sand Dollar Automation ──
@@ -9701,7 +15675,22 @@ local function initializeHuntingTab()
     })
 
     local sandStatus = EngProject:CreateParagraph(SandDollarSection.Container, "Status & Scanner", {"Status: Idle", "Scanning..."})
-    sandStatusUI = sandStatus
+
+    local function updateSandStatus()
+        local info = {}
+        if State.SandRunning then
+            table.insert(info, "🟢 Status      : RUNNING")
+            table.insert(info, "🎯 Target     : " .. tostring(State.SandTarget))
+            table.insert(info, "📏 Distance   : " .. tostring(State.SandDist) .. " studs")
+            table.insert(info, "✅ Collected  : " .. tostring(State.SandCollected))
+            table.insert(info, "⏱ Time        : " .. formatTime(tick() - (State.SandStartAt or tick())))
+        else
+            table.insert(info, "⚪ Status      : Idle")
+            table.insert(info, "✅ Last Session: " .. tostring(State.SandCollected) .. " Sand Dollars")
+            table.insert(info, "Total in area : " .. tostring(State.SandTotal))
+        end
+        sandStatus:SetFields(info)
+    end
 
     EngProject:CreateToggle(SandDollarSection.Container, "Auto Collect Sand Dollar", false, function(state)
         if state then
@@ -9731,7 +15720,15 @@ local function initializeHuntingTab()
             startSandMagnet()
             task.spawn(function()
                 while State.SandMagnetRunning do
-                    pcall(updateSandStatus)
+                    pcall(function()
+                        local info = {}
+                        table.insert(info, "🟢 Status      : MAGNET ACTIVE")
+                        table.insert(info, "🎯 Target     : " .. tostring(State.SandTarget))
+                        table.insert(info, "✅ Collected  : " .. tostring(State.SandCollected))
+                        table.insert(info, "⏱ Time        : " .. formatTime(tick() - (State.SandStartAt or tick())))
+                        table.insert(info, "📦 Remaining  : " .. tostring(State.SandTotal))
+                        sandStatus:SetFields(info)
+                    end)
                     task.wait(0.5)
                 end
                 pcall(updateSandStatus)
@@ -9746,8 +15743,41 @@ local function initializeHuntingTab()
         State.EspEnabled = state
         if state then
             pcall(refreshESP)
+            -- Listen to new sand dollars in real-time
+            pcall(function()
+                if not State.SandConn then
+                    local folder = getGeodeFolder()
+                    if folder then
+                        State.SandConn = folder.ChildAdded:Connect(function(obj)
+                            task.wait(0.1)
+                            if (obj.Name == "SandDollar" or obj.Name == "Sand Dollar") and State.EspEnabled then
+                                local part = getSandPart(obj)
+                                if part then
+                                    pcall(function() createSandESP(obj, part) end)
+                                    pcall(scanSandDollars)
+                                    pcall(updateSandStatus)
+                                end
+                            end
+                        end)
+                        State.SandRemoveConn = folder.ChildRemoved:Connect(function(obj)
+                            if obj.Name == "SandDollar" or obj.Name == "Sand Dollar" then
+                                pcall(scanSandDollars)
+                                pcall(updateSandStatus)
+                            end
+                        end)
+                    end
+                end
+            end)
         else
             pcall(clearSandESP)
+            if State.SandConn then
+                pcall(function() State.SandConn:Disconnect() end)
+                State.SandConn = nil
+            end
+            if State.SandRemoveConn then
+                pcall(function() State.SandRemoveConn:Disconnect() end)
+                State.SandRemoveConn = nil
+            end
         end
     end)
 
@@ -9784,6 +15814,10 @@ local function initializeHuntingTab()
 end
 
 local function initializeTeleportTab()
+    local Config = {
+        GEODE_AUTO_LOOP_DELAY = 0.01,
+        RUNE_AUTO_LOOP_DELAY = 1
+    }
     local page = Tabs.Teleport.Page
     local LeftPage = page.Left
     local RightPage = page.Right
@@ -9795,46 +15829,30 @@ local function initializeTeleportTab()
         TextSize = 15
     })
 
-    local waypointList = {}
-    for name, _ in pairs(WAYPOINTS) do
-        table.insert(waypointList, name)
-    end
-    table.sort(waypointList)
-
     local waypointsDropdown = EngProject:CreateDropdown(WaypointsSection.Container, "Select Destination",
-        waypointList, nil, function(selection)
-            local char = Player.Character
-            local hrp = char and char:FindFirstChild("HumanoidRootPart")
-            local wp = WAYPOINTS[selection]
-            if hrp and wp then
-                hrp.CFrame = wp
-                EngProject:CreateNotification({
-                    Type = "Success",
-                    Title = "Teleported",
-                    Description = "Teleported to " .. selection,
-                    Duration = 3
-                })
-            end
+        WaypointModule.getList(), nil, function(selection)
+            WaypointModule.teleport(selection)
         end, {
             Description = "Choose a waypoint to initiate fast travel. Refresh the list to load newly unlocked destinations."
         })
 
     EngProject:CreateButton(WaypointsSection.Container, "Refresh Destinations", function()
-        EngProject:CreateNotification({
-            Type = "Info",
-            Title = "Destinations",
-            Description = "Waypoint list updated.",
-            Duration = 2
-        })
+        waypointsDropdown:SetOptions(WaypointModule.getList())
     end)
 
     EngProject:CreateButton(WaypointsSection.Container, "Unlock All Waypoints", function()
-        showDummyWarning("Unlock All Waypoints")
+        WaypointModule.unlockAll()
     end)
 
     EngProject:CreateButton(WaypointsSection.Container, "Emergency Return", function()
-        showDummyWarning("Emergency Return")
-    end)
+        local waypointFolder = Map:FindFirstChild("Waypoints")
+        if waypointFolder then
+            ReplicatedStorage.Remotes.Misc.FastTravel:FireServer(waypointFolder["Museum"],
+                waypointFolder["Rubble Creek"])
+        end
+    end, {
+        Description = "Instantly return to the starter town in emergencies or when stuck in difficult terrain."
+    })
 
     local GeodesSection = EngProject:CreateSection(RightPage, "Geode Locations", {
         Style = "box",
@@ -9844,14 +15862,37 @@ local function initializeTeleportTab()
     })
 
     local geodeStatus = EngProject:CreateParagraph(GeodesSection.Container, "Geode Scanner", {"Scanning..."})
-    geodeStatus:SetFields({"No geodes found"})
+
+    local geodes = GeodeModule.getModels()
+    geodeStatus:SetFields({#geodes > 0 and ("Found " .. #geodes .. " geodes") or "No geodes found"})
 
     EngProject:CreateButton(GeodesSection.Container, "Teleport to Next Geode", function()
-        showDummyWarning("Teleport to Next Geode")
+        GeodeModule.teleportToNext(geodeStatus)
     end)
 
     EngProject:CreateToggle(GeodesSection.Container, "Auto Teleport to Geodes", false, function(state)
-        showDummyWarning("Auto Teleport to Geodes")
+        State.Geode.autoLoopEnabled = state
+
+        if State.Geode.teleportConnection then
+            State.Geode.teleportConnection:Disconnect()
+            State.Geode.teleportConnection = nil
+        end
+
+        if not state then
+            local list = GeodeModule.getModels()
+            geodeStatus:SetFields({#list > 0 and ("Found " .. #list .. " geodes") or "No geodes found"})
+            return
+        end
+
+        geodeStatus:SetFields({"Auto Navigation: Active"})
+        State.Geode.lastTeleportTime = tick()
+
+        State.Geode.teleportConnection = Services.RunService.Heartbeat:Connect(function()
+            if tick() - State.Geode.lastTeleportTime >= Config.GEODE_AUTO_LOOP_DELAY then
+                GeodeModule.teleportToNext(geodeStatus)
+                State.Geode.lastTeleportTime = tick()
+            end
+        end)
     end)
 
     local RunesSection = EngProject:CreateSection(RightPage, "Runes", {
@@ -9862,14 +15903,37 @@ local function initializeTeleportTab()
     })
 
     local runeStatus = EngProject:CreateParagraph(RunesSection.Container, "Rune Tracker", {"Scanning..."})
-    runeStatus:SetFields({"No runes found"})
+
+    local runes = RuneModule.getList()
+    runeStatus:SetFields({#runes > 0 and ("Found " .. #runes .. " runes") or "No runes found"})
 
     EngProject:CreateButton(RunesSection.Container, "Teleport to Next Rune", function()
-        showDummyWarning("Teleport to Next Rune")
+        RuneModule.teleportToNext(runeStatus)
     end)
 
     EngProject:CreateToggle(RunesSection.Container, "Auto Teleport to Runes", false, function(state)
-        showDummyWarning("Auto Teleport to Runes")
+        State.Rune.autoLoopEnabled = state
+
+        if State.Rune.teleportConnection then
+            State.Rune.teleportConnection:Disconnect()
+            State.Rune.teleportConnection = nil
+        end
+
+        if not state then
+            local list = RuneModule.getList()
+            runeStatus:SetFields({#list > 0 and ("Found " .. #list .. " runes") or "No runes found"})
+            return
+        end
+
+        runeStatus:SetFields({"Auto Navigation: Active"})
+        State.Rune.lastTeleportTime = tick()
+
+        State.Rune.teleportConnection = Services.RunService.Heartbeat:Connect(function()
+            if tick() - State.Rune.lastTeleportTime >= Config.RUNE_AUTO_LOOP_DELAY then
+                RuneModule.teleportToNext(runeStatus)
+                State.Rune.lastTeleportTime = tick()
+            end
+        end)
     end)
 end
 
@@ -9885,19 +15949,59 @@ local function initializeToolsTab()
         TextSize = 15
     })
 
+    local selectedGUID = nil
     local equipmentInfo = EngProject:CreateParagraph(ReforgeSection.Container, "Equipment Details", {})
 
     local equipmentReforgeDropdown = EngProject:CreateDropdown(ReforgeSection.Container, "Choose Equipment", {}, nil,
         function(selection)
-            showDummyWarning("Select Equipment")
+            if type(selection) ~= "table" then
+                selectedGUID = nil
+                ReforgeModule.updateInfo(nil, equipmentInfo)
+                return
+            end
+            selectedGUID = selection.guid
+            ReforgeModule.updateInfo(selectedGUID, equipmentInfo)
         end)
 
     EngProject:CreateButton(ReforgeSection.Container, "Load Inventory Equipment", function()
-        showDummyWarning("Load Inventory Equipment")
+        local equipmentOptions = {}
+        local nameCounts = {}
+
+        local bp = getBackpack()
+        if bp then
+            for _, child in ipairs(bp:GetChildren() or {}) do
+                if child and child.GetAttribute and child:GetAttribute("ItemType") == "Equipment" then
+                    local baseName = tostring(child.Name or "Unknown")
+                    nameCounts[baseName] = (nameCounts[baseName] or 0) + 1
+
+                    local displayName = baseName
+                    if nameCounts[baseName] > 1 then
+                        displayName = baseName .. " #" .. nameCounts[baseName]
+                    end
+
+                    table.insert(equipmentOptions, {
+                        text = displayName,
+                        guid = child:GetAttribute("GUID")
+                    })
+                end
+            end
+        end
+
+        selectedGUID = nil
+        pcall(function()
+            equipmentReforgeDropdown:SetOptions(equipmentOptions)
+        end)
+        ReforgeModule.updateInfo(nil, equipmentInfo)
     end)
 
     EngProject:CreateButton(ReforgeSection.Container, "Reforge Selected Equipment", function()
-        showDummyWarning("Reforge Equipment")
+        local guid = ReforgeModule.perform(selectedGUID)
+        if guid then
+            ReforgeModule.updateInfo(guid, equipmentInfo)
+            pcall(function()
+                equipmentReforgeDropdown:SetOptions({})
+            end)
+        end
     end)
 
     local PanEnchantsSection = EngProject:CreateSection(RightPage, "Pan Enchantment", {
@@ -9907,27 +16011,51 @@ local function initializeToolsTab()
         TextSize = 15
     })
 
+    local selectedMaterial = "Aurorite"
+    local targetPanEnchant = "Prismatic"
+    local autoEnchantingPan = {false}
+
+    local PanEnchantRemote = ReplicatedStorage.Remotes.Crafting.Enchant
+
     EngProject:CreateDropdown(PanEnchantsSection.Container, "Enchantment Material", {{
         text = "Aetherite"
     }, {
         text = "Aurorite"
     }}, "Aurorite", function(selection)
-        showDummyWarning("Enchantment Material")
+        if selection and selection.text then
+            selectedMaterial = selection.text
+        end
     end)
 
-    EngProject:CreateDropdown(PanEnchantsSection.Container, "Target Enchantment", {"None", "Prismatic", "Efficiency"}, nil,
+    EngProject:CreateDropdown(PanEnchantsSection.Container, "Target Enchantment", EnchantModule.getNames("pan"), nil,
         function(selection)
-            showDummyWarning("Target Enchantment")
+            targetPanEnchant = selection
         end, {
             Description = "Select your desired enchantment. Book-exclusive enchantments OBVIOUSLY cannot be obtained through this method."
         })
 
     EngProject:CreateButton(PanEnchantsSection.Container, "Apply Enchantment", function()
-        showDummyWarning("Apply Enchantment")
+        local match = EnchantModule.findPanMaterial(selectedMaterial)
+        if not match then
+            Utility.createNotification("The selected material was not found in your inventory.", 3)
+            return
+        end
+        EnchantModule.enchant(PanEnchantRemote, match, selectedMaterial)
     end)
 
     EngProject:CreateButton(PanEnchantsSection.Container, "Auto Enchant Until Target", function()
-        showDummyWarning("Auto Enchant")
+        if autoEnchantingPan[1] then
+            autoEnchantingPan[1] = false
+            Utility.createNotification("Pan enchantment process has been stopped.", 2)
+            return
+        end
+
+        autoEnchantingPan[1] = true
+        Utility.createNotification("Automatically enchanting pan until " .. targetPanEnchant .. " is achieved.", 3)
+
+        EnchantModule.performAuto(function()
+            return EnchantModule.findPanMaterial(selectedMaterial)
+        end, PanEnchantRemote, selectedMaterial, targetPanEnchant, autoEnchantingPan)
     end)
 
     local ShovelEnchantsSection = EngProject:CreateSection(RightPage, "Shovel Enchantment", {
@@ -9937,6 +16065,12 @@ local function initializeToolsTab()
         TextSize = 15
     })
 
+    local selectedShovelModifier = "Iridescent"
+    local targetShovelEnchant = "WellBalanced"
+    local autoEnchantingShovel = {false}
+
+    local ShovelEnchantRemote = ReplicatedStorage.Remotes.Crafting.EnchantShovel
+
     EngProject:CreateDropdown(ShovelEnchantsSection.Container, "Aetherite Modifier", {{
         text = "Iridescent"
     }, {
@@ -9944,24 +16078,48 @@ local function initializeToolsTab()
     }, {
         text = "Electrified"
     }}, nil, function(sel)
-        showDummyWarning("Aetherite Modifier")
+        if sel and sel.text then
+            selectedShovelModifier = sel.text
+        end
     end)
 
-    EngProject:CreateDropdown(ShovelEnchantsSection.Container, "Target Enchantment", {"None", "WellBalanced", "GoldMagnet"},
+    EngProject:CreateDropdown(ShovelEnchantsSection.Container, "Target Enchantment", EnchantModule.getNames("shovel"),
         nil, function(selection)
-            showDummyWarning("Target Enchantment")
+            targetShovelEnchant = selection
         end)
 
     EngProject:CreateButton(ShovelEnchantsSection.Container, "Apply Enchantment", function()
-        showDummyWarning("Apply Shovel Enchantment")
+        local shovel = EnchantModule.findShovelMaterial(selectedShovelModifier)
+        if not shovel then
+            Utility.createNotification("The selected Aetherite variant is not in your inventory.", 3)
+            return
+        end
+        EnchantModule.enchant(ShovelEnchantRemote, shovel, selectedShovelModifier .. " Aetherite")
     end)
 
     EngProject:CreateButton(ShovelEnchantsSection.Container, "Auto Enchant Until Target", function()
-        showDummyWarning("Auto Enchant Shovel")
+        if autoEnchantingShovel[1] then
+            autoEnchantingShovel[1] = false
+            Utility.createNotification("Shovel enchantment process has been stopped.", 2)
+            return
+        end
+
+        autoEnchantingShovel[1] = true
+        Utility.createNotification("Automatically enchanting shovel until " .. targetShovelEnchant .. " is achieved.", 3)
+
+        EnchantModule.performAuto(function()
+            return EnchantModule.findShovelMaterial(selectedShovelModifier)
+        end, ShovelEnchantRemote, selectedShovelModifier .. " Aetherite", targetShovelEnchant, autoEnchantingShovel)
     end)
 
     EngProject:CreateButton(LeftPage, "Stop All Enchanting", function()
-        showDummyWarning("Stop All Enchanting")
+        if autoEnchantingPan then
+            autoEnchantingPan[1] = false
+        end
+        if autoEnchantingShovel then
+            autoEnchantingShovel[1] = false
+        end
+        Utility.createNotification("All active enchantment processes have been terminated.", 3)
     end, {
         Description = "Immediately halts all active enchantment processes."
     })
@@ -9975,47 +16133,167 @@ local function initializeCraftingTab()
     local craftingStatus = EngProject:CreateParagraph(page, "Crafting Status",
         {"No equipment selected", "Select an equipment to begin"})
 
+    local function tick()
+        local eq = State.Crafting.selectedEquipment
+        if not eq then
+            craftingStatus:SetFields({"No equipment selected", "Select an equipment to begin"})
+            return
+        end
+
+        if State.Crafting.selectBestOres then
+            State.Crafting.selectedMaterials = CraftingModule.selectBest(eq.Data)
+        end
+
+        local fields = CraftingModule.buildFields(eq, State.Crafting.selectedMaterials)
+        craftingStatus:SetFields(fields)
+    end
+
     local equipmentDropdown = EngProject:CreateDropdown(page, "Select Equipment", {}, nil, function(selection)
-        showDummyWarning("Select Equipment")
+        for _, recipe in ipairs(State.Crafting.discoveredRecipes) do
+            if recipe.Name == selection then
+                State.Crafting.selectedEquipment = recipe
+                State.Crafting.selectedMaterials = {}
+                tick()
+                return
+            end
+        end
     end)
 
     EngProject:CreateButton(page, "Load Discovered Recipes", function()
-        showDummyWarning("Load Discovered Recipes")
+        State.Crafting.discoveredRecipes = CraftingModule.getDiscoveredRecipes()
+        local options = {}
+        for i = 1, #State.Crafting.discoveredRecipes do
+            options[#options + 1] = State.Crafting.discoveredRecipes[i].Name
+        end
+        equipmentDropdown:SetOptions(options)
+        Utility.createNotification("Loaded " .. #options .. " recipes", 3)
     end)
 
     EngProject:CreateToggle(page, "Auto Select Best Materials", false, function(state)
-        State.Crafting.forceMaxQuality = state
-        showDummyWarning("Auto Select Best Materials")
+        State.Crafting.selectBestOres = state
+        tick()
     end, {
         Description = "Automatically select highest quality materials when equipment is chosen"
     })
 
     EngProject:CreateButton(page, "Craft Equipment", function()
-        showDummyWarning("Craft Equipment")
+        local eq = State.Crafting.selectedEquipment
+        if not eq then
+            Utility.createNotification("No equipment selected", 3)
+            return
+        end
+        if State.Crafting.selectBestOres then
+            State.Crafting.selectedMaterials = CraftingModule.selectBest(eq.Data)
+        end
+        if not CraftingModule.canCraft(eq.Data, State.Crafting.selectedMaterials) then
+            Utility.createNotification("Missing materials", 3)
+            return
+        end
+        local success, result = CraftingModule.craft(eq.Item, State.Crafting.selectedMaterials)
+        State.Crafting.selectedMaterials = {}
+        task.wait(0.5)
+        tick()
+        if success then
+            Utility.createNotification("Crafted " .. eq.Name .. "!", 3)
+        else
+            Utility.createNotification("Failed: " .. tostring(result), 3)
+        end
     end)
 
     EngProject:CreateToggle(page, "Enable Automatic Crafting", false, function(state)
-        showDummyWarning("Enable Automatic Crafting")
+        State.Crafting.autocraft = state
+        if not state or State.Crafting.autocraftRunning then
+            return
+        end
+        State.Crafting.autocraftRunning = true
+
+        task.spawn(function()
+            while State.Crafting.autocraft do
+                local eq = State.Crafting.selectedEquipment
+                if not eq then
+                    task.wait(1)
+                else
+                    if State.Crafting.selectBestOres then
+                        State.Crafting.selectedMaterials = CraftingModule.selectBest(eq.Data)
+                    end
+
+                    tick()
+
+                    if CraftingModule.canCraft(eq.Data, State.Crafting.selectedMaterials) then
+                        local success, result = CraftingModule.craft(eq.Item, State.Crafting.selectedMaterials)
+                        State.Crafting.selectedMaterials = {}
+                        task.wait(0.5)
+                        tick()
+                        if success then
+                            task.wait(0.5)
+                        else
+                            Utility.createNotification("Autocraft failed: " .. tostring(result), 3)
+                            task.wait(3)
+                        end
+                    else
+                        task.wait(2)
+                    end
+                end
+            end
+            State.Crafting.autocraftRunning = false
+        end)
     end, {
         Description = "Continuously craft selected equipment when materials are available"
     })
 
     EngProject:CreateSection(page, "Firefly Flare Conversion")
 
+    local fireflyAmount = 1
+    local FireflyCrafting = false
+
     EngProject:CreateTextInput(page, "Conversion Amount", "1", function(input)
-        showDummyWarning("Conversion Amount")
+        local value = tonumber(input)
+        if not value or value ~= math.floor(value) or value < 1 or value >= 1000 then
+            EngProject:CreateNotification({
+                Type = "Error",
+                Title = "Invalid Amount",
+                Description = "Enter a whole number between 1 and 999."
+            })
+            return
+        end
+        fireflyAmount = value
     end, {
         Description = "One Firefly Stone produces one Firefly Flare."
     })
 
     EngProject:CreateButton(page, "Begin Conversion", function()
-        showDummyWarning("Begin Conversion")
+        if FireflyCrafting then
+            EngProject:CreateNotification({
+                Type = "Warning",
+                Title = "Already Converting",
+                Description = "Conversion already in progress."
+            })
+            return
+        end
+        FireflyCrafting = true
+        task.spawn(function()
+            FireflyModule.craft(fireflyAmount)
+            FireflyCrafting = false
+        end)
     end, {
         Description = "Convert Firefly Stones to Firefly Flares at the conversion table."
     })
 
     EngProject:CreateButton(page, "Stop Conversion", function()
-        showDummyWarning("Stop Conversion")
+        if not FireflyCrafting then
+            EngProject:CreateNotification({
+                Type = "Info",
+                Title = "Idle",
+                Description = "No conversion running."
+            })
+            return
+        end
+        FireflyModule.stop()
+        EngProject:CreateNotification({
+            Type = "Warning",
+            Title = "Stopping",
+            Description = "Halting conversion."
+        })
     end)
 
     EngProject:CreateParagraph(page, "Conversion Requirements",
@@ -10027,40 +16305,170 @@ local function initializeFavouriteTab()
 
     EngProject:CreateSection(page, "Item Preservation System")
 
-    EngProject:CreateDropdown(page, "Select Modifier(s)", {"Hearthflame", "Tidal", "Summer"}, nil, function(values)
-        showDummyWarning("Select Modifiers")
+    local selectedModifiers = {}
+    local selectedOre = nil
+    local autoFavEnabled = false
+
+    EngProject:CreateDropdown(page, "Select Modifier(s)", CraftingModule.getModifierNames(), nil, function(values)
+        selectedModifiers = {}
+        for _, v in pairs(values or {}) do
+            table.insert(selectedModifiers, v)
+        end
     end, {
         MultiSelect = true
     })
 
     EngProject:CreateButton(page, "Preserve Items By Modifier", function()
-        showDummyWarning("Preserve Items By Modifier")
+        if #selectedModifiers == 0 then
+            EngProject:CreateNotification({
+                Type = "Warning",
+                Title = "No Modifiers Selected",
+                Description = "Select at least one modifier first."
+            })
+            return
+        end
+
+        local bp = getBackpack()
+        if bp then
+            for _, item in pairs(bp:GetChildren()) do
+                for _, modifier in ipairs(selectedModifiers) do
+                    if FavouriteModule.isValuable(item) and FavouriteModule.matchesModifier(item, modifier) then
+                        FavouriteModule.favourite(item)
+                        break
+                    end
+                end
+            end
+        end
+
+        EngProject:CreateNotification({
+            Type = "Success",
+            Title = "Complete",
+            Description = "Items with selected modifiers have been preserved."
+        })
     end)
 
-    EngProject:CreateDropdown(page, "Select Ore Type", {"Gold", "Iron", "Coal"}, nil, function(value)
-        showDummyWarning("Select Ore Type")
+    EngProject:CreateDropdown(page, "Select Ore Type", CraftingModule.getOreNames(), nil, function(value)
+        selectedOre = value
     end)
 
     EngProject:CreateButton(page, "Preserve Items By Ore", function()
-        showDummyWarning("Preserve Items By Ore")
+        if not selectedOre then
+            EngProject:CreateNotification({
+                Type = "Warning",
+                Title = "No Ore Selected",
+                Description = "Select an ore type first."
+            })
+            return
+        end
+
+        local bp = getBackpack()
+        if bp then
+            for _, item in pairs(bp:GetChildren()) do
+                if FavouriteModule.isValuable(item) and FavouriteModule.matchesOre(item, selectedOre) then
+                    FavouriteModule.favourite(item)
+                end
+            end
+        end
+
+        EngProject:CreateNotification({
+            Type = "Success",
+            Title = "Complete",
+            Description = "All matching ore items have been preserved."
+        })
     end)
 
     EngProject:CreateButton(page, "Preserve Ore with Modifiers", function()
-        showDummyWarning("Preserve Ore with Modifiers")
+        if not selectedOre or #selectedModifiers == 0 then
+            EngProject:CreateNotification({
+                Type = "Warning",
+                Title = "Selection Incomplete",
+                Description = "Select both an ore type and at least one modifier."
+            })
+            return
+        end
+
+        local bp = getBackpack()
+        if bp then
+            for _, item in pairs(bp:GetChildren()) do
+                if FavouriteModule.isValuable(item) and FavouriteModule.matchesOre(item, selectedOre) then
+                    for _, modifier in ipairs(selectedModifiers) do
+                        if FavouriteModule.matchesModifier(item, modifier) then
+                            FavouriteModule.favourite(item)
+                            break
+                        end
+                    end
+                end
+            end
+        end
+
+        EngProject:CreateNotification({
+            Type = "Success",
+            Title = "Complete",
+            Description = "Matching items have been preserved."
+        })
     end)
 
     EngProject:CreateToggle(page, "Enable Automatic Preservation", false, function(state)
-        showDummyWarning("Automatic Preservation")
+        autoFavEnabled = state
     end, {
         Description = "Automatically preserve items as they are obtained."
     })
 
+    local function handleAutoFav(item)
+        if not autoFavEnabled then
+            return
+        end
+        if not FavouriteModule.isValuable(item) then
+            return
+        end
+
+        if selectedOre and #selectedModifiers > 0 then
+            if FavouriteModule.matchesOre(item, selectedOre) then
+                for _, modifier in ipairs(selectedModifiers) do
+                    if FavouriteModule.matchesModifier(item, modifier) then
+                        task.wait(0.1)
+                        FavouriteModule.favourite(item)
+                        break
+                    end
+                end
+            end
+        elseif selectedOre then
+            if FavouriteModule.matchesOre(item, selectedOre) then
+                task.wait(0.1)
+                FavouriteModule.favourite(item)
+            end
+        elseif #selectedModifiers > 0 then
+            for _, modifier in ipairs(selectedModifiers) do
+                if FavouriteModule.matchesModifier(item, modifier) then
+                    task.wait(0.1)
+                    FavouriteModule.favourite(item)
+                    break
+                end
+            end
+        end
+    end
+
+    if BackpackTwo then
+        BackpackTwo.ChildAdded:Connect(handleAutoFav)
+    end
+    local bp = Player:FindFirstChild("Backpack")
+    if bp then
+        bp.ChildAdded:Connect(handleAutoFav)
+    else
+        task.spawn(function()
+            local foundBp = Player:WaitForChild("Backpack", 15)
+            if foundBp then
+                foundBp.ChildAdded:Connect(handleAutoFav)
+            end
+        end)
+    end
+
     EngProject:CreateParagraph(page, "Preservation Guide", {"Select Modifier: Choose which modifiers to protect.",
-                                                          "Preserve Items By Modifier: Protects all items with selected modifiers.",
-                                                          "Select Ore Type: Choose an ore category.",
-                                                          "Preserve Items By Ore: Protects all items of that ore.",
-                                                          "Preserve Ore with Modifiers: Requires both ore and modifier selections.",
-                                                          "Enable Automatic Preservation: Protects newly obtained items based on your selections."})
+                                                           "Preserve Items By Modifier: Protects all items with selected modifiers.",
+                                                           "Select Ore Type: Choose an ore category.",
+                                                           "Preserve Items By Ore: Protects all items of that ore.",
+                                                           "Preserve Ore with Modifiers: Requires both ore and modifier selections.",
+                                                           "Enable Automatic Preservation: Protects newly obtained items based on your selections."})
 end
 
 local function initializeShopTab()
@@ -10073,15 +16481,48 @@ local function initializeShopTab()
         "Jika tidak berhasil, klik 'Cari GUI Marketplace' untuk debug."})
 
     EngProject:CreateButton(page, "Open Marketplace", function()
-        showDummyWarning("Open Marketplace")
+        amazong:Toggle()
     end)
 
     EngProject:CreateButton(page, "Cari GUI Marketplace (Debug)", function()
-        showDummyWarning("Cari GUI Marketplace (Debug)")
+        local PlayerGui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+        local names = {}
+        for _, gui in ipairs(PlayerGui:GetChildren()) do
+            if gui:IsA("ScreenGui") then
+                table.insert(names, gui.Name .. " [" .. (gui.Enabled and "ON" or "OFF") .. "]")
+            end
+        end
+        EngProject:CreateNotification({
+            Type = "Info",
+            Title = "Daftar GUI di PlayerGui:",
+            Description = table.concat(names, ", "),
+            Duration = 15
+        })
     end)
 
     EngProject:CreateButton(page, "Toggle GUI by Name (Manual)", function()
-        showDummyWarning("Toggle GUI")
+        local PlayerGui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+        -- Coba toggle semua ScreenGui yang bukan HUD utama
+        local skipList = {"EngProjectUI", "RobloxGui", "TopBarApp", "BillboardGui"}
+        local function isSkipped(name)
+            for _, s in ipairs(skipList) do
+                if name:find(s) then return true end
+            end
+            return false
+        end
+        local count = 0
+        for _, gui in ipairs(PlayerGui:GetChildren()) do
+            if gui:IsA("ScreenGui") and not isSkipped(gui.Name) then
+                gui.Enabled = not gui.Enabled
+                count = count + 1
+            end
+        end
+        EngProject:CreateNotification({
+            Type = "Info",
+            Title = "Toggle GUI",
+            Description = count .. " ScreenGui di-toggle",
+            Duration = 5
+        })
     end)
 end
 
@@ -10100,31 +16541,127 @@ local function initializeTravelMerchantTab()
     local statsParagraph = EngProject:CreateParagraph(MerchantBuySection.Container, "Statistics",
         {"Total bought: 0", "Status: Idle"})
 
-    EngProject:CreateDropdown(MerchantBuySection.Container, "Select Items to Buy", {"Aetherite Shovel", "Firefly Stone"}, nil,
+    task.spawn(function()
+        while true do
+            pcall(function()
+                statsParagraph:SetFields({
+                    "Total bought: " .. tostring(State.TravelMerchant.totalBought),
+                    "Status: " .. (State.TravelMerchant.running and "Running" or "Idle")
+                })
+            end)
+            task.wait(1)
+        end
+    end)
+
+    EngProject:CreateDropdown(MerchantBuySection.Container, "Select Items to Buy", TravelMerchantModule.KnownItems, nil,
         function(values)
-            showDummyWarning("Select Items to Buy")
+            State.TravelMerchant.selectedItems = {}
+            for _, v in pairs(values or {}) do
+                table.insert(State.TravelMerchant.selectedItems, v)
+            end
+            TravelMerchantModule.selectedItems = State.TravelMerchant.selectedItems
         end, {
             MultiSelect = true
         })
 
     EngProject:CreateToggle(MerchantBuySection.Container, "Use Money", true, function(state)
-        showDummyWarning("Use Money")
+        State.TravelMerchant.useMoney = state
     end)
 
     EngProject:CreateToggle(MerchantBuySection.Container, "Use Shard", false, function(state)
-        showDummyWarning("Use Shard")
+        State.TravelMerchant.useShard = state
     end)
 
+    local function disableAutoBuy(reason)
+        State.TravelMerchant.running = false
+        TravelMerchantModule.running = false
+        if TravelMerchantModule.restockBindable then
+            pcall(function() TravelMerchantModule.restockBindable:Fire() end)
+        end
+        Utility.createNotification("Auto Buy OFF: " .. reason, 5)
+    end
+
     EngProject:CreateToggle(MerchantBuySection.Container, "Enable Auto Buy", false, function(state)
-        showDummyWarning("Enable Auto Buy")
+        State.TravelMerchant.running = state
+        TravelMerchantModule.running = state
+
+        if not state then return end
+
+        if not State.TravelMerchant.useMoney and not State.TravelMerchant.useShard then
+            disableAutoBuy("Select filter first (Use Money / Use Shard)!")
+            return
+        end
+
+        if #State.TravelMerchant.selectedItems == 0 then
+            disableAutoBuy("Select items to buy first!")
+            return
+        end
+
+        task.spawn(function()
+            Utility.createNotification("Travel Merchant Auto Buy ON", 3)
+
+            while State.TravelMerchant.running do
+                local m = State.TravelMerchant.useMoney
+                local s = State.TravelMerchant.useShard
+                if not m and not s then
+                    disableAutoBuy("All filters turned off!")
+                    break
+                end
+
+                local boughtThisRound = 0
+                for _, itemName in ipairs(State.TravelMerchant.selectedItems) do
+                    if not State.TravelMerchant.running then break end
+
+                    local success, reason = TravelMerchantModule.buyAndValidate(itemName, m, s)
+                    if success then
+                        State.TravelMerchant.totalBought = State.TravelMerchant.totalBought + 1
+                        boughtThisRound = boughtThisRound + 1
+                        Utility.createNotification("Bought: " .. itemName, 2)
+                    end
+                    task.wait(1)
+                end
+
+                if boughtThisRound == 0 and State.TravelMerchant.running then
+                    Utility.createNotification("All stock depleted. Waiting for restock...", 3)
+                    TravelMerchantModule.waitForRestock()
+                    if State.TravelMerchant.running then
+                        Utility.createNotification("Restock detected! Continuing...", 3)
+                    end
+                end
+            end
+        end)
     end)
 
     EngProject:CreateButton(MerchantBuySection.Container, "Reset Counter", function()
-        showDummyWarning("Reset Counter")
+        State.TravelMerchant.totalBought = 0
+        Utility.createNotification("Counter reset!", 2)
     end)
 
     EngProject:CreateButton(MerchantBuySection.Container, "Buy Selected Now", function()
-        showDummyWarning("Buy Selected Now")
+        if #State.TravelMerchant.selectedItems == 0 then
+            Utility.createNotification("Select items first!", 2)
+            return
+        end
+        local m = State.TravelMerchant.useMoney
+        local s = State.TravelMerchant.useShard
+        if not m and not s then
+            Utility.createNotification("Select filter first!", 2)
+            return
+        end
+
+        task.spawn(function()
+            local bought = 0
+            for _, itemName in ipairs(State.TravelMerchant.selectedItems) do
+                local success, reason = TravelMerchantModule.buyAndValidate(itemName, m, s)
+                if success then
+                    bought = bought + 1
+                    State.TravelMerchant.totalBought = State.TravelMerchant.totalBought + 1
+                    Utility.createNotification("Bought: " .. itemName, 2)
+                end
+                task.wait(1)
+            end
+            Utility.createNotification("Manual Purchase complete. Bought: " .. bought, 4)
+        end)
     end)
 end
 
@@ -10142,19 +16679,63 @@ local function initializeSummerCollectionTab()
 
     local summerStatus = EngProject:CreateParagraph(CauldronSection.Container, "Status",
         {"Waiting for data..."})
-    summerStatus:SetFields({"Progress: 0/10 (Dummy)", "Quality: 0%"})
 
-    EngProject:CreateDropdown(CauldronSection.Container, "Select Modifiers", {"Hearthflame", "Tidal", "Summer"}, nil,
+    local function updateSummerDisplay()
+        local syncedTime = Services.Workspace:GetAttribute("SyncedTime") or 0
+        local content = {}
+
+        if State.Summer.progress < 10 then
+            content = {
+                "Progress: " .. tostring(State.Summer.progress) .. "/10",
+                "Quality: " .. string.format("%.0f%%", State.Summer.quality * 100)
+            }
+        else
+            local sisa = State.Summer.deliveryTime - syncedTime + 3600
+            if sisa > 0 then
+                local menit = math.floor(sisa / 60)
+                local detik = math.floor(sisa % 60)
+                content = {
+                    "Progress: 10/10 (FULL)",
+                    "Quality: " .. string.format("%.0f%%", State.Summer.quality * 100),
+                    string.format("Delivery in: %02d:%02d", menit, detik)
+                }
+            else
+                content = {
+                    "Progress: 10/10 (FULL)",
+                    "Quality: " .. string.format("%.0f%%", State.Summer.quality * 100),
+                    "READY TO CLAIM!"
+                }
+            end
+        end
+        summerStatus:SetFields(content)
+    end
+
+    task.spawn(function()
+        while true do
+            pcall(updateSummerDisplay)
+            task.wait(1)
+        end
+    end)
+
+    local allRarities = SummerModule.getAllRarities()
+
+    EngProject:CreateDropdown(CauldronSection.Container, "Select Modifiers", SummerModule.ModifierPriority, nil,
         function(values)
-            showDummyWarning("Select Modifiers")
+            State.Summer.selectedModifiers = {}
+            for _, v in pairs(values or {}) do
+                table.insert(State.Summer.selectedModifiers, v)
+            end
         end, {
             MultiSelect = true,
             Description = "Priority: Hearthflame > Tidal > Summer"
         })
 
-    EngProject:CreateDropdown(CauldronSection.Container, "Select Rarities", {"Common", "Rare", "Legendary"}, nil,
+    EngProject:CreateDropdown(CauldronSection.Container, "Select Rarities", allRarities, nil,
         function(values)
-            showDummyWarning("Select Rarities")
+            State.Summer.selectedRarities = {}
+            for _, v in pairs(values or {}) do
+                table.insert(State.Summer.selectedRarities, v)
+            end
         end, {
             MultiSelect = true,
             Description = "Priority: Exotic > Mythic > ... > Common"
@@ -10162,18 +16743,149 @@ local function initializeSummerCollectionTab()
 
     local itemInfoParagraph = EngProject:CreateParagraph(CauldronSection.Container, "Matching Items Info",
         {"Scanning inventory..."})
-    itemInfoParagraph:SetFields({"Matching items: 0", "Progress: 0/10"})
+
+    task.spawn(function()
+        while true do
+            pcall(function()
+                local total = SummerModule.countAllMatchingTools()
+                local nextTool, nextMod, nextRar = SummerModule.findBestToolByPriority()
+
+                local info = {
+                    "Matching items: " .. tostring(total),
+                    "Progress: " .. tostring(State.Summer.progress) .. "/10"
+                }
+                if nextMod and nextRar then
+                    table.insert(info, "Next up: " .. nextMod .. " + " .. nextRar)
+                elseif #State.Summer.selectedModifiers > 0 and #State.Summer.selectedRarities > 0 then
+                    table.insert(info, "Next up: No matching items")
+                else
+                    table.insert(info, "Next up: Select filters first")
+                end
+                itemInfoParagraph:SetFields(info)
+            end)
+            task.wait(2)
+        end
+    end)
+
+    local ClaimCauldron = ReplicatedStorage:FindFirstChild("Remotes")
+        and ReplicatedStorage.Remotes:FindFirstChild("TemporaryEvents")
+        and ReplicatedStorage.Remotes.TemporaryEvents:FindFirstChild("ClaimCauldron")
+
+    local AddCauldronItem = ReplicatedStorage:FindFirstChild("Remotes")
+        and ReplicatedStorage.Remotes:FindFirstChild("TemporaryEvents")
+        and ReplicatedStorage.Remotes.TemporaryEvents:FindFirstChild("AddCauldronItem")
+
+    local UpdateCauldronData = ReplicatedStorage:FindFirstChild("Remotes")
+        and ReplicatedStorage.Remotes:FindFirstChild("TemporaryEvents")
+        and ReplicatedStorage.Remotes.TemporaryEvents:FindFirstChild("UpdateCauldronData")
 
     EngProject:CreateToggle(CauldronSection.Container, "Auto Add + Claim", false, function(state)
-        showDummyWarning("Auto Add + Claim")
+        State.Summer.autoAddRunning = state
+
+        if not state then return end
+
+        if #State.Summer.selectedModifiers == 0 then
+            State.Summer.autoAddRunning = false
+            Utility.createNotification("Select at least 1 modifier!", 3)
+            return
+        end
+        if #State.Summer.selectedRarities == 0 then
+            State.Summer.autoAddRunning = false
+            Utility.createNotification("Select at least 1 rarity!", 3)
+            return
+        end
+
+        task.spawn(function()
+            local totalAdded = 0
+            Utility.createNotification("Auto Add + Claim Cauldron ON", 4)
+
+            while State.Summer.autoAddRunning do
+
+                -- PHASE 1: ADD ITEMS
+                while State.Summer.autoAddRunning and State.Summer.progress < 10 do
+                    local tool, mod, rar = SummerModule.findBestToolByPriority()
+
+                    if not tool then
+                        local waited = 0
+                        while State.Summer.autoAddRunning and waited < 30 do
+                            task.wait(1)
+                            waited = waited + 1
+                        end
+                        tool, mod, rar = SummerModule.findBestToolByPriority()
+                        if not tool and State.Summer.autoAddRunning then
+                            Utility.createNotification("No matching tools. Scanning...", 3)
+                        end
+                    end
+
+                    if not State.Summer.autoAddRunning then break end
+                    if not tool then continue end
+
+                    local equipped = SummerModule.summerEquipTool(tool)
+                    if not equipped then
+                        task.wait(1)
+                        continue
+                    end
+
+                    local equippedTool = Player.Character:FindFirstChildOfClass("Tool")
+                    if not equippedTool then
+                        task.wait(1)
+                        continue
+                    end
+
+                    local ok = pcall(function()
+                        AddCauldronItem:InvokeServer(equippedTool)
+                    end)
+
+                    if ok then
+                        totalAdded = totalAdded + 1
+                        Utility.createNotification(string.format("Added: %s + %s (%d/10)", mod, rar, State.Summer.progress + 1), 2)
+                    end
+                    task.wait(1)
+                end
+
+                if not State.Summer.autoAddRunning then break end
+
+                -- PHASE 2: WAIT FOR RESET
+                Utility.createNotification("Cauldron full! Waiting for delivery/claim...", 3)
+
+                while State.Summer.autoAddRunning and State.Summer.progress >= 10 do
+                    task.wait(2)
+
+                    if State.Summer.progress >= 10 then
+                        local syncedTime = Services.Workspace:GetAttribute("SyncedTime") or 0
+                        local sisa = State.Summer.deliveryTime - syncedTime + 3600
+                        if sisa <= 0 then
+                            local ok, result = pcall(function()
+                                return ClaimCauldron:InvokeServer()
+                            end)
+                            if ok and result then
+                                Utility.createNotification("Reward claimed successfully! Waiting for next cycle...", 5)
+                                task.wait(3)
+                            end
+                        end
+                    end
+                end
+
+                if not State.Summer.autoAddRunning then break end
+                Utility.createNotification("New cycle started! Continuing...", 3)
+            end
+        end)
     end)
 
     EngProject:CreateButton(CauldronSection.Container, "Claim Cauldron Reward", function()
-        showDummyWarning("Claim Cauldron Reward")
+        local ok, result = pcall(function()
+            return ClaimCauldron:InvokeServer()
+        end)
+        if ok and result then
+            Utility.createNotification("Reward claimed successfully!", 3)
+        else
+            Utility.createNotification("Claim failed. Not ready yet.", 3)
+        end
     end)
 
     EngProject:CreateButton(CauldronSection.Container, "Refresh Cauldron Data", function()
-        showDummyWarning("Refresh Cauldron Data")
+        pcall(function() UpdateCauldronData:FireServer() end)
+        Utility.createNotification("Data refreshed!", 2)
     end)
 end
 
@@ -10192,9 +16904,10 @@ local function initializeMiscellaneousTab()
     local excavationStatus = EngProject:CreateParagraph(ExcavationSection.Container, "Site Status",
         {"Idle", "No site selected"})
 
-    EngProject:CreateDropdown(ExcavationSection.Container, "Select Excavation Site", {"Site A", "Site B"}, nil,
+    EngProject:CreateDropdown(ExcavationSection.Container, "Select Excavation Site", ExcavationModule.getNames(), nil,
         function(s)
-            showDummyWarning("Select Excavation Site")
+            State.Excavation.selected = s
+            excavationStatus:SetFields({"Status: Ready", "Selected: " .. tostring(s)})
         end, {
             Save = {
                 Key = "prospecting.excavation.selected_site"
@@ -10202,11 +16915,36 @@ local function initializeMiscellaneousTab()
         })
 
     EngProject:CreateButton(ExcavationSection.Container, "Begin Excavation", function()
-        showDummyWarning("Begin Excavation")
+        if not State.Excavation.selected then
+            excavationStatus:SetFields({"Status: Error", "No site selected"})
+            return
+        end
+
+        local ok, msg = ExcavationModule.start()
+        if ok then
+            excavationStatus:SetFields({"Status: Running", "Site: " .. State.Excavation.selected})
+        else
+            excavationStatus:SetFields({"Status: Failed", tostring(msg)})
+        end
     end)
 
     EngProject:CreateToggle(ExcavationSection.Container, "Auto Claim Rewards", true, function(state)
-        showDummyWarning("Auto Claim Rewards")
+        State.Excavation.autoClaim = state
+        excavationStatus:SetFields({"Status: " .. (state and "Auto-Claim Enabled" or "Auto-Claim Disabled"),
+                                    "Site: " .. tostring(State.Excavation.selected)})
+
+        if not state then
+            return
+        end
+
+        task.spawn(function()
+            while State.Excavation.autoClaim do
+                if ExcavationModule.getCurrentStatus() == "Finished" then
+                    ExcavationModule.claim()
+                end
+                task.wait(1)
+            end
+        end)
     end, {
         Save = {
             Key = "prospecting.excavation.auto_claim"
@@ -10214,7 +16952,41 @@ local function initializeMiscellaneousTab()
     })
 
     EngProject:CreateToggle(ExcavationSection.Container, "Auto Start Excavation", false, function(state)
-        showDummyWarning("Auto Start Excavation")
+        State.Excavation.autoStart = state
+
+        if not state then
+            excavationStatus:SetFields({"Status: Auto-Start Disabled", "Site: " .. tostring(State.Excavation.selected)})
+            return
+        end
+
+        if State.Excavation.autoStartRunning then
+            excavationStatus:SetFields({"Status: Auto-Start Running", "Site: " .. tostring(State.Excavation.selected)})
+            return
+        end
+
+        State.Excavation.autoStartRunning = true
+        excavationStatus:SetFields({"Status: Auto-Start Enabled", "Site: " .. tostring(State.Excavation.selected)})
+
+        task.spawn(function()
+            while State.Excavation.autoStart do
+                if not State.Excavation.selected then
+                    excavationStatus:SetFields({"Status: Waiting", "Select an excavation site to auto-start"})
+                    task.wait(2)
+                    continue
+                end
+
+                local ok, msg = ExcavationModule.autoStartCycle()
+                if ok then
+                    excavationStatus:SetFields({"Status: Running", "Site: " .. tostring(State.Excavation.selected)})
+                elseif msg ~= "Excavation already active." then
+                    excavationStatus:SetFields({"Status: Waiting", tostring(msg)})
+                end
+
+                task.wait(5)
+            end
+
+            State.Excavation.autoStartRunning = false
+        end)
     end, {
         Save = {
             Key = "prospecting.excavation.auto_start"
@@ -10338,27 +17110,36 @@ local function initializeMiscellaneousTab()
     })
 
     EngProject:CreateToggle(RemoveBarriersSection.Container, "Disable Vine Blockades", false, function(state)
-        showDummyWarning("Disable Vine Blockades")
+        State.Barriers.vines = state
+        if not BarrierRemovalModule.toggleVines(state) then
+            Utility.createNotification("Vine blockades were not found.", 4)
+        end
     end, {
-        Description = "Temporarily disables vine collision.",
+        Description = "Temporarily disables vine collision without deleting the objects.",
         Save = {
             Key = "prospecting.barriers.vines"
         }
     })
 
     EngProject:CreateToggle(RemoveBarriersSection.Container, "Disable Abyssal Gate", false, function(state)
-        showDummyWarning("Disable Abyssal Gate")
+        State.Barriers.abyssalGate = state
+        if not BarrierRemovalModule.toggleAbyssalGate(state) then
+            Utility.createNotification("Abyssal Gate was not found.", 4)
+        end
     end, {
-        Description = "Temporarily disables the Abyssal Gate collision.",
+        Description = "Temporarily disables the Abyssal Gate collision and can restore it.",
         Save = {
             Key = "prospecting.barriers.abyssal_gate"
         }
     })
 
     EngProject:CreateToggle(RemoveBarriersSection.Container, "Disable Peak Obstruction", false, function(state)
-        showDummyWarning("Disable Peak Obstruction")
+        State.Barriers.peakObstruction = state
+        if not BarrierRemovalModule.toggleMountainBlock(state) then
+            Utility.createNotification("Peak obstruction was not found.", 4)
+        end
     end, {
-        Description = "Temporarily disables the summit blockage.",
+        Description = "Temporarily disables the summit blockage and can restore it.",
         Save = {
             Key = "prospecting.barriers.peak_obstruction"
         }
@@ -10372,15 +17153,15 @@ local function initializeMiscellaneousTab()
     })
 
     EngProject:CreateToggle(ServerSection.Container, "Enable Anti-AFK Protection", true, function(state)
-        showDummyWarning("Anti-AFK Protection")
+        ServerUtilityModule.setupAntiAFK(state)
     end)
 
     EngProject:CreateButton(ServerSection.Container, "Rejoin Current Server", function()
-        showDummyWarning("Rejoin Server")
+        ServerUtilityModule.rejoin()
     end)
 
     EngProject:CreateButton(ServerSection.Container, "Server Hop", function()
-        showDummyWarning("Server Hop")
+        ServerUtilityModule.serverHop()
     end)
 
     local EspBox = EngProject:CreateSection(RightPage, "ESP", {
@@ -10390,15 +17171,23 @@ local function initializeMiscellaneousTab()
     })
 
     EngProject:CreateToggle(EspBox.Container, "Highlight Players", false, function(enabled)
-        showDummyWarning("Highlight Players")
+        if enabled then
+            ESPModule.enablePlayers()
+        else
+            ESPModule.disablePlayers()
+        end
     end)
 
     EngProject:CreateToggle(EspBox.Container, "Highlight Totems", false, function(enabled)
-        showDummyWarning("Highlight Totems")
+        if enabled then
+            ESPModule.enableTotems()
+        else
+            ESPModule.disableTotems()
+        end
     end)
 
     EngProject:CreateButton(EspBox.Container, "Clear All Highlights", function()
-        showDummyWarning("Clear All Highlights")
+        ESPModule.clearAll()
     end)
 end
 
@@ -10408,7 +17197,11 @@ local function initializeSettingsTab()
     EngProject:CreateSection(page, "Interface Customization")
 
     EngProject:CreateToggle(page, "Enable Inventory Filtering", true, function(state)
-        showDummyWarning("Enable Inventory Filtering")
+        if state then
+            InventoryFilterModule.create()
+        else
+            InventoryFilterModule.destroy()
+        end
     end, {
         Save = {
             Key = "prospecting.settings.inventory_filter"
