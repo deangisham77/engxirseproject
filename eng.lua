@@ -14777,6 +14777,26 @@ do
                                 end
                             end
                         end
+                        
+                        -- Also simulate pressing the "1" key to trigger the actual Roblox core selection
+                        pcall(function()
+                            local vim = game:GetService("VirtualInputManager")
+                            if vim then
+                                vim:SendKeyEvent(true, Enum.KeyCode.One, false, game)
+                                task.wait(0.05)
+                                vim:SendKeyEvent(false, Enum.KeyCode.One, false, game)
+                            end
+                        end)
+                        pcall(function()
+                            if keyclick then
+                                keyclick(0x31) -- 0x31 is key code for '1'
+                            elseif keypress and keyrelease then
+                                keypress(0x31)
+                                task.wait(0.05)
+                                keyrelease(0x31)
+                            end
+                        end)
+                        buttonClicked = true
                     end
                 end
                 
