@@ -14054,6 +14054,20 @@ do
     local running = false
     local questThread = nil
     
+    local function findFirstChildWhichIsARecursive(parent, className)
+        if not parent then return nil end
+        for _, child in ipairs(parent:GetChildren()) do
+            if child:IsA(className) then
+                return child
+            end
+            local found = findFirstChildWhichIsARecursive(child, className)
+            if found then
+                return found
+            end
+        end
+        return nil
+    end
+    
     local function isDialogueQuest(itemName)
         if not itemName then return false end
         local lower = itemName:lower()
@@ -14762,7 +14776,7 @@ do
                 
                 -- Method 1: Legacy Roblox Dialog Object (inside workspace NPC)
                 if dm then
-                    local dialogObj = dm:FindFirstChildWhichIsA("Dialog", true)
+                    local dialogObj = findFirstChildWhichIsARecursive(dm, "Dialog")
                     if dialogObj then
                         dialogActive = true
                         
@@ -14956,7 +14970,7 @@ do
                                 end)
                             end
 
-                            local prompt = dm:FindFirstChildWhichIsA("ProximityPrompt", true) or hrp:FindFirstChildWhichIsA("ProximityPrompt", true)
+                            local prompt = findFirstChildWhichIsARecursive(dm, "ProximityPrompt") or findFirstChildWhichIsARecursive(hrp, "ProximityPrompt")
                             if prompt then
                                 prompt.HoldDuration = 0
                                 updateUI({"Status: Talking to NPC", "Target: " .. targetStr})
@@ -14973,7 +14987,7 @@ do
                                 task.wait(2.0)
                             else
                                 -- Fallback for Legacy Dialog object interaction
-                                local dialogObj = dm:FindFirstChildWhichIsA("Dialog", true)
+                                local dialogObj = findFirstChildWhichIsARecursive(dm, "Dialog")
                                 if dialogObj then
                                     updateUI({"Status: Talking to NPC", "Target: " .. targetStr})
                                     pcall(function()
