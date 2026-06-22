@@ -14754,68 +14754,84 @@ do
             local playerGui = Player:FindFirstChild("PlayerGui")
             if not playerGui then return end
             
-            local dialogKeywords = {"dialog", "chat", "npc", "quest", "talk", "interaction", "conversation"}
-            
             for i = 1, 15 do
                 local dialogActive = false
                 local buttonClicked = false
                 
-                for _, child in ipairs(playerGui:GetChildren()) do
-                    if child:IsA("ScreenGui") and child.Enabled then
-                        local cName = child.Name:lower()
-                        local isDialogGui = false
-                        for _, kw in ipairs(dialogKeywords) do
-                            if cName:find(kw, 1, true) then
-                                isDialogGui = true
-                                break
-                            end
-                        end
-                        
-                        if isDialogGui then
-                            dialogActive = true
-                            for _, desc in ipairs(child:GetDescendants()) do
-                                local isClickable = desc:IsA("TextButton") or desc:IsA("ImageButton")
-                                local textObj = nil
-                                if desc:IsA("TextLabel") then
-                                    textObj = desc
-                                elseif desc:IsA("TextButton") then
-                                    textObj = desc
-                                end
-                                
-                                if textObj and textObj.Text ~= "" and textObj.Visible then
-                                    local txt = textObj.Text:lower()
-                                    if txt:find("accept") or txt:find("yes") or txt:find("sure") or txt:find("complete") or txt:find("claim") or txt:find("turn in") or txt:find("ok") or txt:find("next") or txt:find("confirm") or txt:find("quest") or txt:find("deliver") or txt:find("dialog") or txt:find("give") or txt:find("talk") or txt:find("interact") or txt:find("close") or txt:find("exit") or txt:find("bye") or txt:find("leave") then
-                                        local button = nil
-                                        if isClickable then
-                                            button = desc
-                                        else
-                                            local p = desc.Parent
-                                            while p and p ~= child do
-                                                if p:IsA("TextButton") or p:IsA("ImageButton") then
-                                                    button = p
-                                                    break
-                                                end
-                                                p = p.Parent
-                                            end
-                                        end
-                                        
-                                        if button and button.Visible then
-                                            pcall(function()
-                                                if firesignal then
-                                                    firesignal(button.MouseButton1Click)
-                                                    firesignal(button.Activated)
-                                                end
-                                                button:Activate()
-                                            end)
-                                            buttonClicked = true
-                                            break
-                                        end
-                                    end
+                local dm = findDredgeMasterNPC()
+                
+                -- Method 1: Legacy Roblox Dialog Object (inside workspace NPC)
+                if dm then
+                    local dialogObj = dm:FindFirstChildWhichIsA("Dialog", true)
+                    if dialogObj then
+                        dialogActive = true
+                        for _, choice in ipairs(dialogObj:GetDescendants()) do
+                            if choice:IsA("DialogChoice") then
+                                local userText = choice.UserDialog:lower()
+                                if userText:find("sign%s*me%s*up") or userText:find("accept") or userText:find("yes") or userText:find("sure") or userText:find("complete") or userText:find("claim") or userText:find("turn in") or userText:find("ok") or userText:find("next") or userText:find("confirm") or userText:find("quest") or userText:find("deliver") then
+                                    pcall(function()
+                                        dialogObj:SignalDialogChoiceSelected(Player, choice)
+                                    end)
+                                    buttonClicked = true
+                                    break
                                 end
                             end
                         end
                     end
-                    if buttonClicked then break end
+                end
+                
+                -- Method 2: Custom GUI Dialogue (inside PlayerGui or NPC model)
+                if not buttonClicked then
+                    local searchContainers = {playerGui}
+                    if dm then
+                        table.insert(searchContainers, dm)
+                    end
+                    
+                    for _, container in ipairs(searchContainers) do
+                        for _, desc in ipairs(container:GetDescendants()) do
+                            -- Ignore buttons inside our own UI
+                            if desc:FindFirstAncestor("Qenvory") or desc:FindFirstAncestor("Rayfield") then
+                                continue
+                            end
+                            
+                            local isClickable = desc:IsA("TextButton") or desc:IsA("ImageButton")
+                            local isText = desc:IsA("TextLabel") or desc:IsA("TextButton")
+                            
+                            if isText and desc.Text ~= "" and desc.Visible then
+                                local txt = desc.Text:lower()
+                                if txt:find("sign%s*me%s*up") or txt:find("accept") or txt:find("yes") or txt:find("sure") or txt:find("complete") or txt:find("claim") or txt:find("turn in") or txt:find("ok") or txt:find("next") or txt:find("confirm") or txt:find("quest") or txt:find("deliver") or txt:find("dialog") or txt:find("give") or txt:find("talk") or txt:find("interact") or txt:find("close") or txt:find("exit") or txt:find("bye") or txt:find("leave") then
+                                    dialogActive = true
+                                    
+                                    local button = nil
+                                    if isClickable then
+                                        button = desc
+                                    else
+                                        local p = desc.Parent
+                                        while p and p ~= container do
+                                            if p:IsA("TextButton") or p:IsA("ImageButton") then
+                                                button = p
+                                                break
+                                            end
+                                            p = p.Parent
+                                        end
+                                    end
+                                    
+                                    if button and button.Visible then
+                                        pcall(function()
+                                            if firesignal then
+                                                firesignal(button.MouseButton1Click)
+                                                firesignal(button.Activated)
+                                            end
+                                            button:Activate()
+                                        end)
+                                        buttonClicked = true
+                                        break
+                                    end
+                                end
+                            end
+                        end
+                        if buttonClicked then break end
+                    end
                 end
                 
                 if not dialogActive then
