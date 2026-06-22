@@ -14971,6 +14971,19 @@ do
                                 
                                 processDialogue()
                                 task.wait(2.0)
+                            else
+                                -- Fallback for Legacy Dialog object interaction
+                                local dialogObj = dm:FindFirstChildWhichIsA("Dialog", true)
+                                if dialogObj then
+                                    updateUI({"Status: Talking to NPC", "Target: " .. targetStr})
+                                    pcall(function()
+                                        dialogObj:SetPlayerIsUsing(Player, true)
+                                    end)
+                                    task.wait(0.5)
+                                end
+                                
+                                processDialogue()
+                                task.wait(2.0)
                             end
                         end
                     else
