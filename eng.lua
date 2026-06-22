@@ -1,5 +1,6 @@
 -- ============================================================================
---  ENG & IRSE PROJECT - AUTOMATION MODULE (v4.0.0)
+--  QENVORY - AUTOMATION MODULE (v4.0.0)
+--  Credit By Eng & Irse
 --  Supported Features: Rayfield UI, Geode Opener, Treasure Hunt,
 --                      Sand Dollar Collection, and Auto Quest.
 --
@@ -2223,10 +2224,10 @@ do
         end
         local function FormatError(Context, Message, Level)
             local Prefix = ({
-                [ErrorLevels.WARN] = "[EngProject:WARN]",
-                [ErrorLevels.ERROR] = "[EngProject:ERROR]",
-                [ErrorLevels.CRITICAL] = "[EngProject:CRITICAL]"
-            })[Level] or "[EngProject]"
+                [ErrorLevels.WARN] = "[Qenvory:WARN]",
+                [ErrorLevels.ERROR] = "[Qenvory:ERROR]",
+                [ErrorLevels.CRITICAL] = "[Qenvory:CRITICAL]"
+            })[Level] or "[Qenvory]"
             return Prefix .. " " .. Context .. ": " .. Message
         end
         local function LogError(Context, Message, Level)
@@ -2598,7 +2599,7 @@ do
     do
         EngProject.SaveManager.Enabled = true
         EngProject.SaveManager.AutoSave = true
-        EngProject.SaveManager.Folder = "EngProject"
+        EngProject.SaveManager.Folder = "Qenvory"
         EngProject.SaveManager.FileName = tostring(game.PlaceId) .. ".json"
         EngProject.SaveManager.Values = {}
         EngProject.SaveManager.Loaded = false
@@ -5907,12 +5908,12 @@ function EngProject:CreateWindow(options)
         EnableBlur = function(self, intensity)
             pcall(function()
                 intensity = math.clamp(tonumber(intensity) or 24, 0, 56)
-                local existing = Lighting:FindFirstChild("Eng ProjectBlur")
+                local existing = Lighting:FindFirstChild("QenvoryBlur")
                 if existing then
                     existing.Size = intensity
                 else
                     local blur = Instance.new("BlurEffect")
-                    blur.Name = "Eng ProjectBlur"
+                    blur.Name = "QenvoryBlur"
                     blur.Size = intensity
                     blur.Parent = Lighting
                 end
@@ -5921,7 +5922,7 @@ function EngProject:CreateWindow(options)
 
         DisableBlur = function(self)
             pcall(function()
-                local existing = Lighting:FindFirstChild("Eng ProjectBlur")
+                local existing = Lighting:FindFirstChild("QenvoryBlur")
                 if existing then
                     existing:Destroy()
                 end
@@ -8859,7 +8860,7 @@ function ShoppingMartMock:Toggle()
         else
             -- Fallback: toggle ScreenGui yang tersembunyi
             for _, gui in ipairs(PlayerGui:GetDescendants()) do
-                if gui:IsA("ScreenGui") and not gui.Enabled and not gui.Name:find("EngProject") and not gui.Name:find("Roblox") then
+                if gui:IsA("ScreenGui") and not gui.Enabled and not gui.Name:find("Qenvory") and not gui.Name:find("Roblox") then
                     gui.Enabled = true
                     return
                 end
@@ -9269,16 +9270,22 @@ do
             return "SUCCESS"
         end
 
-        local function emptyToCompletion(shakeScript)
+        local function emptyToCompletion(shakeScript, panScript)
             while task.wait() do
                 if killSwitch and not killSwitch() then
-                    WashAnimation:Stop()
+                    if WashAnimation then WashAnimation:Stop() end
                     return "KILLED"
                 end
 
-                if not shakeUntilNotPanning(shakeScript, killSwitch) then
-                    WashAnimation:Stop()
-                    return "KILLED"
+                if LocalCharacter:GetAttribute("Panning") then
+                    if not shakeUntilNotPanning(shakeScript, killSwitch) then
+                        if WashAnimation then WashAnimation:Stop() end
+                        return "KILLED"
+                    end
+                elseif panScript then
+                    pcall(function()
+                        panScript:InvokeServer()
+                    end)
                 end
 
                 local status = PanModule.getStatus()
@@ -9291,7 +9298,7 @@ do
                 end)
             end
 
-            WashAnimation:Stop()
+            if WashAnimation then WashAnimation:Stop() end
             return (not killSwitch or killSwitch()) and "SUCCESS" or "KILLED"
         end
 
@@ -9356,7 +9363,7 @@ do
                     panScript:InvokeServer()
                 end)
 
-                return emptyToCompletion(shakeScript)
+                return emptyToCompletion(shakeScript, panScript)
             end
         }
 
@@ -12267,7 +12274,7 @@ do
         local TweenService = EngProject.Utility:GetService("TweenService")
         local UserInputService = EngProject.Utility:GetService("UserInputService")
 
-        local folderName = "Eng Project"
+        local folderName = "Qenvory"
         local fileName = folderName .. "/logo.png"
         local iconUrl = "https://raw.githubusercontent.com/dawnpetal/website/refs/heads/main/assets/images/logo.png"
         local logoAsset
@@ -12458,6 +12465,7 @@ _G.scanRegionPos = function(centerPos, targetRegion)
     
     -- Multi-stage radial search in 3D: accurate nearby, fast far away
     local stages = {
+        {max = 20, step = 4},
         {max = 150, step = 15},
         {max = 500, step = 35},
         {max = 1200, step = 60}
@@ -12519,12 +12527,15 @@ do
 
         local controller
 
-        local travelMode = State.AutoFarm.travelMode
         local char = Player.Character
         local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
-        if playerHrp then
+
+        local travelMode = State.AutoFarm.travelMode
+        if State.Quest.isFarming then
+            travelMode = "Legit"
+        elseif playerHrp then
             local dist = (playerHrp.Position - targetCFrame.Position).Magnitude
-            if dist < 20 or State.Quest.isFarming then
+            if dist < 60 then
                 travelMode = "Legit"
             end
         end
@@ -14065,6 +14076,17 @@ do
         
         local function check(obj)
             if not obj:IsA("BasePart") then return end
+            
+            -- Ignore objects in the Museum
+            local ancestor = obj
+            while ancestor and ancestor ~= workspace do
+                local ancName = ancestor.Name:lower()
+                if ancName:find("museum") then
+                    return
+                end
+                ancestor = ancestor.Parent
+            end
+
             local name = obj.Name:lower()
             local matches = name:find(searchName, 1, true)
             
@@ -14213,7 +14235,7 @@ do
             end
         end
 
-        for _, desc in ipairs(workspace:GetDescendants()) do
+        for _, desc in ipairs(workspace:GetChildren()) do
             if checkMatch(desc) then
                 return desc
             end
@@ -14284,6 +14306,17 @@ do
 
         local function checkObject(obj)
             if not (obj:IsA("BasePart") or obj:IsA("Model")) then return false end
+            
+            -- Ignore objects in the Museum
+            local ancestor = obj
+            while ancestor and ancestor ~= workspace do
+                local ancName = ancestor.Name:lower()
+                if ancName:find("museum") then
+                    return false
+                end
+                ancestor = ancestor.Parent
+            end
+
             local model = obj:FindFirstAncestorOfClass("Model")
             if model then
                 if Players:GetPlayerFromCharacter(model) then
@@ -14332,13 +14365,6 @@ do
         end
 
         for _, obj in ipairs(workspace:GetChildren()) do
-            if checkObject(obj) then
-                cachedTarget = obj
-                return obj
-            end
-        end
-
-        for _, obj in ipairs(workspace:GetDescendants()) do
             if checkObject(obj) then
                 cachedTarget = obj
                 return obj
@@ -14941,9 +14967,10 @@ do
                                 Utility.createNotification("Waypoint teleport failed or not configured!", 3)
                             end
                         else
-                            -- Stop manual Auto Farm to avoid conflicting movements
+                            -- Stop manual Auto Farm to avoid conflicting movement
                             AutoFarmModule.stop()
                             
+                            local lastQuestItem = nil
                             State.Quest.isFarming = true
                             
                             -- Inner loop for digging and washing dynamically
@@ -14957,60 +14984,55 @@ do
                                         task.wait(0.1)
                                     end
                                 else
-                                    -- Locate/scan target dynamically in workspace if workspace-aware
-                                    local tObj = findQuestTarget(item)
-                                    local tPos = nil
-                                    if tObj then
-                                        if tObj:IsA("BasePart") then
-                                            tPos = tObj.Position
-                                        elseif tObj:IsA("Model") then
-                                            tPos = tObj.PrimaryPart and tObj.PrimaryPart.Position or tObj:GetPivot().Position
-                                        end
+                                    if lastQuestItem ~= item then
+                                        lastQuestItem = item
+                                        State.AutoFarm.sandCFrame = nil
+                                        State.AutoFarm.waterCFrame = nil
                                     end
 
                                     local char = Player.Character
                                     local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
                                     
                                     if playerHrp then
-                                        local depositCF = nil
-                                        local waterCF = nil
-                                        
-                                        if tPos then
-                                            -- Detect around the quest mineral's position (finding water first, then sand closest to the water)
-                                            waterCF = scanRegionPos(tPos, "Water")
-                                            if waterCF then
-                                                depositCF = scanRegionPos(waterCF.Position, "Deposit")
-                                            else
+                                        if not State.AutoFarm.sandCFrame or not State.AutoFarm.waterCFrame then
+                                            -- Locate/scan target dynamically in workspace if workspace-aware
+                                            local tObj = findQuestTarget(item)
+                                            local tPos = nil
+                                            if tObj then
+                                                if tObj:IsA("BasePart") then
+                                                    tPos = tObj.Position
+                                                elseif tObj:IsA("Model") then
+                                                    tPos = tObj.PrimaryPart and tObj.PrimaryPart.Position or tObj:GetPivot().Position
+                                                end
+                                            end
+
+                                            local depositCF = nil
+                                            local waterCF = nil
+
+                                            if tPos then
+                                                -- Scan for Deposit first (near the mineral's position)
                                                 depositCF = scanRegionPos(tPos, "Deposit")
-                                            end
-                                            
-                                            if depositCF and waterCF then
-                                                State.AutoFarm.sandCFrame = depositCF
-                                                State.AutoFarm.waterCFrame = waterCF
-                                                
-                                                -- Move character close to the object now that both are confirmed
-                                                local isNearFarmingSpot = false
-                                                if State.AutoFarm.sandCFrame and (playerHrp.Position - State.AutoFarm.sandCFrame.Position).Magnitude <= 25 then
-                                                    isNearFarmingSpot = true
+                                                if depositCF then
+                                                    waterCF = scanRegionPos(depositCF.Position, "Water")
+                                                else
+                                                    waterCF = scanRegionPos(tPos, "Water")
+                                                    if waterCF then
+                                                        depositCF = scanRegionPos(waterCF.Position, "Deposit")
+                                                    end
                                                 end
-                                                if State.AutoFarm.waterCFrame and (playerHrp.Position - State.AutoFarm.waterCFrame.Position).Magnitude <= 25 then
-                                                    isNearFarmingSpot = true
-                                                end
-                                                
-                                                if not isNearFarmingSpot and (playerHrp.Position - tPos).Magnitude > 15 then
-                                                    Utility.createNotification("Quest mineral with sand & water found! Teleporting...", 3)
-                                                    playerHrp.CFrame = CFrame.new(tPos + Vector3.new(0, 3, 0))
-                                                    task.wait(0.5)
-                                                end
-                                            end
-                                        else
-                                            -- Fallback: Scan around player position (when mineral does not spawn as a specific model)
-                                            waterCF = scanRegionPos(playerHrp.Position, "Water")
-                                            if waterCF then
-                                                depositCF = scanRegionPos(waterCF.Position, "Deposit")
                                             else
+                                                -- Fallback: Scan around player position (when mineral does not spawn as a specific model)
                                                 depositCF = scanRegionPos(playerHrp.Position, "Deposit")
+                                                if depositCF then
+                                                    waterCF = scanRegionPos(depositCF.Position, "Water")
+                                                else
+                                                    waterCF = scanRegionPos(playerHrp.Position, "Water")
+                                                    if waterCF then
+                                                        depositCF = scanRegionPos(waterCF.Position, "Deposit")
+                                                    end
+                                                end
                                             end
+
                                             if depositCF and waterCF then
                                                 State.AutoFarm.sandCFrame = depositCF
                                                 State.AutoFarm.waterCFrame = waterCF
@@ -15018,6 +15040,21 @@ do
                                         end
                                         
                                         if State.AutoFarm.sandCFrame and State.AutoFarm.waterCFrame then
+                                            -- Move character close to the object now that both are confirmed
+                                            local isNearFarmingSpot = false
+                                            if (playerHrp.Position - State.AutoFarm.sandCFrame.Position).Magnitude <= 25 then
+                                                isNearFarmingSpot = true
+                                            end
+                                            if (playerHrp.Position - State.AutoFarm.waterCFrame.Position).Magnitude <= 25 then
+                                                isNearFarmingSpot = true
+                                            end
+                                            
+                                            if not isNearFarmingSpot then
+                                                Utility.createNotification("Quest mineral found! Teleporting...", 3)
+                                                playerHrp.CFrame = CFrame.new(State.AutoFarm.sandCFrame.Position + Vector3.new(0, 3, 0))
+                                                task.wait(0.5)
+                                            end
+
                                             local acquired = TaskManager:requestTask("AutoFarm", 1)
                                             if acquired then
                                                 local hasTurn = TaskManager:waitForTurn("AutoFarm", 5)
@@ -15143,8 +15180,9 @@ end
 local amazong = ShoppingMart.new(EngProject.Utility:IsMobile() and 0.5 or 0.90)
 
 local window = EngProject:CreateWindow({
+    Name = "Qenvory",
     Brand = {
-        Name = "Eng Project"
+        Name = "Qenvory"
     },
     DefaultScale = EngProject.Utility:IsMobile() and 0.50 or 0.75,
     TabMode = "Dynamic",
@@ -15152,7 +15190,7 @@ local window = EngProject:CreateWindow({
     Footer = true,
     FooterItems = {{
         Type = "Text",
-        Text = "Eng Project v" .. EngProject.Version .. " - https://discord.gg/fmHk8ZbM",
+        Text = "Qenvory v" .. EngProject.Version .. " - Credit By Eng & Irse - https://discord.gg/fmHk8ZbM",
         ColorTier = "TextSecondary",
         Order = 1
     }},
@@ -15271,10 +15309,10 @@ local Tabs = {
 local function initializeDashboardTab()
     local page = Tabs.Dashboard.Page
 
-    EngProject:CreateSection(page, "Eng & Irse Project")
+    EngProject:CreateSection(page, "Qenvory")
 
     EngProject:CreateParagraph(page, "About", {
-        "Script made by Eng & Irse for Roblox Prospecting.",
+        "Credit By Eng & Irse",
         "Version: " .. EngProject.Version,
         "Join our Discord for updates, bug reports, and support!"
     })
