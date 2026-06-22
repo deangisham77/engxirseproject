@@ -15290,7 +15290,7 @@ local window = EngProject:CreateWindow({
     Footer = true,
     FooterItems = {{
         Type = "Text",
-        Text = "Qenvory v" .. EngProject.Version .. " - Credit By Eng & Irse - https://discord.gg/fmHk8ZbM",
+        Text = "Qenvory v" .. EngProject.Version .. " - Credit By Eng & Irse - https://discord.gg/skxYW9YCW",
         ColorTier = "TextSecondary",
         Order = 1
     }},
