@@ -14117,8 +14117,8 @@ do
         ["gold"] = "Fortune River",
         ["obsidian"] = "Volcano",
         ["dragon"] = "Volcano",
-        ["fossil"] = "Windswept Beach",
-        ["ammonite"] = "Windswept Beach",
+        ["fossil"] = "Volcano",
+        ["ammonite"] = "Volcano",
         ["amber"] = "Fungal Marsh",
         ["swamp"] = "Rotwood Swamp",
         ["cinnabar"] = "Volcano",
@@ -14468,7 +14468,7 @@ do
             ["silver clamshell"] = "Sunset Beach",
 
             -- Epic
-            ["ammonite fossil"] = "Windswept Beach",
+            ["ammonite fossil"] = "Volcano",
             ["ashvein"] = "Sunset Beach",
             ["aurorite"] = "Fortune River",
             ["bone"] = "Rotwood Swamp",
@@ -14525,7 +14525,7 @@ do
             ["red beryl"] = "Fungal Marsh",
             ["star garnet"] = "Rotwood Swamp",
             ["sunstone"] = "Starfall River",
-            ["vortessence"] = "Windswept Beach",
+            ["vortessence"] = "Volcano",
             ["volcanic core"] = "Volcano",
 
             -- Exotic
