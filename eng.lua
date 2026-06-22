@@ -14765,12 +14765,29 @@ do
                     local dialogObj = dm:FindFirstChildWhichIsA("Dialog", true)
                     if dialogObj then
                         dialogActive = true
+                        
+                        -- Force interact and set player as using
+                        pcall(function()
+                            dialogObj:SetPlayerIsUsing(Player, true)
+                        end)
+                        
                         for _, choice in ipairs(dialogObj:GetDescendants()) do
                             if choice:IsA("DialogChoice") then
                                 local userText = choice.UserDialog:lower()
                                 if userText:find("sign%s*me%s*up") or userText:find("accept") or userText:find("yes") or userText:find("sure") or userText:find("complete") or userText:find("claim") or userText:find("turn in") or userText:find("ok") or userText:find("next") or userText:find("confirm") or userText:find("quest") or userText:find("deliver") then
                                     pcall(function()
+                                        -- Fire client signal first
                                         dialogObj:SignalDialogChoiceSelected(Player, choice)
+                                        
+                                        -- Fire network remote if it is bound or if server expects it
+                                        local remote = getCompleteQuestRemote()
+                                        if remote then
+                                            if remote:IsA("RemoteFunction") then
+                                                remote:InvokeServer(choice)
+                                            else
+                                                remote:FireServer(choice)
+                                            end
+                                        end
                                     end)
                                     buttonClicked = true
                                     break
