@@ -191,7 +191,8 @@ local State = {
     Barriers = {
         vines = false,
         abyssalGate = false,
-        peakObstruction = false
+        peakObstruction = false,
+        seashellGate = false
     },
 
     Pan = {
@@ -12462,30 +12463,67 @@ _G.scanRegionPos = function(centerPos, targetRegion)
         return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Location"):WaitForChild("PointToRegion"))
     end)
     if not ok or not PointToRegion then return nil end
-    
-    -- Multi-stage radial search in 3D: accurate nearby, fast far away
+
+    -- Raycast setup to quickly get the exact ground or water height
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    if Player.Character then
+        raycastParams.FilterDescendantsInstances = {Player.Character}
+    end
+    raycastParams.IgnoreWater = false -- Detect water surfaces too!
+
+    -- A smarter, tighter multi-stage search using ground raycasting
     local stages = {
-        {max = 20, step = 4},
-        {max = 150, step = 15},
-        {max = 500, step = 35},
-        {max = 1200, step = 60}
+        {max = 30, step = 5},
+        {max = 120, step = 10},
+        {max = 400, step = 15},
+        {max = 1000, step = 30}
     }
-    
+
     for _, stage in ipairs(stages) do
         local r = stage.max
         local step = stage.step
         for dist = 0, r, step do
-            for x = -dist, dist, step do
-                for z = -dist, dist, step do
-                    if math.abs(x) == dist or math.abs(z) == dist then
-                        -- Test multiple height offsets (water level vs peak vs cave depth)
-                        for _, yOffset in ipairs({0, -10, 10, -30, 30, -60, 60}) do
-                            local testPos = centerPos + Vector3.new(x, yOffset, z)
+            for dx = -dist, dist, step do
+                for dz = -dist, dist, step do
+                    if math.abs(dx) == dist or math.abs(dz) == dist then
+                        local colX = centerPos.X + dx
+                        local colZ = centerPos.Z + dz
+                        
+                        -- Raycast down to find ground/water surface height
+                        local origin = Vector3.new(colX, centerPos.Y + 60, colZ)
+                        local direction = Vector3.new(0, -250, 0)
+                        local result = workspace:Raycast(origin, direction, raycastParams)
+                        
+                        if result then
+                            local groundY = result.Position.Y
+                            -- Test the exact point on the surface
+                            local testPos = Vector3.new(colX, groundY, colZ)
                             local region, _ = PointToRegion.GetPanningRegion(testPos)
                             if region == targetRegion then
                                 local cf = CFrame.new(testPos)
                                 scanCache[cacheKey] = cf
                                 return cf
+                            end
+                            -- Secondary check: slightly above/below in case of detection boundaries
+                            for _, offset in ipairs({2, -2}) do
+                                local regionOffset, _ = PointToRegion.GetPanningRegion(testPos + Vector3.new(0, offset, 0))
+                                if regionOffset == targetRegion then
+                                    local cf = CFrame.new(testPos + Vector3.new(0, offset, 0))
+                                    scanCache[cacheKey] = cf
+                                    return cf
+                                end
+                            end
+                        else
+                            -- Fallback: if raycast misses (e.g. out of boundaries), check a few heights
+                            for _, yOffset in ipairs({0, -20, 20, -50, 50}) do
+                                local testPos = centerPos + Vector3.new(dx, yOffset, dz)
+                                local region, _ = PointToRegion.GetPanningRegion(testPos)
+                                if region == targetRegion then
+                                    local cf = CFrame.new(testPos)
+                                    scanCache[cacheKey] = cf
+                                    return cf
+                                end
                             end
                         end
                     end
@@ -13616,6 +13654,21 @@ do
         return abyssAssets and abyssAssets:FindFirstChild("Gate")
     end
 
+    function BarrierRemovalModule.getSeashellGate()
+        if not Map then return nil end
+        local folder = Map:FindFirstChild("SeashellIsle") or Map:FindFirstChild("Seashell Beach") or Map:FindFirstChild("SeashellIsleAssets")
+        if folder then
+            return folder:FindFirstChild("Gate") or folder:FindFirstChild("Barrier") or folder:FindFirstChild("Block") or folder:FindFirstChild("Blockage") or folder:FindFirstChild("Border")
+        end
+        for _, desc in ipairs(Map:GetDescendants()) do
+            local nameLower = desc.Name:lower()
+            if (nameLower:find("seashell") or nameLower:find("shell")) and (nameLower:find("gate") or nameLower:find("block") or nameLower:find("barrier") or nameLower:find("border")) then
+                return desc
+            end
+        end
+        return nil
+    end
+
     function BarrierRemovalModule.getMountainBlock()
         local mountains = Map and Map:FindFirstChild("Mountains")
         local added = mountains and mountains:FindFirstChild("Added")
@@ -13673,6 +13726,10 @@ do
     function BarrierRemovalModule.toggleMountainBlock(disabled)
         return BarrierRemovalModule.setBarrierEnabled("peakObstruction", BarrierRemovalModule.getMountainBlock(),
             not disabled)
+    end
+
+    function BarrierRemovalModule.toggleSeashellGate(disabled)
+        return BarrierRemovalModule.setBarrierEnabled("seashellGate", BarrierRemovalModule.getSeashellGate(), not disabled)
     end
 
     function BarrierRemovalModule.removeCrocodiles()
@@ -14422,6 +14479,11 @@ do
             return zone
         end
         
+        -- Override seashell to search in Sunset Beach
+        if itemLower:find("seashell", 1, true) then
+            return saveAndReturnZone("Sunset Beach")
+        end
+        
         -- 1. Try to search game ReplicatedStorage modules for data
         for _, module in ipairs(ReplicatedStorage:GetDescendants()) do
             if module:IsA("ModuleScript") and (module.Name:lower():find("ore") or module.Name:lower():find("mineral") or module.Name:lower():find("resource") or module.Name:lower():find("item")) then
@@ -14763,6 +14825,34 @@ do
         return saveAndReturn(nil, nil, nil, nil)
     end
 
+    local function findDialogueContainer()
+        local playerGui = Player:FindFirstChild("PlayerGui")
+        if not playerGui then return nil end
+        
+        local dm = findDredgeMasterNPC()
+        local dmName = dm and dm.Name:lower() or "dredge master"
+        
+        for _, desc in ipairs(playerGui:GetDescendants()) do
+            if desc:IsA("TextLabel") and desc.Visible and desc.Text ~= "" then
+                local text = desc.Text:lower()
+                if text:find("dredge%s*master") or text:find("dredgemaster") or (dmName and text:find(dmName, 1, true)) then
+                    local p = desc.Parent
+                    local topFrame = nil
+                    while p and p ~= playerGui do
+                        if p:IsA("Frame") or p:IsA("ScreenGui") or p:IsA("BillboardGui") then
+                            topFrame = p
+                        end
+                        p = p.Parent
+                    end
+                    if topFrame then
+                        return topFrame
+                    end
+                end
+            end
+        end
+        return nil
+    end
+
     local function processDialogue()
         task.spawn(function()
             local playerGui = Player:FindFirstChild("PlayerGui")
@@ -14788,10 +14878,11 @@ do
                         for _, choice in ipairs(dialogObj:GetDescendants()) do
                             if choice:IsA("DialogChoice") then
                                 local userText = choice.UserDialog:lower()
-                                if userText:find("sign%s*me%s*up") or userText:find("accept") or userText:find("yes") or userText:find("sure") or userText:find("complete") or userText:find("claim") or userText:find("turn in") or userText:find("ok") or userText:find("next") or userText:find("confirm") or userText:find("quest") or userText:find("deliver") then
+                                if userText:find("sign%s*me%s*up") or userText:find("accept") or userText:find("yes") or userText:find("sure") or userText:find("complete") or userText:find("claim") or userText:find("turn%s*in") or userText:find("ok") or userText:find("next") or userText:find("confirm") or userText:find("quest") or userText:find("deliver") or userText:find("here%s*they%s*are") or userText:find("here%s*is") or userText:find("here%s*are") or userText:find("have%s*them") or userText:find("done") or userText:find("finish") or userText:find("submit") or userText:find("give") then
                                     pcall(function()
-                                        -- Fire client signal first
-                                        dialogObj:SignalDialogChoiceSelected(Player, choice)
+                                        -- Fire client signals (both signatures for safety)
+                                        pcall(function() dialogObj:SignalDialogChoiceSelected(Player, choice) end)
+                                        pcall(function() dialogObj:SignalDialogChoiceSelected(choice) end)
                                         
                                         -- Fire network remote if it is bound or if server expects it
                                         local remote = getCompleteQuestRemote()
@@ -14831,9 +14922,13 @@ do
                     end
                 end
                 
-                -- Method 2: Custom GUI Dialogue (inside PlayerGui or NPC model)
+                -- Method 2: Custom GUI Dialogue (Strictly isolated to dialogue container)
                 if not buttonClicked then
-                    local searchContainers = {playerGui}
+                    local dialogueContainer = findDialogueContainer()
+                    local searchContainers = {}
+                    if dialogueContainer then
+                        table.insert(searchContainers, dialogueContainer)
+                    end
                     if dm then
                         table.insert(searchContainers, dm)
                     end
@@ -14845,12 +14940,12 @@ do
                                 continue
                             end
                             
-                            local isClickable = desc:IsA("TextButton") or desc:IsA("ImageButton")
+                            local isClickable = desc:IsA("TextButton") or desc:IsA("ImageButton") or desc:IsA("GuiButton")
                             local isText = desc:IsA("TextLabel") or desc:IsA("TextButton")
                             
                             if isText and desc.Text ~= "" and desc.Visible then
                                 local txt = desc.Text:lower()
-                                if txt:find("sign%s*me%s*up") or txt:find("accept") or txt:find("yes") or txt:find("sure") or txt:find("complete") or txt:find("claim") or txt:find("turn in") or txt:find("ok") or txt:find("next") or txt:find("confirm") or txt:find("quest") or txt:find("deliver") or txt:find("dialog") or txt:find("give") or txt:find("talk") or txt:find("interact") or txt:find("close") or txt:find("exit") or txt:find("bye") or txt:find("leave") then
+                                if txt:find("sign%s*me%s*up") or txt:find("accept") or txt:find("yes") or txt:find("sure") or txt:find("complete") or txt:find("claim") or txt:find("turn%s*in") or txt:find("ok") or txt:find("next") or txt:find("confirm") or txt:find("quest") or txt:find("deliver") or txt:find("dialog") or txt:find("give") or txt:find("talk") or txt:find("interact") or txt:find("close") or txt:find("exit") or txt:find("bye") or txt:find("leave") or txt:find("here%s*they%s*are") or txt:find("here%s*is") or txt:find("here%s*are") or txt:find("have%s*them") or txt:find("done") or txt:find("finish") or txt:find("submit") then
                                     dialogActive = true
                                     
                                     local button = nil
@@ -14859,7 +14954,7 @@ do
                                     else
                                         local p = desc.Parent
                                         while p and p ~= container do
-                                            if p:IsA("TextButton") or p:IsA("ImageButton") then
+                                            if p:IsA("TextButton") or p:IsA("ImageButton") or p:IsA("GuiButton") or p:IsA("Frame") then
                                                 button = p
                                                 break
                                             end
@@ -14868,12 +14963,46 @@ do
                                     end
                                     
                                     if button and button.Visible then
+                                        -- Fire events
                                         pcall(function()
                                             if firesignal then
-                                                firesignal(button.MouseButton1Click)
-                                                firesignal(button.Activated)
+                                                pcall(function() firesignal(button.MouseButton1Click) end)
+                                                pcall(function() firesignal(button.MouseButton1Down) end)
+                                                pcall(function() firesignal(button.MouseButton1Up) end)
+                                                pcall(function() firesignal(button.Activated) end)
+                                                pcall(function() firesignal(button.InputBegan) end)
                                             end
-                                            button:Activate()
+                                            pcall(function() button:Activate() end)
+                                        end)
+                                        pcall(function()
+                                            if firesignal then
+                                                pcall(function() firesignal(desc.MouseButton1Click) end)
+                                                pcall(function() firesignal(desc.MouseButton1Down) end)
+                                                pcall(function() firesignal(desc.MouseButton1Up) end)
+                                                pcall(function() firesignal(desc.Activated) end)
+                                                pcall(function() firesignal(desc.InputBegan) end)
+                                            end
+                                        end)
+                                        -- Physical click using VirtualInputManager (robust fallback)
+                                        pcall(function()
+                                            local vim = game:GetService("VirtualInputManager")
+                                            local center = button.AbsolutePosition + (button.AbsoluteSize / 2)
+                                            local inset = game:GetService("GuiService"):GetGuiInset()
+                                            local x = center.X + inset.X
+                                            local y = center.Y + inset.Y
+                                            vim:SendMouseButtonEvent(x, y, 0, true, game, 1)
+                                            task.wait(0.05)
+                                            vim:SendMouseButtonEvent(x, y, 0, false, game, 1)
+                                        end)
+                                        pcall(function()
+                                            local vim = game:GetService("VirtualInputManager")
+                                            local center = desc.AbsolutePosition + (desc.AbsoluteSize / 2)
+                                            local inset = game:GetService("GuiService"):GetGuiInset()
+                                            local x = center.X + inset.X
+                                            local y = center.Y + inset.Y
+                                            vim:SendMouseButtonEvent(x, y, 0, true, game, 1)
+                                            task.wait(0.05)
+                                            vim:SendMouseButtonEvent(x, y, 0, false, game, 1)
                                         end)
                                         buttonClicked = true
                                         break
@@ -14957,10 +15086,25 @@ do
                             end)
                             task.wait(1.5)
                             
-                            -- Call CompleteQuest remote
+                            -- Call start/complete quest remotes directly for DredgeMaster
+                            pcall(function()
+                                if not item then
+                                    local questsFolder = game:GetService("ReplicatedStorage"):FindFirstChild("Quests")
+                                    local dredgeQuest = questsFolder and questsFolder:FindFirstChild("DredgeMaster")
+                                    if dredgeQuest then
+                                        local startArgs = { dredgeQuest, [3] = "DredgeMaster" }
+                                        game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("Quests"):WaitForChild("StartQuest"):InvokeServer(unpack(startArgs))
+                                        Utility.createNotification("Auto-started DredgeMaster quest!", 3)
+                                    end
+                                else
+                                    game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("Quests"):WaitForChild("QuestTalked"):FireServer("DredgeMaster")
+                                    Utility.createNotification("Auto-completed/talked DredgeMaster quest!", 3)
+                                end
+                            end)
+
+                            -- Call CompleteQuest remote (legacy fallback)
                             local remote = getCompleteQuestRemote()
                             if remote then
-                                Utility.createNotification("Calling CompleteQuest remote...", 3)
                                 pcall(function()
                                     if remote:IsA("RemoteFunction") then
                                         remote:InvokeServer("")
@@ -15006,42 +15150,33 @@ do
                 else
                     -- We have a quest and need more items!
                     if State.Quest.autoFarm then
-                        local targetObj = findQuestTarget(item)
-                        local areaMatch = false
-                        local waypoint = nil
+                        local waypoint = getBestZoneForItem(item) or "Fortune River"
                         
-                        if targetObj then
-                            areaMatch = true
-                        else
-                            -- Fallback waypoint logic using robust zone mapping
-                            waypoint = getBestZoneForItem(item) or "Fortune River"
-                            
-                            -- Match waypoint case-insensitively and partially against active game waypoints
-                            if WaypointModule and WaypointModule.getList then
-                                local list = WaypointModule.getList()
-                                local lowerWP = waypoint:lower()
-                                local foundExact = false
+                        -- Match waypoint case-insensitively and partially against active game waypoints
+                        if WaypointModule and WaypointModule.getList then
+                            local list = WaypointModule.getList()
+                            local lowerWP = waypoint:lower()
+                            local foundExact = false
+                            for _, wpName in ipairs(list) do
+                                if wpName:lower() == lowerWP then
+                                    waypoint = wpName
+                                    foundExact = true
+                                    break
+                                end
+                            end
+                            if not foundExact then
                                 for _, wpName in ipairs(list) do
-                                    if wpName:lower() == lowerWP then
+                                    local lowerName = wpName:lower()
+                                    if lowerName:find(lowerWP, 1, true) or lowerWP:find(lowerName, 1, true) then
                                         waypoint = wpName
-                                        foundExact = true
                                         break
                                     end
                                 end
-                                if not foundExact then
-                                    for _, wpName in ipairs(list) do
-                                        local lowerName = wpName:lower()
-                                        if lowerName:find(lowerWP, 1, true) or lowerWP:find(lowerName, 1, true) then
-                                            waypoint = wpName
-                                            break
-                                        end
-                                    end
-                                end
                             end
-                            
-                            local currentArea = Player:GetAttribute("CurrentArea") or ""
-                            areaMatch = isAreaMatch(currentArea, waypoint)
                         end
+                        
+                        local currentArea = Player:GetAttribute("CurrentArea") or ""
+                        local areaMatch = isAreaMatch(currentArea, waypoint)
                         
                         if not areaMatch then
                             -- Stop Auto Farm before teleporting
@@ -15089,7 +15224,7 @@ do
                                         State.AutoFarm.sandCFrame = nil
                                         State.AutoFarm.waterCFrame = nil
                                     end
-
+                                    
                                     local char = Player.Character
                                     local playerHrp = char and char:FindFirstChild("HumanoidRootPart")
                                     
@@ -15104,6 +15239,13 @@ do
                                                 elseif tObj:IsA("Model") then
                                                     tPos = tObj.PrimaryPart and tObj.PrimaryPart.Position or tObj:GetPivot().Position
                                                 end
+                                            end
+
+                                            -- Teleport closer to the mineral model first to ensure assets load properly
+                                            if tPos and (playerHrp.Position - tPos).Magnitude > 30 then
+                                                Utility.createNotification("Teleporting to mineral: " .. tostring(item) .. "...", 3)
+                                                playerHrp.CFrame = CFrame.new(tPos + Vector3.new(0, 3, 0))
+                                                task.wait(0.6)
                                             end
 
                                             local depositCF = nil
@@ -15290,7 +15432,7 @@ local window = EngProject:CreateWindow({
     Footer = true,
     FooterItems = {{
         Type = "Text",
-        Text = "Qenvory v" .. EngProject.Version .. " - Credit By Eng & Irse - https://discord.gg/skxYW9YCW",
+        Text = "Qenvory v" .. EngProject.Version .. " - Credit By Eng & Irse - https://discord.gg/fmHk8ZbM",
         ColorTier = "TextSecondary",
         Order = 1
     }},
@@ -15323,6 +15465,14 @@ local Tabs = {
             Size = UDim2.new(0, 16, 0, 16),
             ImageRectSize = Vector2.new(48, 48),
             ImageRectOffset = Vector2.new(306, 771),
+            ImageColor3 = Color3.fromRGB(255, 255, 255)
+        },
+        DualScroll = true
+    }),
+    Quest = EngProject:CreateTab(window, "Quest", {
+        Description = "Quest management, start and finish automation",
+        Icon = {
+            Image = "rbxassetid://10734963191",
             ImageColor3 = Color3.fromRGB(255, 255, 255)
         },
         DualScroll = true
@@ -17257,6 +17407,18 @@ local function initializeMiscellaneousTab()
         }
     })
 
+    EngProject:CreateToggle(RemoveBarriersSection.Container, "Disable Seashell Isle Block", false, function(state)
+        State.Barriers.seashellGate = state
+        if not BarrierRemovalModule.toggleSeashellGate(state) then
+            Utility.createNotification("Seashell Isle Block was not found.", 4)
+        end
+    end, {
+        Description = "Temporarily disables the Seashell Isle blockage and can restore it.",
+        Save = {
+            Key = "prospecting.barriers.seashell_gate"
+        }
+    })
+
     EngProject:CreateToggle(RemoveBarriersSection.Container, "Disable Peak Obstruction", false, function(state)
         State.Barriers.peakObstruction = state
         if not BarrierRemovalModule.toggleMountainBlock(state) then
@@ -17729,6 +17891,227 @@ local function initializeSummerCollectionTab()
     end)
 end
 
+local function initializeQuestTab()
+    local page = Tabs.Quest.Page
+    local LeftPage = page.Left
+    local RightPage = page.Right
+
+    local questNames = {}
+    local function getQuests()
+        local list = {}
+        local questsFolder = game:GetService("ReplicatedStorage"):FindFirstChild("Quests")
+        if questsFolder then
+            for _, q in ipairs(questsFolder:GetChildren()) do
+                table.insert(list, q.Name)
+            end
+        end
+        table.sort(list)
+        if #list == 0 then
+            list = {"DredgeMaster"}
+        end
+        return list
+    end
+    questNames = getQuests()
+
+    local selectedStartQuest = questNames[1] or "DredgeMaster"
+    local selectedCompleteQuest = questNames[1] or "DredgeMaster"
+
+    local StartQuestSection = EngProject:CreateSection(LeftPage, "Start Quest", {
+        Style = "box",
+        Icon = "rbxassetid://10734963191",
+        DefaultExpanded = true,
+        TextSize = 15
+    })
+
+    local startDropdown = EngProject:CreateDropdown(StartQuestSection.Container, "Daftar Quest", questNames, selectedStartQuest, function(selection)
+        selectedStartQuest = selection
+    end)
+
+    EngProject:CreateButton(StartQuestSection.Container, "Ambil Quest yang Dipilih", function()
+        if not selectedStartQuest then
+            EngProject:CreateNotification({
+                Type = "Warning",
+                Title = "No Quest Selected",
+                Description = "Please select a quest from the dropdown first.",
+                Duration = 3
+            })
+            return
+        end
+        local questInstance = game:GetService("ReplicatedStorage"):WaitForChild("Quests"):FindFirstChild(selectedStartQuest)
+        if not questInstance then
+            EngProject:CreateNotification({
+                Type = "Error",
+                Title = "Quest Not Found",
+                Description = "Quest '" .. selectedStartQuest .. "' not found in ReplicatedStorage.Quests",
+                Duration = 5
+            })
+            return
+        end
+        local args = {
+            questInstance,
+            [3] = selectedStartQuest
+        }
+        local success, err = pcall(function()
+            game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("Quests"):WaitForChild("StartQuest"):InvokeServer(unpack(args))
+        end)
+        if success then
+            EngProject:CreateNotification({
+                Type = "Success",
+                Title = "Quest Started",
+                Description = "Successfully took quest: " .. selectedStartQuest,
+                Duration = 5
+            })
+        else
+            EngProject:CreateNotification({
+                Type = "Error",
+                Title = "Failed to Start Quest",
+                Description = tostring(err),
+                Duration = 5
+            })
+        end
+    end)
+
+    EngProject:CreateButton(StartQuestSection.Container, "Ambil Semua Quest", function()
+        local questsFolder = game:GetService("ReplicatedStorage"):FindFirstChild("Quests")
+        if not questsFolder then
+            EngProject:CreateNotification({
+                Type = "Error",
+                Title = "Quests Folder Not Found",
+                Description = "ReplicatedStorage.Quests not found",
+                Duration = 5
+            })
+            return
+        end
+        local children = questsFolder:GetChildren()
+        if #children == 0 then
+            EngProject:CreateNotification({
+                Type = "Warning",
+                Title = "No Quests Available",
+                Description = "No quests found in ReplicatedStorage.Quests",
+                Duration = 5
+            })
+            return
+        end
+        task.spawn(function()
+            for _, quest in ipairs(children) do
+                local questName = quest.Name
+                local args = {
+                    quest,
+                    [3] = questName
+                }
+                pcall(function()
+                    game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("Quests"):WaitForChild("StartQuest"):InvokeServer(unpack(args))
+                end)
+                task.wait(0.2)
+            end
+            EngProject:CreateNotification({
+                Type = "Success",
+                Title = "Start All Quests Finished",
+                Description = "Sent requests to start all " .. tostring(#children) .. " quests.",
+                Duration = 5
+            })
+        end)
+    end)
+
+    local CompleteQuestSection = EngProject:CreateSection(RightPage, "Selesaikan Quest", {
+        Style = "box",
+        Icon = "rbxassetid://10734963191",
+        DefaultExpanded = true,
+        TextSize = 15
+    })
+
+    local completeDropdown = EngProject:CreateDropdown(CompleteQuestSection.Container, "Daftar Quest", questNames, selectedCompleteQuest, function(selection)
+        selectedCompleteQuest = selection
+    end)
+
+    EngProject:CreateButton(CompleteQuestSection.Container, "Selesaikan Quest yang Dipilih", function()
+        if not selectedCompleteQuest then
+            EngProject:CreateNotification({
+                Type = "Warning",
+                Title = "No Quest Selected",
+                Description = "Please select a quest from the dropdown first.",
+                Duration = 3
+            })
+            return
+        end
+        local success, err = pcall(function()
+            game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("Quests"):WaitForChild("QuestTalked"):FireServer(selectedCompleteQuest)
+        end)
+        if success then
+            EngProject:CreateNotification({
+                Type = "Success",
+                Title = "Quest Completed / Talked",
+                Description = "Successfully talked/completed quest: " .. selectedCompleteQuest,
+                Duration = 5
+            })
+        else
+            EngProject:CreateNotification({
+                Type = "Error",
+                Title = "Failed to Talk Quest",
+                Description = tostring(err),
+                Duration = 5
+            })
+        end
+    end)
+
+    EngProject:CreateButton(CompleteQuestSection.Container, "Selesaikan Semua Quest", function()
+        local questsFolder = game:GetService("ReplicatedStorage"):FindFirstChild("Quests")
+        if not questsFolder then
+            EngProject:CreateNotification({
+                Type = "Error",
+                Title = "Quests Folder Not Found",
+                Description = "ReplicatedStorage.Quests not found",
+                Duration = 5
+            })
+            return
+        end
+        local children = questsFolder:GetChildren()
+        if #children == 0 then
+            EngProject:CreateNotification({
+                Type = "Warning",
+                Title = "No Quests Available",
+                Description = "No quests found in ReplicatedStorage.Quests",
+                Duration = 5
+            })
+            return
+        end
+        task.spawn(function()
+            for _, quest in ipairs(children) do
+                local questName = quest.Name
+                pcall(function()
+                    game:GetService("ReplicatedStorage"):WaitForChild("Remotes"):WaitForChild("Quests"):WaitForChild("QuestTalked"):FireServer(questName)
+                end)
+                task.wait(0.2)
+            end
+            EngProject:CreateNotification({
+                Type = "Success",
+                Title = "Complete All Quests Finished",
+                Description = "Sent requests to complete/talk all " .. tostring(#children) .. " quests.",
+                Duration = 5
+            })
+        end)
+    end)
+
+    local ActionSection = EngProject:CreateSection(LeftPage, "Quest Utilities", {
+        Style = "box",
+        Icon = "rbxassetid://16898613777",
+        DefaultExpanded = true,
+        TextSize = 15
+    })
+
+    EngProject:CreateButton(ActionSection.Container, "Perbarui Daftar Quest (Refresh)", function()
+        local newQuests = getQuests()
+        startDropdown:SetOptions(newQuests)
+        completeDropdown:SetOptions(newQuests)
+        EngProject:CreateNotification({
+            Type = "Success",
+            Title = "Daftar Quest Diperbarui",
+            Description = "Daftar quest berhasil dimuat ulang (" .. tostring(#newQuests) .. " total).",
+            Duration = 3
+        })
+    end)
+end
+
 SummerModule.init()
 
 initializeDashboardTab()
@@ -17741,6 +18124,7 @@ initializeFavouriteTab()
 initializeShopTab()
 initializeTravelMerchantTab()
 initializeSummerCollectionTab()
+initializeQuestTab()
 initializeMiscellaneousTab()
 initializeSettingsTab()
 
