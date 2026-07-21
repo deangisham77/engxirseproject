@@ -3,8 +3,8 @@ local scripts = {
     [111896378748580] = "https://raw.githubusercontent.com/irsemoticon9/QenturyHub/refs/heads/main/kerangajaib.lua",
 	  [117623186846996] = "https://github.com/deangisham77/engxirseproject/raw/refs/heads/main/EngIRSE.lua",
     [86111605798689] = "https://raw.githubusercontent.com/irsemoticon9/QenturyHub/refs/heads/main/starfishing.lua",
-    [90457367396205] = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/fishandmonster.lua",
-    [111385005478215] = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/fishandmonster.lua",
+    [90457367396205] = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/waduhduh.lua",
+    [111385005478215] = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/waduhduh.lua",
     [125927821145949] = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/budakfreeport.lua",
     [98800969324557] = "https://raw.githubusercontent.com/irsemoticon9/QenturyHub/refs/heads/main/Storagehunter.lua",
 }
