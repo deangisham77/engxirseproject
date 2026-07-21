@@ -6,7 +6,7 @@ local scripts = {
     [90457367396205] = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/waduhduh.lua",
     [111385005478215] = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/waduhduh.lua",
     [125927821145949] = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/budakfreeport.lua",
-    [98800969324557] = "https://raw.githubusercontent.com/irsemoticon9/QenturyHub/refs/heads/main/Storagehunter.lua",
+    [98800969324557] = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/bongkarmuat.lua",
 }
 
 local url = scripts[game.PlaceId]
