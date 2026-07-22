@@ -1,7 +1,7 @@
 local scripts = {
-    [129827112113663] = "https://github.com/deangisham77/engxirseproject/raw/refs/heads/main/EngIRSE.lua",
+    [129827112113663] = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/EngIRSE.lua",
     [111896378748580] = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/kerangajaib.lua",
-	[117623186846996] = "https://github.com/deangisham77/engxirseproject/raw/refs/heads/main/EngIRSE.lua",
+	[117623186846996] = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/EngIRSE.lua",
     [86111605798689] = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/mancingbintangcuy.lua",
     [90457367396205] = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/windahbodolgratisan.lua",
     [111385005478215] = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/windahbodolgratisan.lua",
