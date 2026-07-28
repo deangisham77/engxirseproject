@@ -3193,6 +3193,7 @@ task.defer(function()
 end)
 
 -- Floating icon toggle (draggable) — pickaxe
+-- NOTE: Lucide CDN (lucide-roblox-direct) is currently 404 → always use rbxassetid fallback
 local pickaxeIcon = Library:GetIcon("pickaxe")
 local Minimizer = Instance.new("ImageButton")
 Minimizer.Name = "Minimizer"
@@ -3205,12 +3206,12 @@ Minimizer.ImageColor3 = Color3.fromRGB(125, 85, 255)
 Minimizer.ScaleType = Enum.ScaleType.Fit
 Minimizer.Parent = Library.ScreenGui
 
-if pickaxeIcon then
+if pickaxeIcon and pickaxeIcon.Url then
 	Minimizer.Image = pickaxeIcon.Url
 	Minimizer.ImageRectOffset = pickaxeIcon.ImageRectOffset
 	Minimizer.ImageRectSize = pickaxeIcon.ImageRectSize
 else
-	Minimizer.Image = "rbxassetid://6031068420"
+	Minimizer.Image = "rbxassetid://6034287594"
 end
 
 local minimCorner = Instance.new("UICorner")
@@ -3235,29 +3236,34 @@ Library:OnUnload(function()
 	end)
 end)
 
--- Icon fallback helper (Obsidian may not load Lucide icons properly)
-local function safeIcon(name)
-	if Library.GetIcon and pcall(function() return Library:GetIcon(name) end) then
-		return name
+-- Tab icons: Lucide CDN (deividcomsono/lucide-roblox-direct) is 404.
+-- Obsidian only accepts lucide name OR rbxassetid — emoji does nothing.
+-- Prefer lucide if available; otherwise use rbxassetid (always works).
+local function tabIcon(lucideName, assetId)
+	local ok, icon = pcall(function()
+		return Library:GetIcon(lucideName)
+	end)
+	if ok and type(icon) == "table" and icon.Url then
+		return lucideName
 	end
-	return nil
+	return "rbxassetid://" .. tostring(assetId)
 end
 
 local Tabs = {
-	Main = Window:AddTab("Main", safeIcon("gem") or "💎", "Auto mine + ESP + TP"),
-	Boulders = Window:AddTab("Boulders", safeIcon("box") or "📦", "ESP + auto break"),
-	Runes = Window:AddTab("Runes", safeIcon("star") or "⭐", "ESP + auto pickup"),
-	Terrain = Window:AddTab("Terrain", safeIcon("layers") or "🗺️", "Bomb material ESP"),
-	AutoDrop = Window:AddTab("Auto Drop", safeIcon("minus") or "➖", "Drop crystals from bag"),
-	Favorite = Window:AddTab("Favorite", safeIcon("heart") or "❤️", "Auto favorite crystals"),
-	Pickaxes = Window:AddTab("Pickaxes", safeIcon("pickaxe") or "⛏️", "Shop buy / equip"),
-	Bombs = Window:AddTab("Bombs", safeIcon("bomb") or "💣", "Stock + auto buy"),
-	Upgrades = Window:AddTab("Upgrades", safeIcon("arrow-up") or "⬆️", "Warmth / Carry / Plot"),
-	Shovels = Window:AddTab("Shovels", safeIcon("hammer") or "🔨", "Soft dig shop"),
-	Backpacks = Window:AddTab("Backpacks", safeIcon("package") or "🎒", "Weight shop"),
-	Misc = Window:AddTab("Misc", safeIcon("wrench") or "🔧", "QoL utilities"),
-	Server = Window:AddTab("Server", safeIcon("server") or "🌐", "Players / hop / rejoin"),
-	Settings = Window:AddTab("Settings", safeIcon("settings") or "⚙️", "UI"),
+	Main = Window:AddTab("Main", tabIcon("gem", 6031265976), "Auto mine + ESP + TP"),
+	Boulders = Window:AddTab("Boulders", tabIcon("box", 6031097226), "ESP + auto break"),
+	Runes = Window:AddTab("Runes", tabIcon("star", 6031260796), "ESP + auto pickup"),
+	Terrain = Window:AddTab("Terrain", tabIcon("layers", 6031280882), "Bomb material ESP"),
+	AutoDrop = Window:AddTab("Auto Drop", tabIcon("minus", 6031094678), "Drop crystals from bag"),
+	Favorite = Window:AddTab("Favorite", tabIcon("heart", 6031068421), "Auto favorite crystals"),
+	Pickaxes = Window:AddTab("Pickaxes", tabIcon("pickaxe", 6034287594), "Shop buy / equip"),
+	Bombs = Window:AddTab("Bombs", tabIcon("bomb", 6031071053), "Stock + auto buy"),
+	Upgrades = Window:AddTab("Upgrades", tabIcon("arrow-up", 6031090990), "Warmth / Carry / Plot"),
+	Shovels = Window:AddTab("Shovels", tabIcon("hammer", 6034500993), "Soft dig shop"),
+	Backpacks = Window:AddTab("Backpacks", tabIcon("package", 6031260793), "Weight shop"),
+	Misc = Window:AddTab("Misc", tabIcon("wrench", 6031280882), "QoL utilities"),
+	Server = Window:AddTab("Server", tabIcon("server", 6031229361), "Players / hop / rejoin"),
+	Settings = Window:AddTab("Settings", tabIcon("settings", 6031280882), "UI"),
 }
 
 -- single column (left only); right column hidden + left stretched full
@@ -6633,6 +6639,6 @@ end)
 
 Library:Notify({
 	Title = "Mine a Mountain",
-	Description = "Qentury Hub v4.2.2 · rejoin fix + icon fallback · loading extras…",
+	Description = "Qentury Hub v4.2.2 · tab icons fixed (rbxassetid) · loading extras…",
 	Time = 4,
 })
