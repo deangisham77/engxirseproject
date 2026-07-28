@@ -1,9 +1,9 @@
 --========================================================
--- QENTURY HUB v4.2.2 — Mine a Mountain
--- FIX: tryMineInstant ActionText check (line 807) → proper "Pickup" or "Mine" comparison
+-- QENTURY HUB v4.2.3 — Mine a Mountain
+-- Base: v4.1-fix + Godmode + IY rejoin + tryMineInstant Collect
+-- Obsidian: deividcomsono official (Lucide icon CDN fixed)
 -- + Shovels / Backpacks / Boulders / Runes (1 file, loadstring chunk)
 -- Auto-favorite fix: server-side Favorited via PlayerData.Inventory.Crystals index
--- + Godmode (infinite health, prevent death)
 --========================================================
 pcall(function()
 	if getgenv().MaMQenturyCleanup then
@@ -31,7 +31,8 @@ pcall(function()
 	end
 end)
 
-local repo = "https://raw.githubusercontent.com/uhfork/Obsidian/main/"
+-- Official Obsidian (Lucide icons via upio-github-mirror)
+local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
 local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
 local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
@@ -209,13 +210,13 @@ local state = {
 	sellBusy = false,
 	autoBuyPick = false,
 	pickThread = nil,
-	noFallDmg = false,
+	noFallDmg = true,
 	fallCap = -72, -- studs/s (threshold hardlanding ~75)
 	fallConn = nil,
-	antiAfk = false,
+	antiAfk = true,
 	antiAfkThread = nil,
 	antiAfkIdledConn = nil,
-	antiRagdoll = false,
+	antiRagdoll = true,
 	antiRagdollConn = nil,
 	fly = false,
 	flySpeed = 50,
@@ -936,7 +937,11 @@ local function stopGodmode()
 	state.godmode = false
 	if state.godmodeConn then
 		pcall(function()
-			state.godmodeConn:Disconnect()
+			if type(state.godmodeConn) == "function" then
+				state.godmodeConn()
+			else
+				state.godmodeConn:Disconnect()
+			end
 		end)
 		state.godmodeConn = nil
 	end
@@ -947,58 +952,68 @@ local function startGodmode()
 		return
 	end
 	state.godmode = true
-	
+
 	local function setupCharacter(char)
 		local humanoid = char:WaitForChild("Humanoid", 5)
 		if not humanoid then
 			return
 		end
-		
+
 		humanoid.MaxHealth = math.huge
 		humanoid.Health = math.huge
-		
+
 		local healthConn = humanoid:GetPropertyChangedSignal("Health"):Connect(function()
 			if state.godmode and humanoid.Health < humanoid.MaxHealth then
 				humanoid.Health = math.huge
 			end
 		end)
-		
+
 		local diedConn = humanoid.Died:Connect(function()
 			if state.godmode then
 				humanoid.Health = math.huge
 			end
 		end)
-		
+
 		if state.godmodeConn then
 			local oldConn = state.godmodeConn
 			state.godmodeConn = function()
-				pcall(function() healthConn:Disconnect() end)
-				pcall(function() diedConn:Disconnect() end)
+				pcall(function()
+					healthConn:Disconnect()
+				end)
+				pcall(function()
+					diedConn:Disconnect()
+				end)
 				if oldConn and type(oldConn) == "function" then
 					oldConn()
 				end
 			end
 		else
 			state.godmodeConn = function()
-				pcall(function() healthConn:Disconnect() end)
-				pcall(function() diedConn:Disconnect() end)
+				pcall(function()
+					healthConn:Disconnect()
+				end)
+				pcall(function()
+					diedConn:Disconnect()
+				end)
 			end
 		end
 	end
-	
+
 	if LP.Character then
 		setupCharacter(LP.Character)
 	end
-	
+
 	local charAddedConn = LP.CharacterAdded:Connect(function(char)
 		if state.godmode then
 			setupCharacter(char)
 		end
 	end)
-	
+
 	local oldConn = state.godmodeConn
 	state.godmodeConn = function()
-		pcall(function() charAddedConn:Disconnect() end)
+		pcall(function()
+			charAddedConn:Disconnect()
+		end)
 		if oldConn and type(oldConn) == "function" then
 			oldConn()
 		end
@@ -1013,54 +1028,18 @@ local TeleportService = game:GetService("TeleportService")
 local VirtualUser = game:GetService("VirtualUser")
 
 local function antiAfkPulse()
-	local methods = {}
-	
-	table.insert(methods, function()
+	pcall(function()
 		VirtualUser:CaptureController()
 		VirtualUser:ClickButton2(Vector2.new())
 	end)
-	
-	table.insert(methods, function()
-		VirtualUser:CaptureController()
-		VirtualUser:Button1Down(Vector2.new(0, 0))
-		task.wait(0.01)
-		VirtualUser:Button1Up(Vector2.new(0, 0))
-	end)
-	
-	local keys = {
-		Enum.KeyCode.RightShift,
-		Enum.KeyCode.LeftShift,
-		Enum.KeyCode.RightControl,
-		Enum.KeyCode.LeftControl,
-	}
-	
-	for _, key in ipairs(keys) do
-		table.insert(methods, function()
-			local vim = game:GetService("VirtualInputManager")
-			if vim then
-				vim:SendKeyEvent(true, key, false, game)
-				task.wait(math.random(10, 30) / 1000)
-				vim:SendKeyEvent(false, key, false, game)
-			end
-		end)
-	end
-	
-	table.insert(methods, function()
+	pcall(function()
 		local vim = game:GetService("VirtualInputManager")
 		if vim then
-			local mousePos = Vector2.new(math.random(100, 500), math.random(100, 400))
-			vim:SendMouseMoveEvent(mousePos.X, mousePos.Y, game)
+			vim:SendKeyEvent(true, Enum.KeyCode.RightShift, false, game)
+			task.wait(0.02)
+			vim:SendKeyEvent(false, Enum.KeyCode.RightShift, false, game)
 		end
 	end)
-	
-	local selected = methods[math.random(1, #methods)]
-	pcall(selected)
-	
-	if math.random(1, 3) == 1 then
-		local second = methods[math.random(1, #methods)]
-		task.wait(math.random(50, 150) / 1000)
-		pcall(second)
-	end
 end
 
 local function stopAntiAfk()
@@ -1071,10 +1050,6 @@ local function stopAntiAfk()
 		end)
 		state.antiAfkIdledConn = nil
 	end
-	if state.antiAfkThread then
-		task.cancel(state.antiAfkThread)
-		state.antiAfkThread = nil
-	end
 end
 
 local function startAntiAfk()
@@ -1082,7 +1057,7 @@ local function startAntiAfk()
 		return
 	end
 	state.antiAfk = true
-	
+	-- Roblox fires Idled ~20min before kick — block idle immediately
 	if not state.antiAfkIdledConn then
 		state.antiAfkIdledConn = LP.Idled:Connect(function()
 			if state.antiAfk and not Library.Unloaded then
@@ -1090,13 +1065,10 @@ local function startAntiAfk()
 			end
 		end)
 	end
-	
 	state.antiAfkThread = task.spawn(function()
 		while state.antiAfk and not Library.Unloaded do
 			antiAfkPulse()
-			local baseWait = math.random(30, 60)
-			local variation = math.random(-10, 10)
-			task.wait(baseWait + variation)
+			task.wait(45)
 		end
 		state.antiAfkThread = nil
 	end)
@@ -1696,7 +1668,7 @@ local function bestOwnedPickaxe()
 end
 
 local pickScroll
-local PICK_LIST_H = 280
+local PICK_LIST_H = (Library.IsMobile == true) and 200 or 260
 local PICK_ROW_H = 38
 
 local function buildPickListUI()
@@ -2971,7 +2943,7 @@ local function syncFavRarityFromDropdown(value)
 	return map
 end
 
-local LIST_HEIGHT = 220
+local LIST_HEIGHT = (Library.IsMobile == true) and 160 or 200
 local ROW_H = 26
 
 local function buildCrystalListUI()
@@ -3164,15 +3136,32 @@ local function refreshCrystalList()
 end
 
 --========================================================
--- UI
+-- UI (mobile-friendly: smaller window + DPI)
 --========================================================
+local isMobile = Library.IsMobile == true
+	or (UserInputService and UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled)
+
+-- Comfortable phone size (not tiny, not full-desktop)
+local WIN_W = isMobile and 400 or 520
+local WIN_H = isMobile and 340 or 440
+local UI_DPI = isMobile and 80 or 90 -- % scale (Obsidian SetDPIScale)
+
 local Window = Library:CreateWindow({
 	Title = "Mine a Mountain",
-	Footer = "Qentury Hub v4.2.2",
+	Footer = "Qentury Hub v4.2.3",
 	NotifySide = "Right",
 	ShowCustomCursor = false,
 	Resizable = true,
+	Center = true,
+	Size = UDim2.fromOffset(WIN_W, WIN_H),
+	MobileButtonsSide = "Right",
 })
+
+pcall(function()
+	if Library.SetDPIScale then
+		Library:SetDPIScale(UI_DPI)
+	end
+end)
 
 -- Compact sidebar letter badge: Title:sub(1,1) = "M" → force "Q"
 task.defer(function()
@@ -3192,26 +3181,26 @@ task.defer(function()
 	end
 end)
 
--- Floating icon toggle (draggable) — pickaxe
--- NOTE: Lucide CDN (lucide-roblox-direct) is currently 404 → always use rbxassetid fallback
+-- Floating icon toggle (draggable) — pickaxe (slightly smaller on phone)
 local pickaxeIcon = Library:GetIcon("pickaxe")
 local Minimizer = Instance.new("ImageButton")
 Minimizer.Name = "Minimizer"
-Minimizer.Size = UDim2.fromOffset(40, 40)
+local miniSz = isMobile and 36 or 40
+Minimizer.Size = UDim2.fromOffset(miniSz, miniSz)
 Minimizer.AnchorPoint = Vector2.new(0.5, 0)
-Minimizer.Position = UDim2.new(0.5, 0, 0, 50)
+Minimizer.Position = UDim2.new(0.5, 0, 0, isMobile and 28 or 50)
 Minimizer.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 Minimizer.BackgroundTransparency = 0.15
 Minimizer.ImageColor3 = Color3.fromRGB(125, 85, 255)
 Minimizer.ScaleType = Enum.ScaleType.Fit
 Minimizer.Parent = Library.ScreenGui
 
-if pickaxeIcon and pickaxeIcon.Url then
+if pickaxeIcon then
 	Minimizer.Image = pickaxeIcon.Url
 	Minimizer.ImageRectOffset = pickaxeIcon.ImageRectOffset
 	Minimizer.ImageRectSize = pickaxeIcon.ImageRectSize
 else
-	Minimizer.Image = "rbxassetid://6034287594"
+	Minimizer.Image = "rbxassetid://6031068420"
 end
 
 local minimCorner = Instance.new("UICorner")
@@ -3236,82 +3225,22 @@ Library:OnUnload(function()
 	end)
 end)
 
--- Letter-only tabs (no Lucide / rbxassetid image icons)
 local Tabs = {
-	Main = Window:AddTab("Main", "", "Auto mine + ESP + TP"),
-	Boulders = Window:AddTab("Boulders", "", "ESP + auto break"),
-	Runes = Window:AddTab("Runes", "", "ESP + auto pickup"),
-	Terrain = Window:AddTab("Terrain", "", "Bomb material ESP"),
-	AutoDrop = Window:AddTab("Auto Drop", "", "Drop crystals from bag"),
-	Favorite = Window:AddTab("Favorite", "", "Auto favorite crystals"),
-	Pickaxes = Window:AddTab("Pickaxes", "", "Shop buy / equip"),
-	Bombs = Window:AddTab("Bombs", "", "Stock + auto buy"),
-	Upgrades = Window:AddTab("Upgrades", "", "Warmth / Carry / Plot"),
-	Shovels = Window:AddTab("Shovels", "", "Soft dig shop"),
-	Backpacks = Window:AddTab("Backpacks", "", "Weight shop"),
-	Misc = Window:AddTab("Misc", "", "QoL utilities"),
-	Server = Window:AddTab("Server", "", "Players / hop / rejoin"),
-	Settings = Window:AddTab("Settings", "", "UI"),
+	Main = Window:AddTab("Main", "gem", "Auto mine + ESP + TP"),
+	Boulders = Window:AddTab("Boulders", "box", "ESP + auto break"),
+	Runes = Window:AddTab("Runes", "star", "ESP + auto pickup"),
+	Terrain = Window:AddTab("Terrain", "layers", "Bomb material ESP"),
+	AutoDrop = Window:AddTab("Auto Drop", "minus", "Drop crystals from bag"),
+	Favorite = Window:AddTab("Favorite", "star", "Auto favorite crystals"),
+	Pickaxes = Window:AddTab("Pickaxes", "pickaxe", "Shop buy / equip"),
+	Bombs = Window:AddTab("Bombs", "bomb", "Stock + auto buy"),
+	Upgrades = Window:AddTab("Upgrades", "arrow-up", "Warmth / Carry / Plot"),
+	Shovels = Window:AddTab("Shovels", "hammer", "Soft dig shop"),
+	Backpacks = Window:AddTab("Backpacks", "package", "Weight shop"),
+	Misc = Window:AddTab("Misc", "wrench", "QoL utilities"),
+	Server = Window:AddTab("Server", "server", "Players / hop / rejoin"),
+	Settings = Window:AddTab("Settings", "settings", "UI"),
 }
-
--- Plain letter badge on each sidebar tab (M / B / R / …)
-do
-	local LETTERS = {
-		Main = "M",
-		Boulders = "B",
-		Runes = "R",
-		Terrain = "T",
-		["Auto Drop"] = "D",
-		Favorite = "F",
-		Pickaxes = "P",
-		Bombs = "O",
-		Upgrades = "U",
-		Shovels = "S",
-		Backpacks = "K",
-		Misc = "X",
-		Server = "V",
-		Settings = "G",
-	}
-	local function applyLetterIcons()
-		local root = Library.ScreenGui
-		if not root then
-			return
-		end
-		for _, d in ipairs(root:GetDescendants()) do
-			if not d:IsA("TextButton") or d:FindFirstChild("LetterIcon") then
-				continue
-			end
-			local tabName
-			for _, ch in ipairs(d:GetDescendants()) do
-				if ch:IsA("TextLabel") and LETTERS[ch.Text] then
-					tabName = ch.Text
-					break
-				end
-			end
-			if not tabName then
-				continue
-			end
-			local badge = Instance.new("TextLabel")
-			badge.Name = "LetterIcon"
-			badge.BackgroundTransparency = 1
-			badge.AnchorPoint = Vector2.new(0.5, 0.5)
-			badge.Size = UDim2.fromOffset(28, 28)
-			badge.Position = UDim2.new(0, 24, 0.5, 0)
-			badge.Font = Enum.Font.GothamBold
-			badge.TextSize = 18
-			badge.TextColor3 = Color3.fromRGB(125, 85, 255)
-			badge.Text = LETTERS[tabName]
-			badge.ZIndex = (d.ZIndex or 1) + 2
-			badge.Parent = d
-		end
-	end
-	task.defer(function()
-		for _ = 1, 6 do
-			pcall(applyLetterIcons)
-			task.wait(0.15)
-		end
-	end)
-end
 
 -- single column (left only); right column hidden + left stretched full
 local Main = Tabs.Main:AddLeftGroupbox("Main", "gem")
@@ -4075,7 +4004,7 @@ local MiscBox = Tabs.Misc:AddLeftGroupbox("Combat / Fall", "shield")
 
 MiscBox:AddToggle("NoFallDmg", {
 	Text = "No Fall Dmg (cap velocity)",
-	Default = false,
+	Default = true,
 	Tooltip = "Clamps AssemblyLinearVelocity.Y so hardlanding/ragdoll fall dmg rarely triggers.",
 	Callback = function(v)
 		if v then
@@ -4100,7 +4029,7 @@ MiscBox:AddSlider("FallCap", {
 
 MiscBox:AddToggle("AntiRagdoll", {
 	Text = "Anti Ragdoll",
-	Default = false,
+	Default = true,
 	Tooltip = "Destroys ragdoll/fall-damage remotes (StarForge-style).",
 	Callback = function(v)
 		if v then
@@ -4182,7 +4111,7 @@ local QoLBox = Tabs.Misc:AddLeftGroupbox("QoL", "cpu")
 
 QoLBox:AddToggle("AntiAfk", {
 	Text = "Anti AFK",
-	Default = false,
+	Default = true,
 	Tooltip = "Idled hook + VirtualUser pulse every 45s (blocks AFK kick).",
 	Callback = function(v)
 		if v then
@@ -4443,10 +4372,12 @@ task.defer(function()
 	end)
 	state.listTier = rarityToTier(Options.ListRarity and Options.ListRarity.Value) or 5
 	state.mineMinTier = rarityToTier(Options.MineMinRarity and Options.MineMinRarity.Value) or 1
-	syncBombTargetsFromDropdown(Options.BombSelect and Options.BombSelect.Value)
-	refreshCrystalList()
-	refreshBombStockUI()
-	refreshPickList()
+	pcall(function()
+		syncBombTargetsFromDropdown(Options.BombSelect and Options.BombSelect.Value)
+	end)
+	pcall(refreshCrystalList)
+	pcall(refreshBombStockUI)
+	pcall(refreshPickList)
 	-- defaults ON
 	startNoFallDmg()
 	startAntiRagdoll()
@@ -4454,13 +4385,17 @@ task.defer(function()
 	task.spawn(function()
 		while not Library.Unloaded do
 			task.wait(5)
-			refreshBombStockUI()
+			pcall(function()
+				if type(refreshBombStockUI) == "function" then
+					refreshBombStockUI()
+				end
+			end)
 		end
 	end)
 	task.spawn(function()
 		while not Library.Unloaded do
 			task.wait(3)
-			refreshCrystalList()
+			pcall(refreshCrystalList)
 		end
 	end)
 end)
@@ -6686,6 +6621,6 @@ end)
 
 Library:Notify({
 	Title = "Mine a Mountain",
-	Description = "Qentury Hub v4.2.2 · letter tab icons · loading extras…",
+	Description = "Qentury Hub v4.2.3 · godmode + IY rejoin + Collect mine · loading extras…",
 	Time = 4,
 })
