@@ -3236,35 +3236,82 @@ Library:OnUnload(function()
 	end)
 end)
 
--- Tab icons: Lucide CDN (deividcomsono/lucide-roblox-direct) is 404.
--- Obsidian only accepts lucide name OR rbxassetid — emoji does nothing.
--- Prefer lucide if available; otherwise use rbxassetid (always works).
-local function tabIcon(lucideName, assetId)
-	local ok, icon = pcall(function()
-		return Library:GetIcon(lucideName)
-	end)
-	if ok and type(icon) == "table" and icon.Url then
-		return lucideName
-	end
-	return "rbxassetid://" .. tostring(assetId)
-end
-
+-- Letter-only tabs (no Lucide / rbxassetid image icons)
 local Tabs = {
-	Main = Window:AddTab("Main", tabIcon("gem", 6031265976), "Auto mine + ESP + TP"),
-	Boulders = Window:AddTab("Boulders", tabIcon("box", 6031097226), "ESP + auto break"),
-	Runes = Window:AddTab("Runes", tabIcon("star", 6031260796), "ESP + auto pickup"),
-	Terrain = Window:AddTab("Terrain", tabIcon("layers", 6031280882), "Bomb material ESP"),
-	AutoDrop = Window:AddTab("Auto Drop", tabIcon("minus", 6031094678), "Drop crystals from bag"),
-	Favorite = Window:AddTab("Favorite", tabIcon("heart", 6031068421), "Auto favorite crystals"),
-	Pickaxes = Window:AddTab("Pickaxes", tabIcon("pickaxe", 6034287594), "Shop buy / equip"),
-	Bombs = Window:AddTab("Bombs", tabIcon("bomb", 6031071053), "Stock + auto buy"),
-	Upgrades = Window:AddTab("Upgrades", tabIcon("arrow-up", 6031090990), "Warmth / Carry / Plot"),
-	Shovels = Window:AddTab("Shovels", tabIcon("hammer", 6034500993), "Soft dig shop"),
-	Backpacks = Window:AddTab("Backpacks", tabIcon("package", 6031260793), "Weight shop"),
-	Misc = Window:AddTab("Misc", tabIcon("wrench", 6031280882), "QoL utilities"),
-	Server = Window:AddTab("Server", tabIcon("server", 6031229361), "Players / hop / rejoin"),
-	Settings = Window:AddTab("Settings", tabIcon("settings", 6031280882), "UI"),
+	Main = Window:AddTab("Main", "", "Auto mine + ESP + TP"),
+	Boulders = Window:AddTab("Boulders", "", "ESP + auto break"),
+	Runes = Window:AddTab("Runes", "", "ESP + auto pickup"),
+	Terrain = Window:AddTab("Terrain", "", "Bomb material ESP"),
+	AutoDrop = Window:AddTab("Auto Drop", "", "Drop crystals from bag"),
+	Favorite = Window:AddTab("Favorite", "", "Auto favorite crystals"),
+	Pickaxes = Window:AddTab("Pickaxes", "", "Shop buy / equip"),
+	Bombs = Window:AddTab("Bombs", "", "Stock + auto buy"),
+	Upgrades = Window:AddTab("Upgrades", "", "Warmth / Carry / Plot"),
+	Shovels = Window:AddTab("Shovels", "", "Soft dig shop"),
+	Backpacks = Window:AddTab("Backpacks", "", "Weight shop"),
+	Misc = Window:AddTab("Misc", "", "QoL utilities"),
+	Server = Window:AddTab("Server", "", "Players / hop / rejoin"),
+	Settings = Window:AddTab("Settings", "", "UI"),
 }
+
+-- Plain letter badge on each sidebar tab (M / B / R / …)
+do
+	local LETTERS = {
+		Main = "M",
+		Boulders = "B",
+		Runes = "R",
+		Terrain = "T",
+		["Auto Drop"] = "D",
+		Favorite = "F",
+		Pickaxes = "P",
+		Bombs = "O",
+		Upgrades = "U",
+		Shovels = "S",
+		Backpacks = "K",
+		Misc = "X",
+		Server = "V",
+		Settings = "G",
+	}
+	local function applyLetterIcons()
+		local root = Library.ScreenGui
+		if not root then
+			return
+		end
+		for _, d in ipairs(root:GetDescendants()) do
+			if not d:IsA("TextButton") or d:FindFirstChild("LetterIcon") then
+				continue
+			end
+			local tabName
+			for _, ch in ipairs(d:GetDescendants()) do
+				if ch:IsA("TextLabel") and LETTERS[ch.Text] then
+					tabName = ch.Text
+					break
+				end
+			end
+			if not tabName then
+				continue
+			end
+			local badge = Instance.new("TextLabel")
+			badge.Name = "LetterIcon"
+			badge.BackgroundTransparency = 1
+			badge.AnchorPoint = Vector2.new(0.5, 0.5)
+			badge.Size = UDim2.fromOffset(28, 28)
+			badge.Position = UDim2.new(0, 24, 0.5, 0)
+			badge.Font = Enum.Font.GothamBold
+			badge.TextSize = 18
+			badge.TextColor3 = Color3.fromRGB(125, 85, 255)
+			badge.Text = LETTERS[tabName]
+			badge.ZIndex = (d.ZIndex or 1) + 2
+			badge.Parent = d
+		end
+	end
+	task.defer(function()
+		for _ = 1, 6 do
+			pcall(applyLetterIcons)
+			task.wait(0.15)
+		end
+	end)
+end
 
 -- single column (left only); right column hidden + left stretched full
 local Main = Tabs.Main:AddLeftGroupbox("Main", "gem")
@@ -6639,6 +6686,6 @@ end)
 
 Library:Notify({
 	Title = "Mine a Mountain",
-	Description = "Qentury Hub v4.2.2 · tab icons fixed (rbxassetid) · loading extras…",
+	Description = "Qentury Hub v4.2.2 · letter tab icons · loading extras…",
 	Time = 4,
 })
