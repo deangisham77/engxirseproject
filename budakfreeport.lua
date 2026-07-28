@@ -1,5 +1,5 @@
 --========================================================
--- QENTURY HUB v4.2.1 — Mine a Mountain
+-- QENTURY HUB v4.2.2 — Mine a Mountain
 -- FIX: tryMineInstant ActionText check (line 807) → proper "Pickup" or "Mine" comparison
 -- + Shovels / Backpacks / Boulders / Runes (1 file, loadstring chunk)
 -- Auto-favorite fix: server-side Favorited via PlayerData.Inventory.Crystals index
@@ -3168,7 +3168,7 @@ end
 --========================================================
 local Window = Library:CreateWindow({
 	Title = "Mine a Mountain",
-	Footer = "Qentury Hub v4.2",
+	Footer = "Qentury Hub v4.2.2",
 	NotifySide = "Right",
 	ShowCustomCursor = false,
 	Resizable = true,
@@ -3235,21 +3235,29 @@ Library:OnUnload(function()
 	end)
 end)
 
+-- Icon fallback helper (Obsidian may not load Lucide icons properly)
+local function safeIcon(name)
+	if Library.GetIcon and pcall(function() return Library:GetIcon(name) end) then
+		return name
+	end
+	return nil
+end
+
 local Tabs = {
-	Main = Window:AddTab("Main", "gem", "Auto mine + ESP + TP"),
-	Boulders = Window:AddTab("Boulders", "box", "ESP + auto break"),
-	Runes = Window:AddTab("Runes", "star", "ESP + auto pickup"),
-	Terrain = Window:AddTab("Terrain", "layers", "Bomb material ESP"),
-	AutoDrop = Window:AddTab("Auto Drop", "minus", "Drop crystals from bag"),
-	Favorite = Window:AddTab("Favorite", "star", "Auto favorite crystals"),
-	Pickaxes = Window:AddTab("Pickaxes", "pickaxe", "Shop buy / equip"),
-	Bombs = Window:AddTab("Bombs", "bomb", "Stock + auto buy"),
-	Upgrades = Window:AddTab("Upgrades", "arrow-up", "Warmth / Carry / Plot"),
-	Shovels = Window:AddTab("Shovels", "hammer", "Soft dig shop"),
-	Backpacks = Window:AddTab("Backpacks", "package", "Weight shop"),
-	Misc = Window:AddTab("Misc", "wrench", "QoL utilities"),
-	Server = Window:AddTab("Server", "server", "Players / hop / rejoin"),
-	Settings = Window:AddTab("Settings", "settings", "UI"),
+	Main = Window:AddTab("Main", safeIcon("gem") or "💎", "Auto mine + ESP + TP"),
+	Boulders = Window:AddTab("Boulders", safeIcon("box") or "📦", "ESP + auto break"),
+	Runes = Window:AddTab("Runes", safeIcon("star") or "⭐", "ESP + auto pickup"),
+	Terrain = Window:AddTab("Terrain", safeIcon("layers") or "🗺️", "Bomb material ESP"),
+	AutoDrop = Window:AddTab("Auto Drop", safeIcon("minus") or "➖", "Drop crystals from bag"),
+	Favorite = Window:AddTab("Favorite", safeIcon("heart") or "❤️", "Auto favorite crystals"),
+	Pickaxes = Window:AddTab("Pickaxes", safeIcon("pickaxe") or "⛏️", "Shop buy / equip"),
+	Bombs = Window:AddTab("Bombs", safeIcon("bomb") or "💣", "Stock + auto buy"),
+	Upgrades = Window:AddTab("Upgrades", safeIcon("arrow-up") or "⬆️", "Warmth / Carry / Plot"),
+	Shovels = Window:AddTab("Shovels", safeIcon("hammer") or "🔨", "Soft dig shop"),
+	Backpacks = Window:AddTab("Backpacks", safeIcon("package") or "🎒", "Weight shop"),
+	Misc = Window:AddTab("Misc", safeIcon("wrench") or "🔧", "QoL utilities"),
+	Server = Window:AddTab("Server", safeIcon("server") or "🌐", "Players / hop / rejoin"),
+	Settings = Window:AddTab("Settings", safeIcon("settings") or "⚙️", "UI"),
 }
 
 -- single column (left only); right column hidden + left stretched full
@@ -6625,6 +6633,6 @@ end)
 
 Library:Notify({
 	Title = "Mine a Mountain",
-	Description = "Qentury Hub v4.2 · godmode + auto-fav fixed · loading extras…",
+	Description = "Qentury Hub v4.2.2 · rejoin fix + icon fallback · loading extras…",
 	Time = 4,
 })
