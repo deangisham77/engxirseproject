@@ -654,7 +654,6 @@ local promptRestores = {}
 local promptGrabbed = {} -- claim stamps (crystal)
 local claimed = promptGrabbed
 local lastPickup = 0
-local lastBagWarn = 0
 
 local promptCache = setmetatable({}, { __mode = "k" })
 
@@ -831,21 +830,13 @@ local function pickupStep(stillOn)
 	if not hrp then
 		return 0
 	end
-	local free = bagFree()
-	if free <= 0 then
-		if now - lastBagWarn >= 8 then
-			lastBagWarn = now
-			Library:Notify({ Title = "Pickup", Description = "Backpack full", Time = 2 })
-		end
-		return 0
-	end
+	-- no bag-full stop: keep firing even when over cap
 	for inst, stamp in pairs(claimed) do
 		if type(stamp) == "number" and (now - stamp >= PICK.forget or not inst or not inst.Parent) then
 			claimed[inst] = nil
 		end
 	end
 	local n = 0
-	local budget = free
 	local minTier = state.mineMinTier or 1
 	local limit = math.max(1, math.floor(tonumber(state._pickupBurst) or PICK.burst))
 	for _, t in ipairs(listMineables(minTier, hrp, PICK.range + PICK.pad)) do
@@ -853,11 +844,9 @@ local function pickupStep(stillOn)
 			break
 		end
 		local claim = claimed[t.part]
-		local skip = (claim and now - claim < PICK.retry) or (t.weight > budget)
-		if not skip then
+		if not (claim and now - claim < PICK.retry) then
 			claimed[t.part] = now
 			if grabCrystal(t.part, t.prompt) then
-				budget -= t.weight
 				n += 1
 			end
 		end
@@ -892,7 +881,7 @@ local function bagNearFull()
 end
 
 local function mineAlive(flag)
-	return state[flag] and not Library.Unloaded and not bagNearFull()
+	return state[flag] and not Library.Unloaded
 end
 
 local function stopAutoMineV2()
@@ -905,14 +894,10 @@ local function startAutoMineV2()
 	end
 	state.mineV2Thread = task.spawn(function()
 		while state.autoMineV2 and not Library.Unloaded do
-			if bagNearFull() then
-				task.wait(0.5)
-			else
-				local n = pickupStep(function()
-					return state.autoMineV2
-				end)
-				task.wait(n > 0 and PICK.cooldown or 0.08)
-			end
+			local n = pickupStep(function()
+				return state.autoMineV2
+			end)
+			task.wait(n > 0 and PICK.cooldown or 0.08)
 		end
 		state.mineV2Thread = nil
 	end)
@@ -966,58 +951,54 @@ local function startAutoMineTPV2()
 			return mineAlive("autoMineTPV2")
 		end
 		while state.autoMineTPV2 and not Library.Unloaded do
-			if bagNearFull() then
+			pickupStep(on)
+			local best = listMineables(state.mineMinTier, getHRP(), nil, skip)[1]
+			if not best or not best.part.Parent then
+				skip, fails = {}, fails + 1
+				if fails >= 3 then
+					Library:Notify({
+						Title = "Auto Pickup TP",
+						Description = "No crystals ≥ tier " .. state.mineMinTier,
+						Time = 2,
+					})
+					fails = 0
+				end
 				task.wait(0.5)
 			else
-				pickupStep(on)
-				local best = listMineables(state.mineMinTier, getHRP(), nil, skip)[1]
-				if not best or not best.part.Parent then
-					skip, fails = {}, fails + 1
-					if fails >= 3 then
-						Library:Notify({
-							Title = "Auto Pickup TP",
-							Description = "No crystals ≥ tier " .. state.mineMinTier,
-							Time = 2,
-						})
-						fails = 0
-					end
-					task.wait(0.5)
-				else
-					fails = 0
-					local part, before = best.part, countCrystalTools()
-					local hrp = getHRP()
-					local near = hrp and select(1, inRange(part, hrp, 2))
-					if not near then
-						if not steppedTeleport(part.Position, 3) or not on() then
-							skip[part] = true
-							task.wait(0.15)
-						else
-							task.wait(0.08)
-						end
-					end
-					if part.Parent and on() then
-						grabCrystal(part, crystalPrompt(part))
-						pickupStep(on)
-						local t0 = os.clock()
-						local got = false
-						while os.clock() - t0 < 1.5 do
-							if not on() then
-								break
-							end
-							if countCrystalTools() > before then
-								got = true
-								break
-							end
-							task.wait(0.1)
-						end
-						skip[part] = not got and true or nil
-						task.wait(got and PICK.cooldown or 0.12)
+				fails = 0
+				local part, before = best.part, countCrystalTools()
+				local hrp = getHRP()
+				local near = hrp and select(1, inRange(part, hrp, 2))
+				if not near then
+					if not steppedTeleport(part.Position, 3) or not on() then
+						skip[part] = true
+						task.wait(0.15)
+					else
+						task.wait(0.08)
 					end
 				end
-				for p in pairs(skip) do
-					if not p or not p.Parent then
-						skip[p] = nil
+				if part.Parent and on() then
+					grabCrystal(part, crystalPrompt(part))
+					pickupStep(on)
+					local t0 = os.clock()
+					local got = false
+					while os.clock() - t0 < 1.5 do
+						if not on() then
+							break
+						end
+						if countCrystalTools() > before then
+							got = true
+							break
+						end
+						task.wait(0.1)
 					end
+					skip[part] = not got and true or nil
+					task.wait(got and PICK.cooldown or 0.12)
+				end
+			end
+			for p in pairs(skip) do
+				if not p or not p.Parent then
+					skip[p] = nil
 				end
 			end
 		end
@@ -2158,17 +2139,42 @@ local function applyRuneESP()
 	end)
 end
 
+-- hybrid: donnie fire+dedup+burst · rebuild filter/plot · optional short TP
+local RUNE_PICK = {
+	range = 30,
+	tpBeyond = 18,
+	scanRadius = 120,
+	burst = 6,
+	step = 0.25,
+	retry = 0.2,
+	forget = 5,
+}
+
+local runeGrabbed = {} -- prompt -> stamp
+
 local function fireRunePrompt(part)
 	if not part or not part.Parent then
 		return 0
 	end
+	local now = os.clock()
+	for prompt, stamp in pairs(runeGrabbed) do
+		if type(stamp) ~= "number" or now - stamp >= RUNE_PICK.forget or not prompt or not prompt.Parent then
+			runeGrabbed[prompt] = nil
+		end
+	end
 	local n, seen = 0, {}
 	local function try(prompt)
-		if prompt and not seen[prompt] then
-			seen[prompt] = true
-			if firePrompt(prompt) then
-				n += 1
-			end
+		if not prompt or seen[prompt] then
+			return
+		end
+		seen[prompt] = true
+		local last = runeGrabbed[prompt]
+		if last and now - last < RUNE_PICK.retry then
+			return
+		end
+		runeGrabbed[prompt] = now
+		if firePrompt(prompt) then
+			n += 1
 		end
 	end
 	if part:IsA("ProximityPrompt") then
@@ -2186,25 +2192,48 @@ local function fireRunePrompt(part)
 	return n
 end
 
-local function pickupNearbyRunes()
+-- vacuum near; optional short TP only when beyond tpBeyond (Auto Pickup)
+-- allowTp=false → pure donnie vacuum (no TP)
+local function pickupNearbyRunes(allowTp)
 	local hrp = getHRP()
 	if not hrp then
 		return 0
 	end
-	local n = 0
+	if allowTp == nil then
+		allowTp = true
+	end
+	local origin = hrp.Position
+	local candidates = {}
 	iterRunes(function(part)
 		if not part.Parent or not runeAllowed(getRuneId(part)) then
 			return
 		end
-		local d = (part.Position - hrp.Position).Magnitude
-		if d > 80 then
+		local d = (part.Position - origin).Magnitude
+		if d > RUNE_PICK.range then
 			return
 		end
-		if d > 12 then
-			steppedTeleport(part.Position + Vector3.new(0, 3, 0), 4)
-		end
-		n += fireRunePrompt(part)
+		table.insert(candidates, { part = part, d = d })
 	end)
+	table.sort(candidates, function(a, b)
+		return a.d < b.d
+	end)
+	local n = 0
+	for _, row in ipairs(candidates) do
+		if n >= RUNE_PICK.burst or Library.Unloaded then
+			break
+		end
+		local part = row.part
+		if part and part.Parent then
+			if allowTp and row.d > RUNE_PICK.tpBeyond then
+				steppedTeleport(part.Position + Vector3.new(0, 3, 0), 3)
+				hrp = getHRP()
+				if not hrp then
+					break
+				end
+			end
+			n += fireRunePrompt(part)
+		end
+	end
 	return n
 end
 
@@ -2240,11 +2269,9 @@ local function startAutoPickupRune()
 	end
 	state.runeThread = task.spawn(function()
 		while state.autoPickupRune and not Library.Unloaded do
-			local n = pickupNearbyRunes()
-			if n > 0 then
-				Library:Notify({ Title = "Rune Pickup", Description = "fired " .. tostring(n), Time = 1.5 })
-			end
-			task.wait(1.2)
+			-- vacuum only (no TP); far runes = use Auto TP Rune
+			pickupNearbyRunes(false)
+			task.wait(RUNE_PICK.step)
 		end
 		state.runeThread = nil
 	end)
@@ -2673,6 +2700,28 @@ do
 		state._forceBreak = false
 	end
 
+	-- no boulders left: TP to remaining world runes (pickup = Auto Pickup Rune vacuum)
+	local function tpToRemainingRunes()
+		local rows = listWorldRunes()
+		if #rows == 0 then
+			return 0
+		end
+		local n = 0
+		for _, row in ipairs(rows) do
+			if not state.autoBreak or Library.Unloaded then
+				break
+			end
+			local part = row.part
+			if part and part.Parent then
+				steppedTeleport(part.Position + Vector3.new(0, 3, 0), 6)
+				n += 1
+				-- dwell so Auto Pickup Rune (0.25s vacuum) can fire
+				task.wait(0.35)
+			end
+		end
+		return n
+	end
+
 	function Boulders.start()
 		stopHeavyFarms("boulder")
 		-- set flag BEFORE early-return: old breakThread may still be alive after stop
@@ -2687,17 +2736,15 @@ do
 					break
 				end
 				if not m then
-					local got = 0
-					if state.autoPickupRune or state.autoTpRune then
-						got = pickupNearbyRunes()
-					end
-					if got > 0 then
+					-- all boulders gone → TP leftover runes (grab left to Auto Pickup Rune)
+					local hopped = tpToRemainingRunes()
+					if hopped > 0 then
 						Library:Notify({
 							Title = "Boulder Farm",
-							Description = "No boulder · runes " .. tostring(got),
+							Description = "No boulder · TP runes " .. tostring(hopped),
 							Time = 2,
 						})
-						task.wait(0.5)
+						task.wait(0.4)
 					else
 						task.wait(2)
 					end
@@ -3949,7 +3996,7 @@ local WIN_H = isMobile and 340 or 440
 
 local Window = Library:CreateWindow({
 	Title = "Qentury Hub",
-	Footer = "rebuild · Main + Shop + Drop + Favorite + Server + Misc",
+	Footer = "Qentury Hub Rebuild V.1",
 	NotifySide = "Right",
 	ShowCustomCursor = false,
 	Resizable = true,
@@ -4037,7 +4084,7 @@ end)
 Main:AddToggle("AutoMineV2", {
 	Text = "Auto Pickup (mine+drop)",
 	Default = false,
-	Tooltip = "Donnie-style burst grab: HoldComplete + fireprox MaxDist 1000. Bag free-check. No TP.",
+	Tooltip = "Donnie-style burst grab: HoldComplete + fireprox MaxDist 1000. No bag-full stop. No TP.",
 	Callback = function(v)
 		state.autoMineV2 = v
 		if v then
@@ -4337,12 +4384,12 @@ RBox:AddDropdown("RuneSelect", {
 RBox:AddToggle("AutoPickupRune", {
 	Text = "Auto Pickup Runes",
 	Default = false,
-	Tooltip = "Pickup selected runes within ~80 studs (TP short if needed).",
+	Tooltip = "Hybrid: vacuum ~30 stud · 0.25s · burst 6 · firePrompt dedup. No TP (pakai Auto TP Rune for far).",
 	Callback = function(v)
 		state.autoPickupRune = v
 		if v then
 			startAutoPickupRune()
-			Library:Notify({ Title = "Rune Pickup", Description = "ON", Time = 2 })
+			Library:Notify({ Title = "Rune Pickup", Description = "ON · vacuum 30", Time = 2 })
 		else
 			Library:Notify({ Title = "Rune Pickup", Description = "OFF", Time = 2 })
 		end
@@ -4352,7 +4399,7 @@ RBox:AddToggle("AutoPickupRune", {
 RBox:AddToggle("AutoTpRune", {
 	Text = "Auto TP Rune",
 	Default = false,
-	Tooltip = "TP ke rune terpilih → fire prompt → repeat.",
+	Tooltip = "TP tiap rune terpilih → firePrompt → repeat (far runes).",
 	Callback = function(v)
 		if v then
 			startAutoTpRune()
@@ -4369,7 +4416,7 @@ RBox:AddButton({
 	Func = function()
 		Library:Notify({
 			Title = "Rune Pickup",
-			Description = "fired " .. tostring(pickupNearbyRunes()),
+			Description = "fired " .. tostring(pickupNearbyRunes(true)),
 			Time = 2,
 		})
 	end,
