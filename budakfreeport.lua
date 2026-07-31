@@ -1,6 +1,6 @@
 --========================================================
 -- QENTURY HUB (rebuild)
--- Shells/rebuild/ · UI: deividcomsono Obsidian
+-- Shells/rebuild/ / UI: deividcomsono Obsidian
 -- Phase 1: Main + Settings
 -- Source: qentury v4.2.3 Main + donnie Auto Farm (via remake2)
 --========================================================
@@ -70,12 +70,12 @@ local MUTATION_LUCK = {
 local TIER_NAMES = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic" }
 local TIER_BADGE = { "C", "U", "R", "E", "L", "M" }
 local TIER_LABELS = {
-	"C · Common",
-	"U · Uncommon",
-	"R · Rare",
-	"E · Epic",
-	"L · Legendary",
-	"M · Mythic",
+	"C / Common",
+	"U / Uncommon",
+	"R / Rare",
+	"E / Epic",
+	"L / Legendary",
+	"M / Mythic",
 }
 local TIER_COLORS = {
 	Color3.fromRGB(200, 200, 200),
@@ -111,10 +111,10 @@ local SIZE_RANK = {
 	Behemoth = 9,
 }
 local SIZE_LABELS = {
-	"S · Small",
-	"M · Medium",
-	"L · Large",
-	"XL · Extra Large",
+	"S / Small",
+	"M / Medium",
+	"L / Large",
+	"XL / Extra Large",
 	"Giant",
 	"Colossal",
 	"Titan",
@@ -123,7 +123,7 @@ local SIZE_LABELS = {
 }
 local SIZE_KG = { 0, 8, 30, 90, 200, 1000, 3000, 8000, 25000 }
 
--- Donnie Money Farm (peak → dig down)
+-- Donnie Money Farm (peak -> dig down)
 local FARM = {
 	columnStep = 8,
 	ringMax = 6,
@@ -151,6 +151,7 @@ local state = {
 	esp = false,
 	mineMinTier = 1,
 	mineMinSize = 1,
+	mineMinLuckPct = 1, -- Auto Pickup / TP filter (dropdown)
 	listTier = 5,
 	listMinSize = 1,
 	listSortBy = "money",
@@ -177,6 +178,7 @@ local state = {
 	boulderEsp = false,
 	boulderSelected = nil,
 	autoBreak = false,
+	autoRejoin = false, -- rejoin only after farm clear (no boulder + no rune)
 	breakThread = nil,
 	_forceBreak = false,
 	-- Misc
@@ -320,7 +322,7 @@ local function sizeLabelToRank(v)
 	if type(v) ~= "string" then
 		return 1
 	end
-	-- "S · Small" / "XL · Extra Large" / "Behemoth"
+	-- "S / Small" / "XL / Extra Large" / "Behemoth"
 	local code = v:match("^(%S+)")
 	if code and SIZE_RANK[code] then
 		return SIZE_RANK[code]
@@ -612,7 +614,7 @@ local function teleportTo(part)
 end
 
 local function teleportToPeak()
-	Library:Notify({ Title = "Peak TP", Description = "Scanning terrain…", Time = 2 })
+	Library:Notify({ Title = "Peak TP", Description = "Scanning terrain?", Time = 2 })
 	local peak = findTerrainPeak()
 	if not peak then
 		Library:Notify({ Title = "Peak TP", Description = "No peak found.", Time = 2 })
@@ -627,7 +629,7 @@ local function teleportToPeak()
 end
 
 --========================================================
--- PICKUP (1 fire path · Donnie aggressive · Auto + TP)
+-- PICKUP (1 fire path / Donnie aggressive / Auto + TP)
 --========================================================
 local HoldComplete -- lazy; remotes may not exist at load
 
@@ -745,7 +747,7 @@ local function firePrompt(prompt)
 	return fired
 end
 
--- single aggressive grab (no ActionText gate · MaxDist stretch · HoldComplete first)
+-- single aggressive grab (no ActionText gate / MaxDist stretch / HoldComplete first)
 local function grabCrystal(inst, prompt)
 	if not inst or not inst.Parent then
 		return false
@@ -785,6 +787,7 @@ end
 
 local function listMineables(minTier, hrp, maxDist, skip)
 	local minSize = state.mineMinSize or 1
+	local minLuckPct = tonumber(state.mineMinLuckPct) or 1
 	local origin = hrp and hrp.Position
 	local list = {}
 	iterCrystals(function(part)
@@ -799,6 +802,13 @@ local function listMineables(minTier, hrp, maxDist, skip)
 		end
 		if not meetsMinSize(part, minSize) then
 			return
+		end
+		if minLuckPct > 1 then
+			local okL, luck = pcall(crystalLuckValue, part)
+			local pct = (okL and type(luck) == "number") and (luck * 100) or 0
+			if pct < minLuckPct then
+				return
+			end
 		end
 		local d = origin and surfaceDistance(part, origin) or 0
 		if maxDist and d > maxDist then
@@ -958,7 +968,7 @@ local function startAutoMineTPV2()
 				if fails >= 3 then
 					Library:Notify({
 						Title = "Auto Pickup TP",
-						Description = "No crystals ≥ tier " .. state.mineMinTier,
+						Description = "No crystals ? tier " .. state.mineMinTier,
 						Time = 2,
 					})
 					fails = 0
@@ -1129,7 +1139,7 @@ local function startAutoSell()
 					Library:Notify({
 						Title = "Auto-Sell",
 						Description = string.format(
-							"Sold %s · +%s",
+							"Sold %s / +%s",
 							tostring(info.sold or "?"),
 							formatMoney(info.cashDelta or 0)
 						),
@@ -1160,22 +1170,58 @@ end)
 
 local digAngleIdx = 0
 
+local function isCrystalTool(tool)
+	if not tool or not tool:IsA("Tool") then
+		return false
+	end
+	-- world/bag crystals always carry Tier + Value (or luck weight)
+	if tool:GetAttribute("Tier") ~= nil and tool:GetAttribute("Value") ~= nil then
+		return true
+	end
+	if tool:GetAttribute("CrystalName") ~= nil or tool:GetAttribute("DisplayName") ~= nil then
+		return true
+	end
+	return false
+end
+
 local function isPickaxeTool(tool)
 	if not tool or not tool:IsA("Tool") then
 		return false
 	end
-	if tool:GetAttribute("IsPickaxe") or tool:GetAttribute("DigPower") then
+	-- never treat bag crystals as pickaxe (name can contain Edge/Spike/etc)
+	if isCrystalTool(tool) then
+		return false
+	end
+	if tool:GetAttribute("IsPickaxe") == true then
+		return true
+	end
+	if tool:GetAttribute("DigPower") ~= nil and tool:GetAttribute("Tier") == nil then
+		return true
+	end
+	if ToolConfig and ToolConfig.PickaxeNames and ToolConfig.PickaxeNames[tool.Name] then
 		return true
 	end
 	local n = tool.Name
-	return n:find("Pick") ~= nil
-		or n:find("Apex") ~= nil
-		or n:find("Scrapper") ~= nil
-		or n:find("Spike") ~= nil
-		or n:find("Carver") ~= nil
-		or n:find("Basalt") ~= nil
-		or n:find("Edge") ~= nil
-		or n:find("Tempest") ~= nil
+	return n:find("Pick", 1, true) ~= nil
+		or n:find("Apex", 1, true) ~= nil
+		or n:find("Scrapper", 1, true) ~= nil
+		or n:find("Spike", 1, true) ~= nil
+		or n:find("Carver", 1, true) ~= nil
+		or n:find("Basalt", 1, true) ~= nil
+		or n:find("Edge", 1, true) ~= nil
+		or n:find("Tempest", 1, true) ~= nil
+		or n:find("Terminus", 1, true) ~= nil
+		or n:find("Voidreign", 1, true) ~= nil
+		or n:find("Singularity", 1, true) ~= nil
+		or n:find("Nebular", 1, true) ~= nil
+		or n:find("Eclipse", 1, true) ~= nil
+		or n:find("Astral", 1, true) ~= nil
+		or n:find("Celestial", 1, true) ~= nil
+		or n:find("Frostbite", 1, true) ~= nil
+		or n:find("Obsidian", 1, true) ~= nil
+		or n:find("Titanium", 1, true) ~= nil
+		or n:find("Emerald", 1, true) ~= nil
+		or n:find("Volcano", 1, true) ~= nil
 end
 
 local function getEquippedPickaxe()
@@ -1183,11 +1229,18 @@ local function getEquippedPickaxe()
 	if not c then
 		return nil
 	end
+	local hum = c:FindFirstChildOfClass("Humanoid")
 	local equipped = c:FindFirstChildOfClass("Tool")
 	if isPickaxeTool(equipped) then
 		return equipped
 	end
-	local hum = c:FindFirstChildOfClass("Humanoid")
+	-- holding crystal / shovel / junk → unequip so pickaxe can equip
+	if equipped and hum then
+		pcall(function()
+			hum:UnequipTools()
+		end)
+		task.wait(0.05)
+	end
 	local bp = LP:FindFirstChild("Backpack")
 	if bp then
 		for _, tool in ipairs(bp:GetChildren()) do
@@ -1196,9 +1249,13 @@ local function getEquippedPickaxe()
 					pcall(function()
 						hum:EquipTool(tool)
 					end)
-					task.wait(0.12)
+					task.wait(0.15)
 				end
-				return c:FindFirstChildOfClass("Tool") or tool
+				local now = c:FindFirstChildOfClass("Tool")
+				if isPickaxeTool(now) then
+					return now
+				end
+				return tool
 			end
 		end
 	end
@@ -1227,7 +1284,7 @@ local function fireDig(toolName, pos)
 end
 
 --========================================================
--- AUTO FARM (Donnie Money Farm): peak → dig column down
+-- AUTO FARM (Donnie Money Farm): peak -> dig column down
 --========================================================
 local farmOffsets, farmPeakOffsets
 do
@@ -1379,7 +1436,7 @@ local function startAutoFarm()
 
 		Library:Notify({
 			Title = "Auto Farm",
-			Description = "Peak → dig down (Donnie money farm)",
+			Description = "Peak -> dig down (Donnie money farm)",
 			Time = 3,
 		})
 		state.autoFarmStatus = "Starting"
@@ -1404,7 +1461,7 @@ local function startAutoFarm()
 				task.wait(1)
 				target, columnY, columnDry = nil, nil, 0
 			else
-				-- dig only — vacuum crystals via Auto Pickup toggle
+				-- dig only - vacuum crystals via Auto Pickup toggle
 				local tool = getEquippedPickaxe()
 				if not tool then
 					state.autoFarmStatus = "No pickaxe"
@@ -1503,7 +1560,7 @@ local ESP_STYLE = {
 	font = Enum.Font.GothamBold,
 	offset = Vector3.new(0, 3, 0),
 	width = 250,
-	height = 72, -- 4 lines: title, money·kg, dist·luck, size
+	height = 72, -- 4 lines: title, money/kg, dist/luck, size
 	text = 16,
 	scale = 0.75,
 	hexDist = "00E5FF",
@@ -1647,7 +1704,7 @@ local function applyESP()
 		hl.OutlineTransparency = 0.15
 		hl.Parent = part
 
-		-- Donnie 4-line billboard (no box background — stroke only)
+		-- Donnie 4-line billboard (no box background - stroke only)
 		local bb = Instance.new("BillboardGui")
 		bb.Name = "MaM_CrystalESP"
 		bb.Adornee = part
@@ -1665,9 +1722,9 @@ local function applyESP()
 		local lineSize = espNewLabel("Size", bb, 3, 4, Color3.fromRGB(255, 170, 64), false, textSize)
 
 		lineTitle.Text = title
-		lineMoney.Text = string.format("%s  ·  %s", formatMoney(val), formatKgESP(kg))
+		lineMoney.Text = string.format("%s  /  %s", formatMoney(val), formatKgESP(kg))
 		lineExtra.Text = string.format(
-			'<font color="#%s">%s</font>  ·  <font color="#%s">%s</font>',
+			'<font color="#%s">%s</font>  /  <font color="#%s">%s</font>',
 			ESP_STYLE.hexDist,
 			distText,
 			ESP_STYLE.hexLuck,
@@ -1792,7 +1849,7 @@ local function buildCrystalListUI()
 	empty.Font = Enum.Font.Gotham
 	empty.TextSize = 12
 	empty.TextColor3 = Color3.fromRGB(160, 160, 170)
-	empty.Text = "No crystals — Refresh"
+	empty.Text = "No crystals - Refresh"
 	empty.TextXAlignment = Enum.TextXAlignment.Left
 	empty.Visible = false
 	empty.Parent = scroll
@@ -2139,7 +2196,7 @@ local function applyRuneESP()
 	end)
 end
 
--- hybrid: donnie fire+dedup+burst · rebuild filter/plot · optional short TP
+-- hybrid: donnie fire+dedup+burst / rebuild filter/plot / optional short TP
 local RUNE_PICK = {
 	range = 30,
 	tpBeyond = 18,
@@ -2193,7 +2250,7 @@ local function fireRunePrompt(part)
 end
 
 -- vacuum near; optional short TP only when beyond tpBeyond (Auto Pickup)
--- allowTp=false → pure donnie vacuum (no TP)
+-- allowTp=false -> pure donnie vacuum (no TP)
 local function pickupNearbyRunes(allowTp)
 	local hrp = getHRP()
 	if not hrp then
@@ -2309,7 +2366,7 @@ local function startAutoTpRune()
 				if got > 0 then
 					Library:Notify({
 						Title = "Auto TP Rune",
-						Description = "pickup " .. tostring(got) .. " · " .. tostring(#rows) .. " runes",
+						Description = "pickup " .. tostring(got) .. " / " .. tostring(#rows) .. " runes",
 						Time = 1.5,
 					})
 				end
@@ -2387,7 +2444,7 @@ local function refreshRunes()
 		info.TextSize = 12
 		info.TextColor3 = Color3.fromRGB(230, 230, 235)
 		info.TextXAlignment = Enum.TextXAlignment.Left
-		info.Text = string.format("%s Rune · %dm", row.id, math.floor(row.dist))
+		info.Text = string.format("%s Rune / %dm", row.id, math.floor(row.dist))
 		info.Parent = btn
 		local part = row.part
 		btn.MouseButton1Click:Connect(function()
@@ -2405,7 +2462,7 @@ local function refreshRunes()
 end
 
 --========================================================
--- BOULDERS (module · keeps top-level locals low)
+-- BOULDERS (module / keeps top-level locals low)
 --========================================================
 local Boulders = {}
 do
@@ -2544,8 +2601,8 @@ do
 			local pct = maxHp > 0 and math.floor(100 * hp / maxHp) or 0
 			local dist = origin and math.floor((anchor.Position - origin).Magnitude) or 0
 			entry.labels[1].Text = string.format("[%s] %s", info.rarity, name)
-			entry.labels[2].Text = string.format("%s  ·  %s crystals", info.pickaxe, info.crystals)
-			entry.labels[3].Text = string.format("%s  ·  %dm  ·  HP %d%%", info.runes, dist, pct)
+			entry.labels[2].Text = string.format("%s  /  %s crystals", info.pickaxe, info.crystals)
+			entry.labels[3].Text = string.format("%s  /  %dm  /  HP %d%%", info.runes, dist, pct)
 		end)
 		for m, entry in pairs(espCache) do
 			if not m.Parent then
@@ -2593,7 +2650,7 @@ do
 		local forced = state._forceBreak == true
 		while model.Parent and hits < 8000 do
 			if not forced and not state.autoBreak then
-				return false, string.format("stopped · hits %d", hits)
+				return false, string.format("stopped / hits %d", hits)
 			end
 			local hp = tonumber(model:GetAttribute("HP")) or 0
 			if hp <= 0 then
@@ -2653,7 +2710,7 @@ do
 		end
 		local hp1 = tonumber(model:GetAttribute("HP")) or 0
 		local gone = not model.Parent or hp1 <= 0
-		return gone, string.format("hits %d · dHP %d%s", hits, math.floor(hp0 - hp1), gone and " · broke" or " · stuck")
+		return gone, string.format("hits %d / dHP %d%s", hits, math.floor(hp0 - hp1), gone and " / broke" or " / stuck")
 	end
 
 	function Boulders.nearest()
@@ -2736,17 +2793,49 @@ do
 					break
 				end
 				if not m then
-					-- all boulders gone → TP leftover runes (grab left to Auto Pickup Rune)
+					-- all boulders gone -> TP leftover runes (grab left to Auto Pickup Rune)
 					local hopped = tpToRemainingRunes()
 					if hopped > 0 then
 						Library:Notify({
 							Title = "Boulder Farm",
-							Description = "No boulder · TP runes " .. tostring(hopped),
+							Description = "No boulder / TP runes " .. tostring(hopped),
 							Time = 2,
 						})
 						task.wait(0.4)
 					else
-						task.wait(2)
+						-- farm done: no boulder + no rune
+						if state.autoRejoin then
+							Library:Notify({
+								Title = "Auto Rejoin",
+								Description = "Farm clear / rejoining?",
+								Time = 2,
+							})
+							task.wait(0.35)
+							-- same as Server.rejoin (inline - Server local defined later)
+							local ok, err = pcall(function()
+								local placeId = game.PlaceId
+								local jobId = game.JobId
+								if #Players:GetPlayers() <= 1 then
+									LP:Kick("\nRejoining...")
+									task.wait()
+									TeleportService:Teleport(placeId, LP)
+								else
+									TeleportService:TeleportToPlaceInstance(placeId, jobId, LP)
+								end
+							end)
+							if not ok then
+								Library:Notify({
+									Title = "Rejoin failed",
+									Description = tostring(err),
+									Time = 3,
+								})
+								task.wait(3)
+							else
+								task.wait(5)
+							end
+						else
+							task.wait(2)
+						end
 					end
 				else
 					local name = m:GetAttribute("BoulderName") or m.Name
@@ -2759,7 +2848,7 @@ do
 						local got = drainRunes()
 						Library:Notify({
 							Title = "Broke " .. name,
-							Description = tostring(msg) .. " · runes " .. tostring(got),
+							Description = tostring(msg) .. " / runes " .. tostring(got),
 							Time = 2,
 						})
 					else
@@ -2891,7 +2980,7 @@ do
 end
 
 --========================================================
--- DROP (CrystalDropRequest · module)
+-- DROP (CrystalDropRequest / module)
 --========================================================
 local Drop = {}
 do
@@ -2953,7 +3042,7 @@ do
 		local target = (tonumber(state.dropValueTargetB) or 1) * 1e9
 		local sort = state.dropSortExpensive and "expensive" or "cheap"
 		return string.format(
-			"Mode: %s · sort %s\nDropped: %d · %s\nTarget: %s",
+			"Mode: %s / sort %s\nDropped: %d / %s\nTarget: %s",
 			mode,
 			sort,
 			state.dropStatCount or 0,
@@ -2999,7 +3088,7 @@ do
 						end
 					end
 					if dropped == 0 then
-						-- bag empty of droppable (or all fav) — idle
+						-- bag empty of droppable (or all fav) - idle
 						task.wait(1)
 					end
 				elseif modeNow == "value" then
@@ -3058,7 +3147,7 @@ do
 end
 
 --========================================================
--- FAVORITE (ToggleFavorite · server-authoritative · v4.2.3)
+-- FAVORITE (ToggleFavorite / server-authoritative / v4.2.3)
 --========================================================
 local Fav = {}
 do
@@ -3132,7 +3221,7 @@ do
 		if not fav then
 			return false
 		end
-		-- FireServer only — never SetAttribute first (ghost = loop skip)
+		-- FireServer only - never SetAttribute first (ghost = loop skip)
 		local ok = pcall(function()
 			fav:FireServer(tool, want)
 		end)
@@ -3182,7 +3271,7 @@ do
 			end
 		end
 		return string.format(
-			"Bag: %d · Fav: %d\nLuck ≥ %.0f%%: %d · Rarity: %d",
+			"Bag: %d / Fav: %d\nLuck ? %.0f%%: %d / Rarity: %d",
 			#tools,
 			favN,
 			minPct,
@@ -3463,7 +3552,7 @@ do
 						Library:Notify({
 							Title = "Bomb Buy",
 							Description = string.format(
-								"Bought %s · left %s",
+								"Bought %s / left %s",
 								displayName(id),
 								tostring(state.bombStock[id] or "?")
 							),
@@ -3607,7 +3696,7 @@ do
 				Library:Notify({
 					Title = "Upgrade Prices",
 					Description = string.format(
-						"Warmth %s/%s/%s · Carry %s/%s/%s",
+						"Warmth %s/%s/%s / Carry %s/%s/%s",
 						formatMoney(a and a[1]),
 						formatMoney(a and a[2]),
 						formatMoney(a and a[3]),
@@ -3813,7 +3902,7 @@ local function applyAntiRagdoll()
 end
 
 --========================================================
--- MOVEMENT (Fly / Noclip / Speed) — module
+-- MOVEMENT (Fly / Noclip / Speed) - module
 --========================================================
 local Move = {}
 do
@@ -3996,7 +4085,7 @@ local WIN_H = isMobile and 340 or 440
 
 local Window = Library:CreateWindow({
 	Title = "Qentury Hub",
-	Footer = "Qentury Hub Rebuild V.1",
+	Footer = "rebuild / Main + Shop + Drop + Favorite + Server + Misc",
 	NotifySide = "Right",
 	ShowCustomCursor = false,
 	Resizable = true,
@@ -4100,7 +4189,7 @@ Main:AddToggle("AutoMineV2", {
 Main:AddToggle("AutoMineTPV2", {
 	Text = "Auto Pickup TP (mine+drop)",
 	Default = false,
-	Tooltip = "Vacuum near → TP richest Value$ → instant mine.",
+	Tooltip = "Vacuum near -> TP richest Value$ -> instant mine.",
 	Callback = function(v)
 		state.autoMineTPV2 = v
 		if v then
@@ -4116,12 +4205,12 @@ Main:AddToggle("AutoMineTPV2", {
 Main:AddToggle("AutoFarm", {
 	Text = "Auto Farm (peak dig)",
 	Default = false,
-	Tooltip = "Peak → dig highest column down. Vacuum = pakai Auto Pickup. Auto-Sell jika ON.",
+	Tooltip = "Peak -> dig highest column down. Vacuum = pakai Auto Pickup. Auto-Sell jika ON.",
 	Callback = function(v)
 		if v then
 			state.autoFarm = true
 			startAutoFarm()
-			Library:Notify({ Title = "Auto Farm", Description = "ON — peak → dig down", Time = 2 })
+			Library:Notify({ Title = "Auto Farm", Description = "ON - peak -> dig down", Time = 2 })
 		else
 			stopAutoFarm()
 			if state.autoFarmThread then
@@ -4164,9 +4253,21 @@ Main:AddDropdown("MineMinSize", {
 	Values = SIZE_LABELS,
 	Default = 1,
 	Multi = false,
-	Tooltip = "Filter pickup only. S<8kg · M≥8 · L≥30 · XL≥90 · …",
+	Tooltip = "Filter pickup only. S<8kg / M?8 / L?30 / XL?90 / ?",
 	Callback = function(v)
 		state.mineMinSize = sizeLabelToRank(v)
+	end,
+})
+
+Main:AddDropdown("MineMinLuck", {
+	Text = "Min Luck % (Auto-Mine)",
+	Values = { "1%", "50%", "100%", "200%", "250%" },
+	Default = 1,
+	Multi = false,
+	Tooltip = "Skip crystals with luck below this (Auto Pickup + Auto Pickup TP).",
+	Callback = function(v)
+		local n = tonumber((tostring(v or "1%"):gsub("%%", ""))) or 1
+		state.mineMinLuckPct = n
 	end,
 })
 
@@ -4175,7 +4276,7 @@ Main:AddLabel("Must stand near crystal for Auto Pickup (no TP).")
 Main:AddToggle("AutoSell", {
 	Text = "Auto-Sell (At Capacity)",
 	Default = false,
-	Tooltip = "When bag kg >= % capacity → sell zone → SellRequest all.",
+	Tooltip = "When bag kg >= % capacity -> sell zone -> SellRequest all.",
 	Callback = function(v)
 		state.autoSell = v
 		if v then
@@ -4204,7 +4305,7 @@ Main:AddButton({
 		Library:Notify({
 			Title = ok and "Sold" or "Sell failed",
 			Description = ok
-					and string.format("Sold %s · +%s", tostring(info.sold), formatMoney(info.cashDelta or 0))
+					and string.format("Sold %s / +%s", tostring(info.sold), formatMoney(info.cashDelta or 0))
 				or tostring(info),
 			Time = 3,
 		})
@@ -4242,7 +4343,7 @@ Main:AddToggle("CharESP", {
 Main:AddToggle("CrystalESP", {
 	Text = "Crystal ESP",
 	Default = false,
-	Tooltip = "Donnie-style label: rarity · name · $ · kg · dist · luck · size. Filter = Rarity + Min Size.",
+	Tooltip = "Donnie-style label: rarity / name / $ / kg / dist / luck / size. Filter = Rarity + Min Size.",
 	Callback = function(v)
 		state.esp = v
 		if v then
@@ -4288,7 +4389,7 @@ Main:AddDropdown("ListRarity", {
 		end
 		Library:Notify({
 			Title = "Rarity",
-			Description = string.format("%s · top %d", TIER_NAMES[state.listTier] or v, math.min(n, 20)),
+			Description = string.format("%s / top %d", TIER_NAMES[state.listTier] or v, math.min(n, 20)),
 			Time = 2,
 		})
 	end,
@@ -4299,7 +4400,7 @@ Main:AddDropdown("EspMinSize", {
 	Values = SIZE_LABELS,
 	Default = 1,
 	Multi = false,
-	Tooltip = "Hanya tampilkan crystal size ≥ ini di ESP & list. S/M/L/XL/…",
+	Tooltip = "Hanya tampilkan crystal size ? ini di ESP & list. S/M/L/XL/?",
 	Callback = function(v)
 		state.listMinSize = sizeLabelToRank(v)
 		if state.esp then
@@ -4320,7 +4421,7 @@ Main:AddDropdown("ListSortBy", {
 	end,
 })
 
-Main:AddLabel("Crystal list (Top 20) — click = TP")
+Main:AddLabel("Crystal list (Top 20) - click = TP")
 
 crystalScroll, crystalEmpty = buildCrystalListUI()
 Main:AddUIPassthrough("CrystalListUI", {
@@ -4384,12 +4485,12 @@ RBox:AddDropdown("RuneSelect", {
 RBox:AddToggle("AutoPickupRune", {
 	Text = "Auto Pickup Runes",
 	Default = false,
-	Tooltip = "Hybrid: vacuum ~30 stud · 0.25s · burst 6 · firePrompt dedup. No TP (pakai Auto TP Rune for far).",
+	Tooltip = "Hybrid: vacuum ~30 stud / 0.25s / burst 6 / firePrompt dedup. No TP (pakai Auto TP Rune for far).",
 	Callback = function(v)
 		state.autoPickupRune = v
 		if v then
 			startAutoPickupRune()
-			Library:Notify({ Title = "Rune Pickup", Description = "ON · vacuum 30", Time = 2 })
+			Library:Notify({ Title = "Rune Pickup", Description = "ON / vacuum 30", Time = 2 })
 		else
 			Library:Notify({ Title = "Rune Pickup", Description = "OFF", Time = 2 })
 		end
@@ -4399,7 +4500,7 @@ RBox:AddToggle("AutoPickupRune", {
 RBox:AddToggle("AutoTpRune", {
 	Text = "Auto TP Rune",
 	Default = false,
-	Tooltip = "TP tiap rune terpilih → firePrompt → repeat (far runes).",
+	Tooltip = "TP tiap rune terpilih -> firePrompt -> repeat (far runes).",
 	Callback = function(v)
 		if v then
 			startAutoTpRune()
@@ -4442,7 +4543,7 @@ RBox:AddUIPassthrough("RuneListUI", {
 --========================================================
 local BBox = Tabs.RuneBoulder:AddLeftGroupbox("Boulders", "box", true, true)
 
-local boulderStatusLabel = BBox:AddLabel("World: … · Listed: …", true)
+local boulderStatusLabel = BBox:AddLabel("World: ? / Listed: ?", true)
 
 local function updateBoulderStatus(listed)
 	local world = Boulders.folderCount()
@@ -4452,9 +4553,9 @@ local function updateBoulderStatus(listed)
 	end
 	local text
 	if world == 0 then
-		text = "World: 0 models · dig/stream mountain or hop server"
+		text = "World: 0 models / dig/stream mountain or hop server"
 	else
-		text = string.format("World: %d · Listed (filter): %d", world, n)
+		text = string.format("World: %d / Listed (filter): %d", world, n)
 	end
 	pcall(function()
 		if boulderStatusLabel and boulderStatusLabel.SetText then
@@ -4502,19 +4603,33 @@ BBox:AddDropdown("BoulderSelect", {
 BBox:AddToggle("AutoFarmBoulder", {
 	Text = "Auto Farm Boulder",
 	Default = false,
-	Tooltip = "Nearest selected boulder → break → pickup nearby runes → next.",
+	Tooltip = "Nearest selected boulder -> break -> drain runes -> next. Empty: TP leftover runes.",
 	Callback = function(v)
 		if v then
 			Boulders.start()
 			Library:Notify({
 				Title = "Boulder Farm",
-				Description = "ON — break → drain runes → next",
+				Description = "ON - break -> drain runes -> next",
 				Time = 2,
 			})
 		else
 			Boulders.stop()
 			Library:Notify({ Title = "Boulder Farm", Description = "OFF", Time = 2 })
 		end
+	end,
+})
+
+BBox:AddToggle("AutoRejoin", {
+	Text = "Auto Rejoin",
+	Default = false,
+	Tooltip = "Flag only. When Auto Farm Boulder finishes (no boulder + no rune) -> rejoin same place (Server tab logic).",
+	Callback = function(v)
+		state.autoRejoin = v
+		Library:Notify({
+			Title = "Auto Rejoin",
+			Description = v and "ON - rejoin after farm clear" or "OFF",
+			Time = 2,
+		})
 	end,
 })
 
@@ -4543,7 +4658,7 @@ BBox:AddButton({
 		local n = updateBoulderStatus(Boulders.refresh())
 		Library:Notify({
 			Title = "Boulders",
-			Description = string.format("%d listed · %d in world", n, Boulders.folderCount()),
+			Description = string.format("%d listed / %d in world", n, Boulders.folderCount()),
 			Time = 2,
 		})
 	end,
@@ -4747,7 +4862,7 @@ Upgrades.buildUI(UpgBox)
 --========================================================
 local FavBox = Tabs.Favorite:AddLeftGroupbox("Favorite", "star")
 
-FavBox:AddLabel("ToggleFavorite · server truth (Inventory.Crystals)", true)
+FavBox:AddLabel("ToggleFavorite / server truth (Inventory.Crystals)", true)
 
 local favStatusLabel = FavBox:AddLabel(Fav.statusText(), true)
 
@@ -4766,7 +4881,7 @@ FavBox:AddSlider("FavLuckMin", {
 	Max = 500,
 	Rounding = 0,
 	Suffix = "%",
-	Tooltip = "Auto-favorite crystals with luck ≥ this percent (1–500).",
+	Tooltip = "Auto-favorite crystals with luck ? this percent (1-500).",
 	Callback = function(v)
 		state.favLuckMin = v
 		refreshFavStatus()
@@ -4776,7 +4891,7 @@ FavBox:AddSlider("FavLuckMin", {
 FavBox:AddToggle("AutoFavLuck", {
 	Text = "Auto Favorite by Luck",
 	Default = false,
-	Tooltip = "Loop: favorite bag tools with luck ≥ min %.",
+	Tooltip = "Loop: favorite bag tools with luck ? min %.",
 	Callback = function(v)
 		state.autoFavLuck = v
 		if v then
@@ -4797,7 +4912,7 @@ FavBox:AddDivider()
 FavBox:AddDropdown("FavRaritySelect", {
 	Text = "Rarity filter",
 	Values = TIER_LABELS,
-	Default = { "L · Legendary", "M · Mythic" },
+	Default = { "L / Legendary", "M / Mythic" },
 	Multi = true,
 	Searchable = false,
 	Tooltip = "Tiers used by Auto Favorite by Rarity.",
@@ -4859,7 +4974,7 @@ end)
 --========================================================
 local DropBox = Tabs.Drop:AddLeftGroupbox("Drop", "minus")
 
-DropBox:AddLabel("CrystalDropRequest · not sell · skip Favorited", true)
+DropBox:AddLabel("CrystalDropRequest / not sell / skip Favorited", true)
 
 local dropStatusLabel = DropBox:AddLabel(Drop.statusText(), true)
 
@@ -4882,7 +4997,7 @@ DropBox:AddToggle("DropAll", {
 			if not _dropAllConfirm then
 				_dropAllConfirm = true
 				Library:Notify({
-					Title = "Drop All — confirm",
+					Title = "Drop All - confirm",
 					Description = "Toggle ON again within 5s to start",
 					Time = 4,
 				})
@@ -4905,7 +5020,7 @@ DropBox:AddToggle("DropAll", {
 				end
 			end)
 			Drop.start("all")
-			Library:Notify({ Title = "Drop All", Description = "ON — skip Favorited", Time = 2 })
+			Library:Notify({ Title = "Drop All", Description = "ON - skip Favorited", Time = 2 })
 		else
 			if state.dropMode == "all" then
 				Drop.stop()
@@ -4925,7 +5040,7 @@ DropBox:AddSlider("DropValueTargetB", {
 	Max = 500,
 	Rounding = 0,
 	Suffix = "B $",
-	Tooltip = "Drop non-fav crystals until total dropped $ ≥ this (1–500 billion).",
+	Tooltip = "Drop non-fav crystals until total dropped $ ? this (1-500 billion).",
 	Callback = function(v)
 		state.dropValueTargetB = v
 		refreshDropStatus()
@@ -4947,7 +5062,7 @@ DropBox:AddDropdown("DropValueSort", {
 DropBox:AddToggle("DropValue", {
 	Text = "Drop until value target",
 	Default = false,
-	Tooltip = "Skip Favorited · sort by order above · stop when dropped sum ≥ target.",
+	Tooltip = "Skip Favorited / sort by order above / stop when dropped sum ? target.",
 	Callback = function(v)
 		if v then
 			pcall(function()
@@ -4959,7 +5074,7 @@ DropBox:AddToggle("DropValue", {
 			local sort = state.dropSortExpensive and "expensive" or "cheap"
 			Library:Notify({
 				Title = "Drop Value",
-				Description = string.format("ON — %s · target %sB", sort, tostring(state.dropValueTargetB or 1)),
+				Description = string.format("ON - %s / target %sB", sort, tostring(state.dropValueTargetB or 1)),
 				Time = 2,
 			})
 		else
@@ -5036,7 +5151,7 @@ ServerPlayers:AddButton({
 		local ok, err = Server.teleportTo(name)
 		Library:Notify({
 			Title = "TP Player",
-			Description = ok and ("→ " .. tostring(name)) or tostring(err),
+			Description = ok and ("-> " .. tostring(name)) or tostring(err),
 			Time = 2,
 		})
 	end,
@@ -5199,6 +5314,10 @@ task.defer(function()
 	state.listTier = rarityToTier(Options.ListRarity and Options.ListRarity.Value) or 5
 	state.mineMinTier = rarityToTier(Options.MineMinRarity and Options.MineMinRarity.Value) or 1
 	state.mineMinSize = sizeLabelToRank(Options.MineMinSize and Options.MineMinSize.Value) or 1
+	pcall(function()
+		local luckV = Options.MineMinLuck and Options.MineMinLuck.Value
+		state.mineMinLuckPct = tonumber((tostring(luckV or "1%"):gsub("%%", ""))) or 1
+	end)
 	state.listMinSize = sizeLabelToRank(Options.EspMinSize and Options.EspMinSize.Value) or 1
 	pcall(function()
 		syncRuneSelected(Options.RuneSelect and Options.RuneSelect.Value)
