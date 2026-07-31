@@ -1174,11 +1174,18 @@ local function isCrystalTool(tool)
 	if not tool or not tool:IsA("Tool") then
 		return false
 	end
-	-- world/bag crystals always carry Tier + Value (or luck weight)
+	-- pickaxes also have DisplayName — never use DisplayName alone
+	if tool:GetAttribute("IsPickaxe") == true then
+		return false
+	end
+	if tool:GetAttribute("DigPower") ~= nil and tool:GetAttribute("Value") == nil then
+		return false
+	end
+	-- bag crystals: Tier + Value (pickaxes have no Value $)
 	if tool:GetAttribute("Tier") ~= nil and tool:GetAttribute("Value") ~= nil then
 		return true
 	end
-	if tool:GetAttribute("CrystalName") ~= nil or tool:GetAttribute("DisplayName") ~= nil then
+	if tool:GetAttribute("CrystalName") ~= nil then
 		return true
 	end
 	return false
@@ -1188,15 +1195,15 @@ local function isPickaxeTool(tool)
 	if not tool or not tool:IsA("Tool") then
 		return false
 	end
-	-- never treat bag crystals as pickaxe (name can contain Edge/Spike/etc)
-	if isCrystalTool(tool) then
-		return false
-	end
+	-- authoritative attrs first (The Terminus has IsPickaxe=true)
 	if tool:GetAttribute("IsPickaxe") == true then
 		return true
 	end
-	if tool:GetAttribute("DigPower") ~= nil and tool:GetAttribute("Tier") == nil then
+	if tool:GetAttribute("DigPower") ~= nil and tool:GetAttribute("Value") == nil then
 		return true
+	end
+	if isCrystalTool(tool) then
+		return false
 	end
 	if ToolConfig and ToolConfig.PickaxeNames and ToolConfig.PickaxeNames[tool.Name] then
 		return true
@@ -1224,17 +1231,32 @@ local function isPickaxeTool(tool)
 		or n:find("Volcano", 1, true) ~= nil
 end
 
+-- held only: player equips themselves (peak dig)
+local function getHeldPickaxe()
+	local c = LP.Character
+	if not c then
+		return nil
+	end
+	local equipped = c:FindFirstChildOfClass("Tool")
+	if isPickaxeTool(equipped) then
+		return equipped
+	end
+	return nil
+end
+
+-- auto-equip from bag (boulder farm)
 local function getEquippedPickaxe()
+	local held = getHeldPickaxe()
+	if held then
+		return held
+	end
 	local c = LP.Character
 	if not c then
 		return nil
 	end
 	local hum = c:FindFirstChildOfClass("Humanoid")
 	local equipped = c:FindFirstChildOfClass("Tool")
-	if isPickaxeTool(equipped) then
-		return equipped
-	end
-	-- holding crystal / shovel / junk → unequip so pickaxe can equip
+	-- holding crystal / shovel / junk -> unequip so pickaxe can equip
 	if equipped and hum then
 		pcall(function()
 			hum:UnequipTools()
@@ -1433,6 +1455,7 @@ local function startAutoFarm()
 		local columnDry, columnSwings = 0, 0
 		local surfaceClock, peakClock, swingClock = 0, 0, 0
 		local loaded = false
+		local lastEquipWarn = 0
 
 		Library:Notify({
 			Title = "Auto Farm",
@@ -1462,9 +1485,19 @@ local function startAutoFarm()
 				target, columnY, columnDry = nil, nil, 0
 			else
 				-- dig only - vacuum crystals via Auto Pickup toggle
-				local tool = getEquippedPickaxe()
+				-- player equips pickaxe themselves (no auto EquipTool)
+				local tool = getHeldPickaxe()
 				if not tool then
-					state.autoFarmStatus = "No pickaxe"
+					state.autoFarmStatus = "Equip pickaxe"
+					local now = os.clock()
+					if now - lastEquipWarn >= 4 then
+						lastEquipWarn = now
+						Library:Notify({
+							Title = "Auto Farm",
+							Description = "Equip pickaxe first",
+							Time = 2,
+						})
+					end
 					task.wait(0.5)
 				else
 					local now = os.clock()
@@ -4205,12 +4238,16 @@ Main:AddToggle("AutoMineTPV2", {
 Main:AddToggle("AutoFarm", {
 	Text = "Auto Farm (peak dig)",
 	Default = false,
-	Tooltip = "Peak -> dig highest column down. Vacuum = pakai Auto Pickup. Auto-Sell jika ON.",
+	Tooltip = "Peak -> dig down. Equip pickaxe yourself (no auto equip). Vacuum = Auto Pickup. Auto-Sell if ON.",
 	Callback = function(v)
 		if v then
 			state.autoFarm = true
 			startAutoFarm()
-			Library:Notify({ Title = "Auto Farm", Description = "ON - peak -> dig down", Time = 2 })
+			Library:Notify({
+				Title = "Auto Farm",
+				Description = "ON - equip pickaxe, peak dig",
+				Time = 2,
+			})
 		else
 			stopAutoFarm()
 			if state.autoFarmThread then
