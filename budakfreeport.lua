@@ -1,7 +1,7 @@
 --========================================================
 -- QENTURY HUB (rebuild)
 -- Shells/rebuild/ / UI: deividcomsono Obsidian
--- Phase 1: Main + Settings
+-- Phase 1: Main + Shop (Bombs + Radars) + Settings
 -- Source: qentury v4.2.3 Main + donnie Auto Farm (via remake2)
 --========================================================
 
@@ -218,6 +218,11 @@ local state = {
 	bombTargets = { ClassicBomb = true },
 	bombStock = {},
 	bombThread = nil,
+	-- Shop / Radars
+	autoBuyRadar = false,
+	radarTargets = { CrystalRadar = true },
+	radarStock = {},
+	radarThread = nil,
 	-- Shop / Upgrades
 	upgPrices = {}, -- kind -> { [1]=p1, [2]=p2, [3]=p3 }
 }
@@ -3608,6 +3613,205 @@ do
 end
 
 --========================================================
+-- SHOP / RADARS (module)
+--========================================================
+local Radars = {}
+do
+	local RadarShopConfig
+	pcall(function()
+		RadarShopConfig = require(ReplicatedStorage.Modules.RadarShopConfig)
+	end)
+
+	local function meta(id)
+		return RadarShopConfig and RadarShopConfig.RADARS and RadarShopConfig.RADARS[id]
+	end
+
+	local function displayName(id)
+		local m = meta(id)
+		return (m and m.displayName) or id
+	end
+
+	local function price(id)
+		local m = meta(id)
+		return (m and m.cashPrice) or 0
+	end
+
+	local function duration(id)
+		local m = meta(id)
+		return (m and m.durationSeconds) or 45
+	end
+
+	local function rarity(id)
+		local m = meta(id)
+		return (m and m.rarity) or "Common"
+	end
+
+	function Radars.dropdownLabels()
+		local labels = {}
+		if RadarShopConfig and RadarShopConfig.orderedIds then
+			for _, id in ipairs(RadarShopConfig.orderedIds()) do
+				local m = meta(id)
+				if m and m.enabled ~= false then
+					table.insert(labels, string.format("%s ($%s)", m.displayName, formatMoney(m.cashPrice):gsub("%$", "")))
+				end
+			end
+		end
+		return labels
+	end
+
+	local function labelToId(label)
+		if type(label) ~= "string" then
+			return nil
+		end
+		if RadarShopConfig and RadarShopConfig.RADARS then
+			for id, m in pairs(RadarShopConfig.RADARS) do
+				if label:find(m.displayName, 1, true) then
+					return id
+				end
+				if label == id then
+					return id
+				end
+			end
+		end
+		return nil
+	end
+
+	function Radars.syncTargets(value)
+		local map = {}
+		if type(value) == "table" then
+			for label, on in pairs(value) do
+				if on then
+					local id = labelToId(label)
+					if id then
+						map[id] = true
+					end
+				end
+			end
+		elseif type(value) == "string" then
+			local id = labelToId(value)
+			if id then
+				map[id] = true
+			end
+		end
+		if next(map) == nil then
+			map.CrystalRadar = true
+		end
+		state.radarTargets = map
+		return map
+	end
+
+	function Radars.queryStock()
+		local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+		local q = remotes and remotes:FindFirstChild("RadarShopQuery")
+		if q then
+			local ok, result = pcall(function()
+				return q:InvokeServer()
+			end)
+			if ok and type(result) == "table" and type(result.stock) == "table" then
+				state.radarStock = result.stock
+				return state.radarStock, true
+			end
+		end
+		if RadarShopConfig and RadarShopConfig.rollStockForWindow then
+			local win = RadarShopConfig.currentWindow and RadarShopConfig.currentWindow() or 0
+			state.radarStock = RadarShopConfig.rollStockForWindow(win) or {}
+			return state.radarStock, false
+		end
+		return state.radarStock, false
+	end
+
+	local function pickBuyable()
+		if not RadarShopConfig or not RadarShopConfig.orderedIds then
+			return nil
+		end
+		for _, id in ipairs(RadarShopConfig.orderedIds()) do
+			if state.radarTargets[id] then
+				local stock = tonumber(state.radarStock[id]) or 0
+				if stock > 0 and getCash() >= price(id) then
+					return id
+				end
+			end
+		end
+		return nil
+	end
+
+	local function tryBuy(id)
+		local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+		local buy = remotes and remotes:FindFirstChild("RadarBuyRequest")
+		if not buy then
+			return false, "no remote"
+		end
+		if getCash() < price(id) then
+			return false, "no cash"
+		end
+		local stock = state.radarStock[id]
+		if stock ~= nil and stock <= 0 then
+			return false, "no stock"
+		end
+		local ok, result = pcall(function()
+			return buy:InvokeServer(id)
+		end)
+		if not ok then
+			return false, "invoke fail"
+		end
+		if type(result) == "table" and result.ok then
+			if result.remaining ~= nil then
+				state.radarStock[id] = result.remaining
+			else
+				state.radarStock[id] = math.max(0, (state.radarStock[id] or 1) - 1)
+			end
+			return true, result.remaining
+		end
+		return false, "rejected"
+	end
+
+	function Radars.stop()
+		state.autoBuyRadar = false
+	end
+
+	function Radars.start()
+		if state.radarThread then
+			return
+		end
+		state.autoBuyRadar = true
+		state.radarThread = task.spawn(function()
+			while state.autoBuyRadar and not Library.Unloaded do
+				Radars.queryStock()
+				local id = pickBuyable()
+				if id then
+					local ok = tryBuy(id)
+					if ok then
+						Library:Notify({
+							Title = "Radar Buy",
+							Description = string.format(
+								"Bought %s / left %s / %ds",
+								displayName(id),
+								tostring(state.radarStock[id] or "?"),
+								duration(id)
+							),
+							Time = 2,
+						})
+						task.wait(0.45)
+					else
+						task.wait(1.2)
+					end
+				else
+					task.wait(1.5)
+				end
+			end
+			state.radarThread = nil
+		end)
+	end
+
+	Radars.meta = meta
+	Radars.displayName = displayName
+	Radars.price = price
+	Radars.duration = duration
+	Radars.rarity = rarity
+	Radars.IDS = (RadarShopConfig and RadarShopConfig.orderedIds and RadarShopConfig.orderedIds()) or { "CrystalRadar" }
+end
+
+--========================================================
 -- SHOP / UPGRADES (module)
 -- UpgradeBuy:FireServer(kind, amount) kind Air|Weight amount 1|2|3
 -- UpgradePrices:InvokeServer(kind) -> {p1,p2,p3}
@@ -4889,7 +5093,50 @@ task.defer(function()
 	end)
 end)
 
--- Upgrades section under Bombs (collapsed by default)
+--========================================================
+-- SHOP / RADARS section
+--========================================================
+local RadarBox = Tabs.Shop:AddLeftGroupbox("Radars", "radar")
+
+local radarLabels = Radars.dropdownLabels()
+local crystalRadarLabel = radarLabels[1] or "Crystal Radar ($300K)"
+
+RadarBox:AddDropdown("RadarSelect", {
+	Text = "Radars to buy (multi)",
+	Values = #radarLabels > 0 and radarLabels or Radars.IDS,
+	Default = { crystalRadarLabel },
+	Multi = true,
+	Searchable = true,
+	Tooltip = "Multi-select. Auto-buy prefers rarer radars first when in stock.",
+	Callback = function(v)
+		Radars.syncTargets(v)
+	end,
+})
+
+RadarBox:AddToggle("AutoBuyRadar", {
+	Text = "Auto Buy when in stock",
+	Default = false,
+	Tooltip = "Buys selected radars while shop stock + cash available (rarest first).",
+	Callback = function(v)
+		if v then
+			Radars.syncTargets(Options.RadarSelect and Options.RadarSelect.Value)
+			Radars.start()
+			Library:Notify({ Title = "Auto Buy Radar", Description = "ON", Time = 2 })
+		else
+			Radars.stop()
+			Library:Notify({ Title = "Auto Buy Radar", Description = "OFF", Time = 2 })
+		end
+	end,
+})
+
+task.defer(function()
+	task.wait(0.25)
+	pcall(function()
+		Radars.syncTargets(Options.RadarSelect and Options.RadarSelect.Value)
+	end)
+end)
+
+-- Upgrades section under Radars (collapsed by default)
 -- AddLeftGroupbox(title, icon, visible, collapsed)
 local UpgBox = Tabs.Shop:AddLeftGroupbox("Upgrades", "arrow-up", true, true)
 Upgrades.buildUI(UpgBox)
@@ -5317,6 +5564,7 @@ local function stopFeatures()
 	Drop.stop()
 	Fav.stop()
 	Bombs.stop()
+	Radars.stop()
 	Move.stopAll()
 	if state.noFallConn then
 		state.noFallConn:Disconnect()
@@ -5382,6 +5630,6 @@ end)
 
 Library:Notify({
 	Title = "Qentury rebuild",
-	Description = "Main + Shop + Drop + Favorite + Server + Misc",
+	Description = "Main + Shop + Radars + Drop + Favorite + Server + Misc",
 	Time = 4,
 })
