@@ -152,6 +152,7 @@ local state = {
 	mineMinTier = 1,
 	mineMinSize = 1,
 	mineMinLuckPct = 1, -- Auto Pickup / TP filter (dropdown)
+	mineMinValue = 0, -- Auto Pickup / TP filter, $ (0 = all)
 	listTier = 5,
 	listMinSize = 1,
 	listSortBy = "money",
@@ -195,6 +196,16 @@ local state = {
 	flyBg = nil,
 	speedBoost = false,
 	walkSpeed = 32,
+	antiAfk = false,
+	antiAfkInterval = 120,
+	antiAfkThread = nil,
+	antiLag = false,
+	antiLagThread = nil,
+	fxSaved = {},
+	antiGlow = false,
+	glowThread = nil,
+	glowSurfaces = {},
+	glowLights = {},
 	speedConn = nil,
 	noclip = false,
 	noclipConn = nil,
@@ -814,6 +825,9 @@ local function listMineables(minTier, hrp, maxDist, skip)
 			if pct < minLuckPct then
 				return
 			end
+		end
+		if (tonumber(part:GetAttribute("Value")) or 0) < (state.mineMinValue or 0) then
+			return
 		end
 		local d = origin and surfaceDistance(part, origin) or 0
 		if maxDist and d > maxDist then
@@ -1963,7 +1977,7 @@ local function collectByExactTier(tier, limit)
 end
 
 local function refreshCrystalList()
-	local rows = collectByExactTier(state.listTier, 20)
+	local rows = collectByExactTier(state.listTier, 10)
 	clearListRows()
 	if crystalEmpty then
 		crystalEmpty.Visible = #rows == 0
@@ -4247,6 +4261,49 @@ do
 		end
 	end
 
+	function Move.stopAntiAfk()
+state.antiAfk = false
+	state.antiLag = false
+	state.antiGlow = false
+		if state.antiAfkThread then
+			pcall(task.cancel, state.antiAfkThread)
+			state.antiAfkThread = nil
+		end
+	end
+
+	function Move.startAntiAfk()
+		if state.antiAfkThread then
+			return
+		end
+		state.antiAfk = true
+		state.antiAfkThread = task.spawn(function()
+			local lastStamp = 0
+			while state.antiAfk and not Library.Unloaded do
+				task.wait(1)
+				local now = os.clock()
+				local interval = state.antiAfkInterval or 120
+				if now - lastStamp >= interval then
+					lastStamp = now
+					local c = LP.Character
+					local hrp = c and c:FindFirstChild("HumanoidRootPart")
+					local hum = c and c:FindFirstChildOfClass("Humanoid")
+					if hrp and hrp.Parent then
+						local orig = hrp.CFrame
+						hrp.CFrame = orig * CFrame.new(1, 0, 0)
+						if hum then
+							hum.Jump = true
+						end
+						task.wait(0.4)
+						if hrp.Parent then
+							hrp.CFrame = orig
+						end
+					end
+				end
+			end
+			state.antiAfkThread = nil
+		end)
+	end
+
 	function Move.startSpeed()
 		if state.speedConn then
 			return
@@ -4309,6 +4366,149 @@ do
 		Move.stopFly()
 		Move.stopSpeed()
 		Move.stopNoclip()
+		Move.stopAntiAfk()
+	end
+end
+
+--========================================================
+-- GRAPHICS (Anti-Lag + Disable Glow) - module
+--========================================================
+do
+	local FX_TYPES = {
+		"BloomEffect",
+		"ColorCorrectionEffect",
+		"DepthOfFieldEffect",
+		"SunRaysEffect",
+		"BlurEffect",
+	}
+	state.gfx = {}
+
+	function state.gfx.stopLag()
+		state.antiLag = false
+		if state.antiLagThread then
+			pcall(task.cancel, state.antiLagThread)
+			state.antiLagThread = nil
+		end
+		restoreFx()
+	end
+
+	function restoreFx()
+		for fx, was in pairs(state.fxSaved) do
+			if fx and fx.Enabled ~= nil then
+				pcall(function()
+					fx.Enabled = was
+				end)
+			end
+			state.fxSaved[fx] = nil
+		end
+	end
+
+	function applyFx()
+		local lg = game:GetService("Lighting")
+		for _, typ in ipairs(FX_TYPES) do
+			for _, fx in ipairs(lg:GetChildren()) do
+				if fx.ClassName == typ then
+					if state.fxSaved[fx] == nil then
+						state.fxSaved[fx] = fx.Enabled
+					end
+					pcall(function()
+						fx.Enabled = false
+					end)
+				end
+			end
+		end
+	end
+
+	function state.gfx.startLag()
+		if state.antiLagThread then
+			return
+		end
+		state.antiLag = true
+		applyFx()
+		state.antiLagThread = task.spawn(function()
+			while state.antiLag and not Library.Unloaded do
+				task.wait(4)
+				applyFx()
+			end
+			state.antiLagThread = nil
+		end)
+	end
+
+	function state.gfx.clearGlow()
+		state.antiGlow = false
+		if state.glowThread then
+			pcall(task.cancel, state.glowThread)
+			state.glowThread = nil
+		end
+		restoreGlow()
+	end
+
+	function restoreGlow()
+		for part, sa in pairs(state.glowSurfaces) do
+			if part and part.Parent and sa then
+				pcall(function()
+					sa.Parent = part
+				end)
+			end
+			state.glowSurfaces[part] = nil
+		end
+		for part, pl in pairs(state.glowLights) do
+			if part and part.Parent and pl then
+				pcall(function()
+					pl.Enabled = true
+				end)
+			end
+			state.glowLights[part] = nil
+		end
+	end
+
+	local function areasToGlow(fn)
+		local function visit(folder)
+			if not folder then
+				return
+			end
+			for _, part in ipairs(folder:GetChildren()) do
+				if part:IsA("BasePart") then
+					fn(part)
+				end
+			end
+		end
+		visit(workspace:FindFirstChild("Things") and workspace.Things:FindFirstChild("Crystals"))
+		visit(workspace:FindFirstChild("DroppedCrystals"))
+	end
+
+	function applyGlow()
+		areasToGlow(function(part)
+			local pl = part:FindFirstChildOfClass("PointLight")
+			if pl then
+				if state.glowLights[part] == nil then
+					state.glowLights[part] = pl
+				end
+				pl.Enabled = false
+			end
+			local sa = part:FindFirstChildOfClass("SurfaceAppearance")
+			if sa then
+				if state.glowSurfaces[part] == nil then
+					state.glowSurfaces[part] = sa
+				end
+				sa.Parent = nil
+			end
+		end)
+	end
+
+	function state.gfx.startGlow()
+		if state.antiGlow then
+			return
+		end
+		state.antiGlow = true
+		applyGlow()
+		state.glowThread = task.spawn(function()
+			while state.antiGlow and not Library.Unloaded do
+				task.wait(4)
+				applyGlow()
+			end
+			state.glowThread = nil
+		end)
 	end
 end
 
@@ -4393,7 +4593,7 @@ local function forceFullWidthTabs()
 end
 
 task.spawn(function()
-	for _ = 1, 20 do
+	for _ = 1, 6 do
 		task.wait(0.25)
 		if Library.Unloaded then
 			break
@@ -4401,7 +4601,7 @@ task.spawn(function()
 		forceFullWidthTabs()
 	end
 	while not Library.Unloaded do
-		task.wait(1)
+		task.wait(2)
 		forceFullWidthTabs()
 	end
 end)
@@ -4470,7 +4670,11 @@ Main:AddLabel("FarmStatus", {
 
 task.spawn(function()
 	while not Library.Unloaded do
-		task.wait(0.25)
+		if state.autoFarm then
+			task.wait(0.25)
+		else
+			task.wait(2)
+		end
 		pcall(function()
 			if Options.FarmStatus and Options.FarmStatus.SetText then
 				Options.FarmStatus:SetText("Farm: " .. (state.autoFarmStatus or "Idle"))
@@ -4509,6 +4713,19 @@ Main:AddDropdown("MineMinLuck", {
 	Callback = function(v)
 		local n = tonumber((tostring(v or "1%"):gsub("%%", ""))) or 1
 		state.mineMinLuckPct = n
+	end,
+})
+
+Main:AddDropdown("MineMinValue", {
+	Text = "Min Value (Auto-Mine)",
+	Values = { "0", "1b", "2b", "3b", "4b", "5b" },
+	Default = "0",
+	Multi = false,
+	Tooltip = "Skip crystals worth less than this (Auto Pickup + TP + Farm). 0 = all.",
+	Callback = function(v)
+		local s = tostring(v or "0"):lower()
+		local n = tonumber((s:gsub("b", ""))) or 0
+		state.mineMinValue = s:find("b") and n * 1e9 or n
 	end,
 })
 
@@ -4630,7 +4847,7 @@ Main:AddDropdown("ListRarity", {
 		end
 		Library:Notify({
 			Title = "Rarity",
-			Description = string.format("%s / top %d", TIER_NAMES[state.listTier] or v, math.min(n, 20)),
+			Description = string.format("%s / top %d", TIER_NAMES[state.listTier] or v, math.min(n, 10)),
 			Time = 2,
 		})
 	end,
@@ -4662,7 +4879,7 @@ Main:AddDropdown("ListSortBy", {
 	end,
 })
 
-Main:AddLabel("Crystal list (Top 20) - click = TP")
+Main:AddLabel("Crystal list (Top 10) - click = TP")
 
 crystalScroll, crystalEmpty = buildCrystalListUI()
 Main:AddUIPassthrough("CrystalListUI", {
@@ -5049,6 +5266,68 @@ MoveBox:AddSlider("WalkSpeed", {
 		state.walkSpeed = v
 	end,
 })
+
+MoveBox:AddDivider()
+
+MoveBox:AddToggle("AntiAfk", {
+	Text = "Anti AFK",
+	Default = false,
+	Tooltip = "Nudge HRP 1 stud + jump every interval (default 120s). Keeps the server from kicking you idle.",
+	Callback = function(v)
+		if v then
+			Move.startAntiAfk()
+			Library:Notify({ Title = "Anti AFK", Description = "ON", Time = 2 })
+		else
+			Move.stopAntiAfk()
+			Library:Notify({ Title = "Anti AFK", Description = "OFF", Time = 2 })
+		end
+	end,
+})
+
+MoveBox:AddSlider("AntiAfkInterval", {
+	Text = "Anti AFK interval",
+	Default = 120,
+	Min = 30,
+	Max = 300,
+	Rounding = 0,
+	Suffix = "s",
+	Callback = function(v)
+		state.antiAfkInterval = v
+	end,
+})
+
+--========================================================
+-- GRAPHIC TAB (Anti-Lag + Disable Glow)
+--========================================================
+local GraphicBox = Tabs.Misc:AddLeftGroupbox("Graphic", "sun")
+GraphicBox:AddToggle("AntiLag", {
+	Text = "Anti Lag",
+	Default = false,
+	Tooltip = "Disables Lighting FX (Bloom, ColorCorrection, DepthOfField, SunRays, Blur) for FPS.",
+	Callback = function(v)
+		if v then
+			state.gfx.startLag()
+			Library:Notify({ Title = "Anti Lag", Description = "ON", Time = 2 })
+		else
+			state.gfx.stopLag()
+			Library:Notify({ Title = "Anti Lag", Description = "OFF", Time = 2 })
+		end
+	end,
+})
+GraphicBox:AddToggle("DisableGlow", {
+		Text = "Disable Glow",
+		Default = false,
+		Tooltip = "Turns off PointLights and SurfaceAppearances on crystals. Saves FPS.",
+		Callback = function(v)
+			if v then
+				state.gfx.startGlow()
+				Library:Notify({ Title = "Disable Glow", Description = "ON", Time = 2 })
+			else
+				state.gfx.clearGlow()
+				Library:Notify({ Title = "Disable Glow", Description = "OFF", Time = 2 })
+			end
+		end,
+	})
 
 --========================================================
 -- SHOP TAB (Bombs section)
@@ -5550,6 +5829,7 @@ local function stopFeatures()
 	state.fly = false
 	state.speedBoost = false
 	state.noclip = false
+	state.antiAfk = false
 	state.runeEsp = false
 	state.autoPickupRune = false
 	state.autoTpRune = false
@@ -5566,6 +5846,8 @@ local function stopFeatures()
 	Bombs.stop()
 	Radars.stop()
 	Move.stopAll()
+	state.gfx.stopLag()
+	state.gfx.clearGlow()
 	if state.noFallConn then
 		state.noFallConn:Disconnect()
 		state.noFallConn = nil
@@ -5602,6 +5884,25 @@ task.defer(function()
 	pcall(function()
 		local luckV = Options.MineMinLuck and Options.MineMinLuck.Value
 		state.mineMinLuckPct = tonumber((tostring(luckV or "1%"):gsub("%%", ""))) or 1
+	end)
+	pcall(function()
+		local valV = Options.MineMinValue and Options.MineMinValue.Value
+		local s = tostring(valV or "0"):lower()
+		local n = tonumber((s:gsub("b", ""))) or 0
+		state.mineMinValue = s:find("b") and n * 1e9 or n
+	end)
+	pcall(function()
+		state.antiAfkInterval = Options.AntiAfkInterval and Options.AntiAfkInterval.Value or 120
+	end)
+	pcall(function()
+		if Options.AntiLag and Options.AntiLag.Value then
+			state.gfx.startLag()
+		end
+	end)
+	pcall(function()
+		if Options.DisableGlow and Options.DisableGlow.Value then
+			state.gfx.startGlow()
+		end
 	end)
 	state.listMinSize = sizeLabelToRank(Options.EspMinSize and Options.EspMinSize.Value) or 1
 	pcall(function()
