@@ -49,7 +49,7 @@ local LP = Players.LocalPlayer
 --========================================================
 -- CONSTANTS
 --========================================================
-local RARITY_MULT = { 1, 1.6, 2.6, 4.2, 7, 12, 20, 33, 55 }
+local RARITY_MULT = { 1, 1.6, 2.6, 4.2, 7, 12, 216, 480, 600 }
 local LUCK_BASE = 0.00045
 local LUCK_KG_CAP = 500
 local LUCK_WEIGHT_EXP = 0.5
@@ -3242,8 +3242,8 @@ do
 				end
 			end
 		end
-		scan(LP:FindFirstChildOfClass("Backpack") or LP:FindFirstChild("Backpack"))
 		scan(LP.Character)
+		scan(LP:FindFirstChildOfClass("Backpack") or LP:FindFirstChild("Backpack"))
 		return tools
 	end
 
