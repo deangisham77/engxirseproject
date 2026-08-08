@@ -198,6 +198,7 @@ local state = {
 	boulderEsp = false,
 	boulderSelected = nil,
 	autoBreak = false,
+	pickupAfterBoulder = false, -- after no boulder + no rune: TP-pickup crystals per Main filter
 	autoRejoin = false, -- rejoin only after farm clear (no boulder + no rune)
 	breakThread = nil,
 	_forceBreak = false,
@@ -2880,7 +2881,65 @@ do
 						})
 						task.wait(0.4)
 					else
-						-- farm done: no boulder + no rune
+						-- farm done: no boulder + no rune -> TP-pickup crystals per Main filters
+						if state.pickupAfterBoulder then
+							local picked, skip = 0, {}
+							local on = function()
+								return state.autoBreak and state.pickupAfterBoulder and not Library.Unloaded
+							end
+							while on() do
+								pickupStep(on)
+								local best = listMineables(state.mineMinTier, getHRP(), nil, skip)[1]
+								if not best or not best.part.Parent then
+									break
+								end
+								local part, before = best.part, countCrystalTools()
+								local hrp = getHRP()
+								local near = hrp and select(1, inRange(part, hrp, 2))
+								if not near then
+									if not steppedTeleport(part.Position, 3) or not on() then
+										skip[part] = true
+										task.wait(0.15)
+									else
+										task.wait(0.08)
+									end
+								end
+								if part.Parent and on() then
+									grabCrystal(part, crystalPrompt(part))
+									pickupStep(on)
+									local t0 = os.clock()
+									local got = false
+									while os.clock() - t0 < 1.5 do
+										if not on() then
+											break
+										end
+										if countCrystalTools() > before then
+											got = true
+											break
+										end
+										task.wait(0.1)
+									end
+									skip[part] = not got and true or nil
+									if got then
+										picked = picked + 1
+									end
+									task.wait(got and PICK.cooldown or 0.12)
+								end
+								for p in pairs(skip) do
+									if not p or not p.Parent then
+										skip[p] = nil
+									end
+								end
+							end
+							if picked > 0 then
+								Library:Notify({
+									Title = "Boulder Farm",
+									Description = "Crystal pickup " .. tostring(picked),
+									Time = 2,
+								})
+							end
+							task.wait(0.3)
+						end
 						if state.autoRejoin then
 							Library:Notify({
 								Title = "Auto Rejoin",
@@ -5118,6 +5177,20 @@ BBox:AddToggle("AutoFarmBoulder", {
 	end,
 })
 
+BBox:AddToggle("PickupAfterBoulder", {
+	Text = "Pickup Crystal After Boulder",
+	Default = false,
+	Tooltip = "When Auto Farm Boulder clears (no boulder + no rune): TP-pickup crystals per Main tab filters, then rejoin if Auto Rejoin.",
+	Callback = function(v)
+		state.pickupAfterBoulder = v
+		Library:Notify({
+			Title = "Pickup Crystal",
+			Description = v and "ON - crystal phase after boulder clear" or "OFF",
+			Time = 2,
+		})
+	end,
+})
+
 BBox:AddToggle("AutoRejoin", {
 	Text = "Auto Rejoin",
 	Default = false,
@@ -5912,6 +5985,7 @@ local function stopFeatures()
 	state.boulderEsp = false
 	state.autoBreak = false
 	state._forceBreak = false
+	state.pickupAfterBoulder = false
 	state.dropMode = nil
 	state.autoFavLuck = false
 	state.autoFavRarity = false
@@ -5987,6 +6061,9 @@ task.defer(function()
 	end)
 	pcall(function()
 		Boulders.syncSelected(Options.BoulderSelect and Options.BoulderSelect.Value)
+	end)
+	pcall(function()
+		state.pickupAfterBoulder = Toggles.PickupAfterBoulder and Toggles.PickupAfterBoulder.Value == true or false
 	end)
 	pcall(refreshCrystalList)
 	pcall(refreshRunes)
