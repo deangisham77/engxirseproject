@@ -49,7 +49,7 @@ local LP = Players.LocalPlayer
 --========================================================
 -- CONSTANTS
 --========================================================
-local RARITY_MULT = { 1, 1.6, 2.6, 4.2, 7, 12 }
+local RARITY_MULT = { 1, 1.6, 2.6, 4.2, 7, 12, 20, 33, 55 }
 local LUCK_BASE = 0.00045
 local LUCK_KG_CAP = 500
 local LUCK_WEIGHT_EXP = 0.5
@@ -67,8 +67,8 @@ local MUTATION_LUCK = {
 	Wet = 1,
 }
 
-local TIER_NAMES = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic" }
-local TIER_BADGE = { "C", "U", "R", "E", "L", "M" }
+local TIER_NAMES = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Empyrean", "Pulsar", "Quasar" }
+local TIER_BADGE = { "C", "U", "R", "E", "L", "M", "Em", "Pu", "Qu" }
 local TIER_LABELS = {
 	"C / Common",
 	"U / Uncommon",
@@ -76,6 +76,9 @@ local TIER_LABELS = {
 	"E / Epic",
 	"L / Legendary",
 	"M / Mythic",
+	"Em / Empyrean",
+	"Pu / Pulsar",
+	"Qu / Quasar",
 }
 local TIER_COLORS = {
 	Color3.fromRGB(200, 200, 200),
@@ -84,8 +87,21 @@ local TIER_COLORS = {
 	Color3.fromRGB(170, 90, 255),
 	Color3.fromRGB(255, 80, 180),
 	Color3.fromRGB(255, 60, 60),
+	Color3.fromRGB(255, 225, 150),
+	Color3.fromRGB(90, 210, 255),
+	Color3.fromRGB(255, 90, 220),
 }
-local BADGE_TO_TIER = { C = 1, U = 2, R = 3, E = 4, L = 5, M = 6 }
+local BADGE_TO_TIER = {
+	C = 1,
+	U = 2,
+	R = 3,
+	E = 4,
+	L = 5,
+	M = 6,
+	Em = 7,
+	Pu = 8,
+	Qu = 9,
+}
 local NAME_TO_TIER = {
 	Common = 1,
 	Uncommon = 2,
@@ -93,6 +109,9 @@ local NAME_TO_TIER = {
 	Epic = 4,
 	Legendary = 5,
 	Mythic = 6,
+	Empyrean = 7,
+	Pulsar = 8,
+	Quasar = 9,
 }
 
 local TP_STEP = 55
@@ -221,7 +240,9 @@ local state = {
 	-- Favorite
 	autoFavLuck = false,
 	autoFavRarity = false,
+	autoFavWeight = false,
 	favLuckMin = 4,
+	favMinWeight = 4,
 	favRarityTiers = { [5] = true, [6] = true }, -- L + M default
 	favThread = nil,
 	-- Shop / Bombs
@@ -276,6 +297,10 @@ local function rarityToTier(v)
 	end
 	if NAME_TO_TIER[v] then
 		return NAME_TO_TIER[v]
+	end
+	local two = v:match("^([EPQ][mu])")
+	if two and BADGE_TO_TIER[two] then
+		return BADGE_TO_TIER[two]
 	end
 	local letter = v:match("^([CURELM])")
 	if letter and BADGE_TO_TIER[letter] then
@@ -3254,11 +3279,14 @@ do
 		if not tool then
 			return false
 		end
+		if tool:GetAttribute("Favorited") ~= nil then
+			return tool:GetAttribute("Favorited") == true
+		end
 		local data = (_favIndex or rebuildFavIndex())[crystalKey(tool)]
 		if data then
 			return data:GetAttribute("Favorited") == true
 		end
-		return tool:GetAttribute("Favorited") == true
+		return false
 	end
 
 	local function setToolFavorite(tool, want)
@@ -3308,8 +3336,9 @@ do
 	function Fav.statusText()
 		rebuildFavIndex()
 		local tools = getCrystalTools()
-		local favN, matchLuck, matchRar = 0, 0, 0
+		local favN, matchLuck, matchRar, matchWt = 0, 0, 0, 0
 		local minPct = tonumber(state.favLuckMin) or 4
+		local minWt = tonumber(state.favMinWeight) or 4
 		for _, t in ipairs(tools) do
 			if isToolFavorited(t) then
 				favN += 1
@@ -3321,14 +3350,19 @@ do
 			if state.favRarityTiers and state.favRarityTiers[tier] then
 				matchRar += 1
 			end
+			local _, _, wtRank = crystalSize(t)
+			if wtRank and wtRank >= minWt then
+				matchWt += 1
+			end
 		end
 		return string.format(
-			"Bag: %d / Fav: %d\nLuck ? %.0f%%: %d / Rarity: %d",
+			"Bag: %d / Fav: %d\nLuck ? %.0f%%: %d / Rarity: %d / Weight: %d",
 			#tools,
 			favN,
 			minPct,
 			matchLuck,
-			matchRar
+			matchRar,
+			matchWt
 		)
 	end
 
@@ -3362,6 +3396,12 @@ do
 				return true
 			end
 		end
+		if state.autoFavWeight then
+			local _, _, wtRank = crystalSize(tool)
+			if wtRank and wtRank >= (tonumber(state.favMinWeight) or 4) then
+				return true
+			end
+		end
 		return false
 	end
 
@@ -3370,7 +3410,7 @@ do
 		local minPct = tonumber(state.favLuckMin) or 4
 		local n = 0
 		for _, tool in ipairs(getCrystalTools()) do
-			if Library.Unloaded or not (state.autoFavLuck or state.autoFavRarity) then
+			if Library.Unloaded or not (state.autoFavLuck or state.autoFavRarity or state.autoFavWeight) then
 				break
 			end
 			if wantsFavorite(tool, minPct) and not isToolFavorited(tool) then
@@ -3391,7 +3431,7 @@ do
 		end
 		state.favThread = task.spawn(function()
 			pcall(runPass)
-			while (state.autoFavLuck or state.autoFavRarity) and not Library.Unloaded do
+			while (state.autoFavLuck or state.autoFavRarity or state.autoFavWeight) and not Library.Unloaded do
 				pcall(runPass)
 				task.wait(0.75)
 			end
@@ -3402,6 +3442,7 @@ do
 	function Fav.stop()
 		state.autoFavLuck = false
 		state.autoFavRarity = false
+		state.autoFavWeight = false
 	end
 
 	function Fav.favoriteAll()
@@ -5461,7 +5502,7 @@ FavBox:AddToggle("AutoFavLuck", {
 			Fav.start()
 			Library:Notify({ Title = "Favorite", Description = "Luck auto ON", Time = 2 })
 		else
-			if not state.autoFavRarity then
+			if not (state.autoFavRarity or state.autoFavWeight) then
 				Fav.stop()
 			end
 			Library:Notify({ Title = "Favorite", Description = "Luck auto OFF", Time = 2 })
@@ -5496,10 +5537,45 @@ FavBox:AddToggle("AutoFavRarity", {
 			Fav.start()
 			Library:Notify({ Title = "Favorite", Description = "Rarity auto ON", Time = 2 })
 		else
-			if not state.autoFavLuck then
+			if not (state.autoFavLuck or state.autoFavWeight) then
 				Fav.stop()
 			end
 			Library:Notify({ Title = "Favorite", Description = "Rarity auto OFF", Time = 2 })
+		end
+		refreshFavStatus()
+	end,
+})
+
+FavBox:AddDivider()
+
+FavBox:AddDropdown("FavWeightSelect", {
+	Text = "Min Weight (Auto-Fav)",
+	Values = { SIZE_LABELS[4], SIZE_LABELS[5], SIZE_LABELS[6], SIZE_LABELS[7], SIZE_LABELS[8], SIZE_LABELS[9] },
+	Default = 1,
+	Multi = false,
+	Searchable = false,
+	Tooltip = "Favorite tools whose crystal size is at least this (XL+).",
+	Callback = function(v)
+		state.favMinWeight = sizeLabelToRank(v)
+		refreshFavStatus()
+	end,
+})
+
+FavBox:AddToggle("AutoFavWeight", {
+	Text = "Auto Favorite by Weight",
+	Default = false,
+	Tooltip = "Loop: favorite bag tools with crystal size ? min weight.",
+	Callback = function(v)
+		state.autoFavWeight = v
+		if v then
+			state.favMinWeight = sizeLabelToRank(Options.FavWeightSelect and Options.FavWeightSelect.Value) or 4
+			Fav.start()
+			Library:Notify({ Title = "Favorite", Description = "Weight auto ON", Time = 2 })
+		else
+			if not (state.autoFavLuck or state.autoFavRarity) then
+				Fav.stop()
+			end
+			Library:Notify({ Title = "Favorite", Description = "Weight auto OFF", Time = 2 })
 		end
 		refreshFavStatus()
 	end,
@@ -5839,6 +5915,7 @@ local function stopFeatures()
 	state.dropMode = nil
 	state.autoFavLuck = false
 	state.autoFavRarity = false
+	state.autoFavWeight = false
 	state.autoBuyBomb = false
 	Boulders.stop()
 	Drop.stop()
@@ -5918,6 +5995,9 @@ task.defer(function()
 	end)
 	pcall(function()
 		Fav.syncRarity(Options.FavRaritySelect and Options.FavRaritySelect.Value)
+	end)
+	pcall(function()
+		state.favMinWeight = sizeLabelToRank(Options.FavWeightSelect and Options.FavWeightSelect.Value) or 4
 	end)
 	pcall(refreshFavStatus)
 	pcall(Upgrades.refreshPrices)
