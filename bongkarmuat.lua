@@ -1,6 +1,9 @@
 --========================================================
--- STORAGE HUNTERS OPEN WORLD - OBSIDIAN HUB V5
--- Museum tab (Place 140): GetState / Donate / Withdraw / Collect / UnlockSlot
+-- STORAGE HUNTERS OPEN WORLD - OBSIDIAN HUB V8
+-- v8: removed Auto-Decline Out-of-Range (decline remote bridged nothing visible & NPC stayed; behavior reverted to leave-pending)
+-- v7: Auto-Decline out-of-range offers + floor ghost cleanup (decline removed in v8)
+-- v6: Auto-Accept Offers range 0%..500% (Min+Max sliders)
+-- v5: Museum tab (Place 140): GetState / Donate / Withdraw / Collect / UnlockSlot
 -- Auto Farm reliability from v4. Backup: …-v4.backup-*-museum-pre.lua
 --========================================================
 pcall(function()
@@ -26,6 +29,7 @@ local Options = Library.Options
 local Toggles = Library.Toggles
 
 local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
 local RS = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local VirtualUser = game:GetService("VirtualUser")
@@ -110,7 +114,11 @@ local state = {
 	garageFilter = {},
 	autoAccept = false,
 	-- absolute % of base value (same as GameConfig.Staff MinOfferPercent): 100 = fair, 105 = +5%
-	minAcceptPct = 100,
+	-- v6: accept range [minAcceptPct .. maxAcceptPct], default 0..500
+	-- v7→v8: auto-decline removed (not working); floor ghost cleanup kept
+	minAcceptPct = 0,
+	maxAcceptPct = 500,
+	autoPickupGhosts = false,
 	autoUnload = false,
 	autoCollect = false,
 	autoLostFound = false,
@@ -131,15 +139,36 @@ local state = {
 	running = true,
 }
 
+-- v202: PlaceStockItem confirms via PlaceStockItemResult(requestGUID, ok)
+-- track inflight so loop doesn't stack listings on unconfirmed slots
 local connections = {}
 local function track(conn)
 	table.insert(connections, conn)
 	return conn
 end
+local placePending = {}
+task.spawn(function()
+	local rp = remote("Plot", "PlaceStockItemResult")
+	if rp then
+		track(rp.OnClientEvent:Connect(function(req, okFlag)
+			if type(req) == "string" then
+				placePending[req] = nil
+			end
+		end))
+	end
+	task.wait(20)
+	-- clear stale every 20s
+	while state.running do
+		task.wait(20)
+		for k in pairs(placePending) do
+			placePending[k] = nil
+		end
+	end
+end)
 
 local Window = Library:CreateWindow({
 	Title = "Storage Hunters",
-	Footer = "Qentury Hub v5 · Museum",
+	Footer = "Qentury Hub v8 · Offers/Ghosts",
 	NotifySide = "Right",
 	ShowCustomCursor = false,
 	Center = true,
@@ -283,6 +312,19 @@ local function teleportTo(cf)
 		end
 	end
 	hrp.CFrame = cf
+end
+
+local function getMyPlot()
+	local plots = workspace:FindFirstChild("_Plots")
+	if not plots then
+		return nil
+	end
+	for _, plot in ipairs(plots:GetChildren()) do
+		if plot:GetAttribute("OwnerUserId") == LP.UserId then
+			return plot
+		end
+	end
+	return nil
 end
 
 local function getOwnedPlotCFrame()
@@ -1705,19 +1747,96 @@ end
 
 local function processPendingOffers()
 	local now = os.clock()
-	local minPct = tonumber(state.minAcceptPct) or 100
+	local minPct = tonumber(state.minAcceptPct)
+	local maxPct = tonumber(state.maxAcceptPct)
+	if not minPct or not maxPct or minPct > maxPct then
+		minPct, maxPct = 0, 500
+	end
 	for offerId, data in pairs(pendingOffers) do
 		if now - (data.at or 0) > 30 then
 			pendingOffers[offerId] = nil
 		else
 			local pct = offerAbsolutePercent(data.price, data.base)
-			if pct and pct >= minPct then
+			if pct and pct >= minPct and pct <= maxPct then
 				fire("NPCShopper", "RespondOffer", offerId, true)
 				pendingOffers[offerId] = nil
 			end
-			-- below threshold: leave pending until HideOffer / expire (no auto-decline)
+			-- outside range: leave pending until HideOffer / expire (no auto-decline)
 		end
 	end
+end
+
+-- Floor ghost cleanup: old display placements (no ShelfGUID attr, resting at floor Y) -> PickUpStockItem
+-- Shelf-listed renders also lack ShelfGUID client-side, so require near-floor height.
+local ghostPickupCooldown = {} -- [guid] = os.clock()
+local GHOST_FLOOR_TOLERANCE = 1.5 -- studs above plot OriginY counts as floor-resting
+
+local function isFloorGhost(model, floorY)
+	if not model:IsA("Model") then
+		return false
+	end
+	if model:GetAttribute("ShelfGUID") then
+		return false
+	end
+	local part = model.PrimaryPart or model:FindFirstChildWhichIsA("BasePart", true)
+	if not part then
+		return false
+	end
+	local dy = part.Position.Y - floorY
+	return dy <= GHOST_FLOOR_TOLERANCE
+end
+
+local function countFloorGhosts()
+	local plot = getMyPlot()
+	if not plot then
+		return 0
+	end
+	local floorY = plot:GetAttribute("OriginY") or 0
+	local stock = plot:FindFirstChild("Stock")
+	if not stock then
+		return 0
+	end
+	local n = 0
+	for _, m in ipairs(stock:GetChildren()) do
+		if isFloorGhost(m, floorY) then
+			n = n + 1
+		end
+	end
+	return n
+end
+
+local function pickupFloorGhostsOnce()
+	local plot = getMyPlot()
+	if not plot then
+		return 0, "no plot"
+	end
+	local floorY = plot:GetAttribute("OriginY") or 0
+	local stock = plot:FindFirstChild("Stock")
+	if not stock or #stock:GetChildren() == 0 then
+		return 0, "stock not streamed (near plot?)"
+	end
+	local now = os.clock()
+	local picked = 0
+	local lastErr
+	for _, m in ipairs(stock:GetChildren()) do
+		if isFloorGhost(m, floorY) then
+			local guid = m:GetAttribute("GUID")
+			if type(guid) == "string" then
+				local last = ghostPickupCooldown[guid] or 0
+				if now - last >= 6 then
+					ghostPickupCooldown[guid] = now
+					local ok, err = fire("Plot", "PickUpStockItem", guid)
+					if ok then
+						picked = picked + 1
+						task.wait(0.15)
+					else
+						lastErr = err
+					end
+				end
+			end
+		end
+	end
+	return picked, lastErr
 end
 
 -- Lost & Found UI: GetLostItems(area) / ClaimLostItem(area, guid)
@@ -1800,15 +1919,47 @@ CollectBox:AddToggle("AutoUnload", {
 CollectBox:AddToggle("AutoAccept", {
 	Text = "Auto-Accept Offers",
 	Default = false,
-	Tooltip = "NPC shopper offers. Accept when offer ≥ Min % of item base value.",
+	Tooltip = "NPC shopper offers. Accept when offer % is between Min and Max % of item base value.",
 })
 CollectBox:AddSlider("MinAcceptPct", {
 	Text = "Min Accept % of value",
-	Default = 100,
-	Min = 50,
-	Max = 300,
+	Default = 0,
+	Min = 0,
+	Max = 500,
 	Rounding = 0,
-	Tooltip = "Absolute % of base (staff-style). 100=fair, 105=+5% (game UI [+5%]), 50=half price. Game range 50–300.",
+	Tooltip = "Absolute % of base (staff-style). 100=fair, 105=+5% (game UI [+5%]), 0=lowest. v6 range 0–500.",
+})
+CollectBox:AddSlider("MaxAcceptPct", {
+	Text = "Max Accept % of value",
+	Default = 500,
+	Min = 0,
+	Max = 500,
+	Rounding = 0,
+	Tooltip = "Absolute % of base. Offers above this % are left pending. 500 = accept up to 5x base.",
+})
+CollectBox:AddToggle("AutoPickupGhosts", {
+	Text = "Auto-Cleanup Floor Ghosts",
+	Default = false,
+	Tooltip = "PickUpStockItem for stock models with no ShelfGUID (old floor listings) → back to inventory.",
+})
+CollectBox:AddButton({
+	Text = "Cleanup Floor Ghosts Now",
+	Func = function()
+		local n, err = pickupFloorGhostsOnce()
+		local msg
+		if n > 0 then
+			msg = "Picked " .. n .. " → inventory"
+		elseif err then
+			msg = tostring(err)
+		else
+			msg = "No floor ghosts found"
+		end
+		Library:Notify({
+			Title = "Ghost Cleanup",
+			Description = msg,
+			Time = 3,
+		})
+	end,
 })
 CollectBox:AddButton({
 	Text = "Unload Now",
@@ -1860,6 +2011,12 @@ end)
 Options.MinAcceptPct:OnChanged(function()
 	state.minAcceptPct = Options.MinAcceptPct.Value
 end)
+Options.MaxAcceptPct:OnChanged(function()
+	state.maxAcceptPct = Options.MaxAcceptPct.Value
+end)
+Toggles.AutoPickupGhosts:OnChanged(function()
+	state.autoPickupGhosts = Toggles.AutoPickupGhosts.Value
+end)
 
 task.spawn(function()
 	while state.running do
@@ -1902,6 +2059,17 @@ task.spawn(function()
 			task.wait(0.2)
 		else
 			task.wait(0.4)
+		end
+	end
+end)
+
+task.spawn(function()
+	while state.running do
+		if state.autoPickupGhosts and not shouldPauseInventory() then
+			local n = pickupFloorGhostsOnce()
+			task.wait(n > 0 and 0.8 or 2.0)
+		else
+			task.wait(0.5)
 		end
 	end
 end)
@@ -2200,31 +2368,8 @@ local function listFreePlaceSlots(plot)
 			end
 		end
 	end
-	-- floor fallbacks only if no shelf snaps left
-	if #free == 0 then
-		local ox = plot:GetAttribute("OriginX")
-		local oy = plot:GetAttribute("OriginY")
-		local oz = plot:GetAttribute("OriginZ")
-		local rot = plot:GetAttribute("RotationY") or 0
-		if typeof(ox) == "number" and typeof(oy) == "number" and typeof(oz) == "number" then
-			local origin = CFrame.new(ox, oy, oz) * CFrame.Angles(0, math.rad(rot), 0)
-			local stock = plot:FindFirstChild("Stock")
-			local n = stock and #stock:GetChildren() or 0
-			for i = 0, 11 do
-				local idx = n + i
-				local col = idx % 6
-				local row = math.floor(idx / 6) % 6
-				table.insert(free, {
-					cf = origin * CFrame.new(col * 3 - 7.5, 1.2, row * 3 - 7.5),
-					shelfGuid = nil,
-					snapName = nil,
-					surface = false,
-					key = "floor:" .. idx,
-				})
-			end
-		end
-	end
-	return free
+	-- floor fallback removed: game has no floor listing path (v202). Only shelf snaps.
+return free
 end
 
 local function placeOneStockItem()
@@ -2251,23 +2396,33 @@ local function placeOneStockItem()
 			if itemId ~= nil then
 				local slot = freeSlots[slotIdx]
 				local price = stockPriceFor(entry)
-				-- PlaceVersion 140: 9th arg displayAsStock flag (stock client passes false)
-				local ok = fire(
-					"Plot",
-					"PlaceStockItem",
-					guid,
-					itemId,
-					slot.cf,
-					price,
-					slot.shelfGuid,
-					slot.snapName,
-					slot.surface == true,
-					1,
-					false
-				)
+				-- v202 contract (ShelfInteraction): 10 args — arg9=true (sell listing),
+				-- arg10 = request GUID; server confirms via PlaceStockItemResult.
+				-- arg9=false tell server "display/decor" → no listing (old v140 9-arg).
+				local req = HttpService:GenerateGUID(false)
+				placePending[req] = true
+				local r = remote("Plot", "PlaceStockItem")
+				local ok = false
+				if r then
+					ok = pcall(function()
+						r:FireServer(
+							guid,
+							tostring(itemId),
+							slot.cf * CFrame.Angles(0, 0, 0),
+							price,
+							slot.shelfGuid,
+							slot.snapName,
+							nil,
+							nil,
+							true,
+							req
+						)
+					end)
+				end
 				if ok then
 					placed = placed + 1
 					slotIdx = slotIdx + 1
+					task.wait(0.25)
 				end
 			end
 		end
@@ -2506,6 +2661,18 @@ PlaceBox:AddToggle("AutoWash", {
 	Text = "Auto Wash",
 	Default = false,
 	Tooltip = "Independent of Auto Place",
+})
+PlaceBox:AddButton({
+	Text = "Place One Now",
+	Func = function()
+		local ok, res = placeOneStockItem()
+		Library:Notify({
+			Title = "Place",
+			Description = ok and ("Placed " .. tostring(res)) or tostring(res or "fail"),
+			Time = 2.5,
+		})
+	end,
+	Tooltip = "Places 1+ item to free slot, ignores inventory pause",
 })
 PlaceBox:AddButton({
 	Text = "Reprice All Stock",
@@ -3070,8 +3237,9 @@ end)
 
 	task.spawn(function()
 	while state.running do
-		if state.autoPlace and not shouldPauseInventory() then
-			-- placeOneStockItem fills multiple free shelf snaps per tick
+		if state.autoPlace then
+			-- placing frees inventory, so no shouldPauseInventory() gate here
+			-- (pause gate there deadlocks: full inv → never place → stays full)
 			local ok = placeOneStockItem()
 			task.wait(ok and 0.6 or 1.2)
 		else
