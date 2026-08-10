@@ -251,6 +251,13 @@ local state = {
 	bombTargets = { ClassicBomb = true },
 	bombStock = {},
 	bombThread = nil,
+	-- Shop / Upgrades
+	autoUpgradeCarry = false,
+	upgradeThread = nil,
+	-- Shop / Destroy
+	destroyLowRarity = false,
+	destroyMaxTier = 6,
+	destroyThread = nil,
 	-- Shop / Radars
 	autoBuyRadar = false,
 	radarTargets = { CrystalRadar = true },
@@ -3283,6 +3290,64 @@ do
 end
 
 --========================================================
+-- DESTROY WORLD CRYSTALS (client-side, by rarity)
+--========================================================
+do
+	local function worldCrystals()
+		local things = workspace:FindFirstChild("Things")
+		local roots = {
+			things and things:FindFirstChild("Crystals"),
+			workspace:FindFirstChild("DroppedCrystals"),
+		}
+		local parts = {}
+		for _, root in ipairs(roots) do
+			if root then
+				for _, p in ipairs(root:GetDescendants()) do
+					if p:IsA("BasePart") and p:GetAttribute("Tier") ~= nil then
+						parts[#parts + 1] = p
+					end
+				end
+			end
+		end
+		return parts
+	end
+
+	state.CrystalDestroy = state.CrystalDestroy or {}
+
+	function state.CrystalDestroy.stop()
+		state.destroyLowRarity = false
+	end
+
+	function state.CrystalDestroy.start()
+		if state.destroyThread then
+			return
+		end
+		state.destroyLowRarity = true
+		state.destroyThread = task.spawn(function()
+			while state.destroyLowRarity and not Library.Unloaded do
+				local maxTier = tonumber(state.destroyMaxTier) or 6
+				local parts = worldCrystals()
+				local killed = 0
+				for _, p in ipairs(parts) do
+					if not state.destroyLowRarity or Library.Unloaded then
+						break
+					end
+					local t = tonumber(p:GetAttribute("Tier")) or 0
+					if t <= maxTier then
+						pcall(function()
+							p:Destroy()
+						end)
+						killed = killed + 1
+					end
+				end
+				task.wait(killed > 0 and 0.5 or 1.5)
+			end
+			state.destroyThread = nil
+		end)
+	end
+end
+
+--========================================================
 -- FAVORITE (ToggleFavorite / server-authoritative / v4.2.3)
 --========================================================
 local Fav = {}
@@ -3686,7 +3751,9 @@ do
 	end
 
 	function Bombs.stop()
-		state.autoBuyBomb = false
+	state.autoBuyBomb = false
+	state.autoUpgradeCarry = false
+	state.destroyLowRarity = false
 	end
 
 	function Bombs.start()
@@ -4059,6 +4126,39 @@ do
 				})
 			end,
 		})
+	end
+
+	function Upgrades.stop()
+		state.autoUpgradeCarry = false
+	end
+
+	function Upgrades.start()
+		if state.upgradeThread then
+			return
+		end
+		state.autoUpgradeCarry = true
+		state.upgradeThread = task.spawn(function()
+			while state.autoUpgradeCarry and not Library.Unloaded do
+				Upgrades.refreshPrices()
+				local p = price("Weight", 3)
+				if p > 0 and getCash() >= p * 1.15 then
+					local ok = Upgrades.buy("Weight", 3)
+					if ok then
+						Library:Notify({
+							Title = "Auto Carry",
+							Description = string.format("+10kg (paid %s)", formatMoney(p)),
+							Time = 2,
+						})
+						task.wait(3)
+					else
+						task.wait(1.5)
+					end
+				else
+					task.wait(2)
+				end
+			end
+			state.upgradeThread = nil
+		end)
 	end
 end
 
@@ -4806,7 +4906,7 @@ Main:AddDropdown("MineMinSize", {
 
 Main:AddDropdown("MineMinLuck", {
 	Text = "Min Luck % (Auto-Mine)",
-	Values = { "1%", "50%", "100%", "200%", "250%" },
+	Values = { "1%", "50%", "100%", "200%", "250%", "500%", "1000%" },
 	Default = 1,
 	Multi = false,
 	Tooltip = "Skip crystals with luck below this (Auto Pickup + Auto Pickup TP).",
@@ -5414,6 +5514,28 @@ MoveBox:AddSlider("AntiAfkInterval", {
 -- GRAPHIC TAB (Anti-Lag + Disable Glow)
 --========================================================
 local GraphicBox = Tabs.Misc:AddLeftGroupbox("Graphic", "sun")
+GraphicBox:AddToggle("DestroyLowRarity", {
+	Text = "Destroy World Crystals by Rarity",
+	Default = false,
+	Tooltip = "Client-side Destroy() on world crystals (Things.Crystals / DroppedCrystals) with Tier <= max. Reduces lag. Permanent!",
+	Callback = function(v)
+		if v then
+			state.CrystalDestroy.start()
+		else
+			state.CrystalDestroy.stop()
+		end
+	end,
+})
+GraphicBox:AddDropdown("DestroyMaxRarity", {
+	Text = "Destroy max rarity",
+	Values = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic" },
+	Default = "Mythic",
+	Multi = false,
+	Tooltip = "Crystals with rarity up to (and including) this are destroyed.",
+	Callback = function(v)
+		state.destroyMaxTier = rarityToTier(v)
+	end,
+})
 GraphicBox:AddToggle("AntiLag", {
 	Text = "Anti Lag",
 	Default = false,
@@ -5532,6 +5654,18 @@ end)
 -- Upgrades section under Radars (collapsed by default)
 -- AddLeftGroupbox(title, icon, visible, collapsed)
 local UpgBox = Tabs.Shop:AddLeftGroupbox("Upgrades", "arrow-up", true, true)
+UpgBox:AddToggle("AutoUpgradeCarry", {
+	Text = "Auto-Upgrade Carry +10kg",
+	Default = false,
+	Tooltip = "Buy Carry +10kg (Weight tier 3) when cash >= 115% of price.",
+	Callback = function(v)
+		if v then
+			Upgrades.start()
+		else
+			Upgrades.stop()
+		end
+	end,
+})
 Upgrades.buildUI(UpgBox)
 
 --========================================================
@@ -5688,17 +5822,17 @@ local DropBox = Tabs.Drop:AddLeftGroupbox("Drop", "minus")
 
 DropBox:AddLabel("CrystalDropRequest / not sell / skip Favorited", true)
 
-local dropStatusLabel = DropBox:AddLabel(Drop.statusText(), true)
+state.dropStatusLabel = DropBox:AddLabel(Drop.statusText(), true)
 
-local function refreshDropStatus()
+function state.refreshDropStatus()
 	pcall(function()
-		if dropStatusLabel and dropStatusLabel.SetText then
-			dropStatusLabel:SetText(Drop.statusText())
+		if state.dropStatusLabel and state.dropStatusLabel.SetText then
+			state.dropStatusLabel:SetText(Drop.statusText())
 		end
 	end)
 end
 
-local _dropAllConfirm = false
+state.dropAllConfirm = false
 
 DropBox:AddToggle("DropAll", {
 	Text = "Drop All (skip Favorited)",
@@ -5706,15 +5840,15 @@ DropBox:AddToggle("DropAll", {
 	Tooltip = "Dump every non-favorited crystal. Toggle twice to confirm.",
 	Callback = function(v)
 		if v then
-			if not _dropAllConfirm then
-				_dropAllConfirm = true
+			if not state.dropAllConfirm then
+				state.dropAllConfirm = true
 				Library:Notify({
 					Title = "Drop All - confirm",
 					Description = "Toggle ON again within 5s to start",
 					Time = 4,
 				})
 				task.delay(5, function()
-					_dropAllConfirm = false
+					state.dropAllConfirm = false
 				end)
 				task.defer(function()
 					pcall(function()
@@ -5725,7 +5859,7 @@ DropBox:AddToggle("DropAll", {
 				end)
 				return
 			end
-			_dropAllConfirm = false
+			state.dropAllConfirm = false
 			pcall(function()
 				if Toggles.DropValue and Toggles.DropValue.Value then
 					Toggles.DropValue:SetValue(false)
@@ -5739,7 +5873,7 @@ DropBox:AddToggle("DropAll", {
 			end
 			Library:Notify({ Title = "Drop All", Description = "OFF", Time = 2 })
 		end
-		refreshDropStatus()
+		state.refreshDropStatus()
 	end,
 })
 
@@ -5755,7 +5889,7 @@ DropBox:AddSlider("DropValueTargetB", {
 	Tooltip = "Drop non-fav crystals until total dropped $ ? this (1-500 billion).",
 	Callback = function(v)
 		state.dropValueTargetB = v
-		refreshDropStatus()
+		state.refreshDropStatus()
 	end,
 })
 
@@ -5767,7 +5901,7 @@ DropBox:AddDropdown("DropValueSort", {
 	Tooltip = "Which crystals drop first when value target is ON.",
 	Callback = function(v)
 		state.dropSortExpensive = (v == "Most expensive first")
-		refreshDropStatus()
+		state.refreshDropStatus()
 	end,
 })
 
@@ -5795,7 +5929,7 @@ DropBox:AddToggle("DropValue", {
 			end
 			Library:Notify({ Title = "Drop Value", Description = "OFF", Time = 2 })
 		end
-		refreshDropStatus()
+		state.refreshDropStatus()
 	end,
 })
 
@@ -5816,7 +5950,7 @@ task.spawn(function()
 	while not Library.Unloaded do
 		task.wait(0.5)
 		if state.dropMode then
-			refreshDropStatus()
+			state.refreshDropStatus()
 		end
 	end
 end)
@@ -6064,6 +6198,16 @@ task.defer(function()
 	end)
 	pcall(function()
 		state.pickupAfterBoulder = Toggles.PickupAfterBoulder and Toggles.PickupAfterBoulder.Value == true or false
+	end)
+	pcall(function()
+		if Toggles.AutoUpgradeCarry and Toggles.AutoUpgradeCarry.Value == true then
+			Upgrades.start()
+		end
+	end)
+	pcall(function()
+		if Toggles.DestroyLowRarity and Toggles.DestroyLowRarity.Value == true then
+			state.CrystalDestroy.start()
+		end
 	end)
 	pcall(refreshCrystalList)
 	pcall(refreshRunes)
