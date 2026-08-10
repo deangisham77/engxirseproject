@@ -4862,7 +4862,7 @@ local WIN_H = isMobile and 340 or 440
 
 local Window = Library:CreateWindow({
 	Title = "Qentury Hub",
-	Footer = "rebuild / Main + Shop + Drop + Favorite + Server + Misc",
+	Footer = "Qentury Hub | Mine A Mountain",
 	NotifySide = "Right",
 	ShowCustomCursor = false,
 	Resizable = true,
@@ -6406,7 +6406,7 @@ task.defer(function()
 end)
 
 Library:Notify({
-	Title = "Qentury rebuild",
-	Description = "Main + Shop + Radars + Drop + Favorite + Server + Misc",
+	Title = "Qentury Hub",
+	Description = "Qentury Hub | Mine A Mountain",
 	Time = 4,
 })
