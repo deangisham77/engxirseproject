@@ -258,6 +258,11 @@ local state = {
 	destroyLowRarity = false,
 	destroyMaxTier = 6,
 	destroyThread = nil,
+	-- Drop Rune
+	runeDrop = false,
+	runeDropSel = nil,
+	runeDropCount = 1,
+	runeDropThread = nil,
 	-- Shop / Radars
 	autoBuyRadar = false,
 	radarTargets = { CrystalRadar = true },
@@ -2872,6 +2877,17 @@ do
 			return
 		end
 		state.breakThread = task.spawn(function()
+			-- teleport ke tengah gunung dulu sebelum cari boulder
+			pcall(function()
+				local cx = workspace:GetAttribute("MountainCenterX")
+				local cz = workspace:GetAttribute("MountainCenterZ")
+				local base = workspace:GetAttribute("MountainBaseY") or 0
+				local peak = workspace:GetAttribute("MountainPeakY") or (base + 100)
+				if typeof(cx) == "number" and typeof(cz) == "number" then
+					local goal = Vector3.new(cx, base + (peak - base) * 0.5, cz)
+					steppedTeleport(goal, 4)
+				end
+			end)
 			while state.autoBreak and not Library.Unloaded do
 				local m = Boulders.nearest()
 				if not state.autoBreak then
@@ -3343,6 +3359,130 @@ do
 				task.wait(killed > 0 and 0.5 or 1.5)
 			end
 			state.destroyThread = nil
+		end)
+	end
+end
+
+--========================================================
+-- DROP RUNE (equip + CrystalDropRequest -> DroppedRunes)
+--========================================================
+do
+	local RUNE_MAP = {
+		["Luck Rune"] = "LuckRune",
+		["Haste Rune"] = "HasteRune",
+		["Storm Rune"] = "StormRune",
+		["Fortune Rune"] = "FortuneRune",
+		["Detonation Rune"] = "DetonationRune",
+		["Preservation Rune"] = "PreservationRune",
+		["Weight Rune"] = "WeightRune",
+		["Excavator Rune"] = "ExcavatorRune",
+		["Warmth Rune"] = "WarmthRune",
+		["Colossus Rune"] = "ColossusRune",
+	}
+
+	local function runeTools()
+		local tools = {}
+		local function scan(c)
+			if not c then
+				return
+			end
+			for _, t in ipairs(c:GetChildren()) do
+				if t:IsA("Tool") and type(t:GetAttribute("RuneId")) == "string" then
+					tools[#tools + 1] = t
+				end
+			end
+		end
+		scan(LP:FindFirstChildOfClass("Backpack"))
+		scan(LP.Character)
+		return tools
+	end
+
+	state.DropRune = state.DropRune or {}
+	state.DropRune.map = RUNE_MAP
+
+	function state.DropRune.stop()
+		state.runeDrop = false
+	end
+
+	function state.DropRune.start()
+		if state.runeDropThread then
+			return
+		end
+		state.runeDrop = true
+		state.runeDropThread = task.spawn(function()
+			local ok, err = pcall(function()
+				local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+				local budget = math.max(1, tonumber(state.runeDropCount) or 1)
+				local sel = state.runeDropSel
+				local dropped = 0
+				local seen = {}
+				local ids = {}
+				for _, t in ipairs(runeTools()) do
+					local id = t:GetAttribute("RuneId")
+					if type(id) == "string" and (sel == nil or id == sel) and not seen[id] then
+						seen[id] = true
+						ids[#ids + 1] = id
+					end
+				end
+				for _, id in ipairs(ids) do
+					if not state.runeDrop or Library.Unloaded then
+						break
+					end
+					local tool
+					for _, t in ipairs(runeTools()) do
+						if t:GetAttribute("RuneId") == id then
+							tool = t
+							break
+						end
+					end
+					if not tool or not hum then
+						continue
+					end
+					pcall(function()
+						hum:EquipTool(tool)
+					end)
+					task.wait(0.4)
+					local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+					local dr = remotes and remotes:FindFirstChild("CrystalDropRequest")
+					if not dr then
+						continue
+					end
+					local name = tool.Name
+					for i = 1, budget do
+						if not state.runeDrop or Library.Unloaded then
+							break
+						end
+						pcall(function()
+							dr:FireServer(name)
+						end)
+						dropped = dropped + 1
+						task.wait(0.35)
+					end
+				end
+				state.runeDrop = false
+				pcall(function()
+					if Toggles.RuneDrop then
+						Toggles.RuneDrop:SetValue(false)
+					end
+				end)
+				if dropped > 0 then
+					Library:Notify({
+						Title = "Drop Rune",
+						Description = string.format("dropped %s", tostring(dropped)),
+						Time = 2,
+					})
+				end
+			end)
+			if not ok then
+				warn("[DropRune] " .. tostring(err))
+				state.runeDrop = false
+				pcall(function()
+					if Toggles.RuneDrop then
+						Toggles.RuneDrop:SetValue(false)
+					end
+				end)
+			end
+			state.runeDropThread = nil
 		end)
 	end
 end
@@ -5688,11 +5828,11 @@ end
 FavBox:AddSlider("FavLuckMin", {
 	Text = "Min Luck %",
 	Default = 4,
-	Min = 1,
-	Max = 500,
+	Min = 0,
+	Max = 5000,
 	Rounding = 0,
 	Suffix = "%",
-	Tooltip = "Auto-favorite crystals with luck ? this percent (1-500).",
+	Tooltip = "Auto-favorite crystals with luck >= this percent (0-5000).",
 	Callback = function(v)
 		state.favLuckMin = v
 		refreshFavStatus()
@@ -5818,7 +5958,7 @@ end)
 --========================================================
 -- DROP TAB
 --========================================================
-local DropBox = Tabs.Drop:AddLeftGroupbox("Drop", "minus")
+local DropBox = Tabs.Drop:AddLeftGroupbox("Crystal", "gem", true, true)
 
 DropBox:AddLabel("CrystalDropRequest / not sell / skip Favorited", true)
 
@@ -5874,6 +6014,41 @@ DropBox:AddToggle("DropAll", {
 			Library:Notify({ Title = "Drop All", Description = "OFF", Time = 2 })
 		end
 		state.refreshDropStatus()
+	end,
+})
+
+local RuneBox = Tabs.Drop:AddLeftGroupbox("Rune", "gem", true, true)
+RuneBox:AddDropdown("RuneDropSelect", {
+	Text = "Rune to drop",
+	Values = { "All", "Luck Rune", "Haste Rune", "Storm Rune", "Fortune Rune", "Detonation Rune", "Preservation Rune", "Weight Rune", "Excavator Rune", "Warmth Rune", "Colossus Rune" },
+	Default = "All",
+	Multi = false,
+	Tooltip = "Which rune type to drop. All = every rune in backpack.",
+	Callback = function(v)
+		state.runeDropSel = state.DropRune and state.DropRune.map and state.DropRune.map[v]
+	end,
+})
+RuneBox:AddSlider("RuneDropCount", {
+	Text = "Runes to drop",
+	Default = 1,
+	Min = 1,
+	Max = 500,
+	Rounding = 0,
+	Tooltip = "Drop this many of each selected rune (1 fire = 1 rune), then auto-stop. All = N per rune type.",
+	Callback = function(v)
+		state.runeDropCount = v
+	end,
+})
+RuneBox:AddToggle("RuneDrop", {
+	Text = "Drop Runes (auto)",
+	Default = false,
+	Tooltip = "Drop RuneDropCount of each selected rune (All = N per type), then auto-stop.",
+	Callback = function(v)
+		if v then
+			state.DropRune.start()
+		else
+			state.DropRune.stop()
+		end
 	end,
 })
 
