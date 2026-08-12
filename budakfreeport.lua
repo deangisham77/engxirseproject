@@ -2963,14 +2963,14 @@ do
 							end
 							task.wait(0.3)
 						end
-						if state.autoRejoin then
-							Library:Notify({
-								Title = "Auto Rejoin",
-								Description = "Farm clear / rejoining?",
-								Time = 2,
-							})
-							task.wait(0.35)
-							-- same as Server.rejoin (inline - Server local defined later)
+					if state.autoRejoin then
+						Library:Notify({
+							Title = "Auto Rejoin",
+							Description = "Farm clear / rejoining in 5s?",
+							Time = 3,
+						})
+						task.wait(5)
+						-- same as Server.rejoin (inline - Server local defined later)
 							local ok, err = pcall(function()
 								local placeId = game.PlaceId
 								local jobId = game.JobId
@@ -4862,7 +4862,7 @@ local WIN_H = isMobile and 340 or 440
 
 local Window = Library:CreateWindow({
 	Title = "Qentury Hub",
-	Footer = "Qentury Hub | Mine A Mountain",
+	Footer = "rebuild / Main + Shop + Drop + Favorite + Server + Misc",
 	NotifySide = "Right",
 	ShowCustomCursor = false,
 	Resizable = true,
@@ -6406,7 +6406,7 @@ task.defer(function()
 end)
 
 Library:Notify({
-	Title = "Qentury Hub",
-	Description = "Qentury Hub | Mine A Mountain",
+	Title = "Qentury rebuild",
+	Description = "Main + Shop + Radars + Drop + Favorite + Server + Misc",
 	Time = 4,
 })
