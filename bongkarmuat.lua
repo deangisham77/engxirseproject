@@ -1,6 +1,7 @@
 --========================================================
 -- STORAGE HUNTERS OPEN WORLD - OBSIDIAN HUB V8
 -- v8: removed Auto-Decline Out-of-Range (decline remote bridged nothing visible & NPC stayed; behavior reverted to leave-pending)
+-- v8.1: Auto-Place fix — confirm-gate before re-fire (no snap double-fire) + proximity occupancy for legacy attr-less items
 -- v7: Auto-Decline out-of-range offers + floor ghost cleanup (decline removed in v8)
 -- v6: Auto-Accept Offers range 0%..500% (Min+Max sliders)
 -- v5: Museum tab (Place 140): GetState / Donate / Withdraw / Collect / UnlockSlot
@@ -168,7 +169,7 @@ end)
 
 local Window = Library:CreateWindow({
 	Title = "Storage Hunters",
-	Footer = "Qentury Hub v8 · Offers/Ghosts",
+	Footer = "Qentury Hub v8",
 	NotifySide = "Right",
 	ShowCustomCursor = false,
 	Center = true,
@@ -2328,6 +2329,27 @@ local function listFreePlaceSlots(plot)
 		return free
 	end
 	local used = occupiedShelfSnaps(plot)
+	-- v8 fix: server sets ShelfGUID only on NEW placements; legacy items carry
+	-- none, so attr-based occupancy is blind to them. Treat any stock item base
+	-- part sitting within ~3 studs of a snap as occupying it.
+	local occPositions = {}
+	local occStock = plot:FindFirstChild("Stock")
+	if occStock then
+		for _, it in ipairs(occStock:GetChildren()) do
+			local part = it.PrimaryPart or it:FindFirstChildWhichIsA("BasePart", true)
+			if part then
+				table.insert(occPositions, part.Position)
+			end
+		end
+	end
+	local function snapOccupied(pos)
+		for _, o in ipairs(occPositions) do
+			if (o - pos).Magnitude < 3 then
+				return true
+			end
+		end
+		return false
+	end
 	local furniture = plot:FindFirstChild("Furniture")
 	local roots = {}
 	if furniture then
@@ -2353,7 +2375,7 @@ local function listFreePlaceSlots(plot)
 				for _, att in ipairs(shelf:GetDescendants()) do
 					if att:IsA("Attachment") and string.match(att.Name, "^SnapPoint") then
 						local key = shelfGuid .. ":" .. att.Name
-						if not used[key] then
+						if not used[key] and not snapOccupied(att.WorldCFrame.Position) then
 							table.insert(free, {
 								cf = att.WorldCFrame,
 								shelfGuid = shelfGuid,
@@ -2376,6 +2398,12 @@ local function placeOneStockItem()
 	local plot = getOwnedPlotModel()
 	if not plot then
 		return false, "no plot"
+	end
+	-- v8 fix: don't fire onto a snap before the previous request is confirmed.
+	-- Server sets ShelfGUID/SnapPointName only after accept; firing again on a
+	-- not-yet-replicated slot double-stacks or gets rejected ("listing not confirmed").
+	if next(placePending) ~= nil then
+		return false, "pending confirm"
 	end
 	local inv = invoke("Inventory", "GetPlayerInventory")
 	if type(inv) ~= "table" then
