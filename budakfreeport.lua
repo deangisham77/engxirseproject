@@ -1,4 +1,4 @@
---========================================================
+	--========================================================
 -- QENTURY HUB (rebuild)
 -- Shells/rebuild/ / UI: deividcomsono Obsidian
 -- Phase 1: Main + Shop (Bombs + Radars) + Settings
@@ -242,8 +242,10 @@ local state = {
 	autoFavLuck = false,
 	autoFavRarity = false,
 	autoFavWeight = false,
+	autoFavValue = false,
 	favLuckMin = 4,
 	favMinWeight = 4,
+	favMinValue = 1e12,
 	favRarityTiers = { [5] = true, [6] = true }, -- L + M default
 	favThread = nil,
 	-- Shop / Bombs
@@ -3438,26 +3440,26 @@ do
 					if not tool or not hum then
 						continue
 					end
+				pcall(function()
+					hum:EquipTool(tool)
+				end)
+				task.wait(0.25)
+				local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+				local dr = remotes and remotes:FindFirstChild("CrystalDropRequest")
+				if not dr then
+					continue
+				end
+				local name = tool.Name
+				for i = 1, budget do
+					if not state.runeDrop or Library.Unloaded then
+						break
+					end
 					pcall(function()
-						hum:EquipTool(tool)
+						dr:FireServer(name)
 					end)
-					task.wait(0.4)
-					local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-					local dr = remotes and remotes:FindFirstChild("CrystalDropRequest")
-					if not dr then
-						continue
-					end
-					local name = tool.Name
-					for i = 1, budget do
-						if not state.runeDrop or Library.Unloaded then
-							break
-						end
-						pcall(function()
-							dr:FireServer(name)
-						end)
-						dropped = dropped + 1
-						task.wait(0.35)
-					end
+					dropped = dropped + 1
+					task.wait(0.15)
+				end
 				end
 				state.runeDrop = false
 				pcall(function()
@@ -3600,9 +3602,10 @@ do
 	function Fav.statusText()
 		rebuildFavIndex()
 		local tools = getCrystalTools()
-		local favN, matchLuck, matchRar, matchWt = 0, 0, 0, 0
+		local favN, matchLuck, matchRar, matchWt, matchVal = 0, 0, 0, 0, 0
 		local minPct = tonumber(state.favLuckMin) or 4
 		local minWt = tonumber(state.favMinWeight) or 4
+		local minVal = tonumber(state.favMinValue) or 1e12
 		for _, t in ipairs(tools) do
 			if isToolFavorited(t) then
 				favN += 1
@@ -3618,15 +3621,19 @@ do
 			if wtRank and wtRank >= minWt then
 				matchWt += 1
 			end
+			if (tonumber(t:GetAttribute("Value")) or 0) >= minVal then
+				matchVal += 1
+			end
 		end
 		return string.format(
-			"Bag: %d / Fav: %d\nLuck ? %.0f%%: %d / Rarity: %d / Weight: %d",
+			"Bag: %d / Fav: %d\nLuck ? %.0f%%: %d / Rarity: %d / Weight: %d / Value: %d",
 			#tools,
 			favN,
 			minPct,
 			matchLuck,
 			matchRar,
-			matchWt
+			matchWt,
+			matchVal
 		)
 	end
 
@@ -3666,6 +3673,11 @@ do
 				return true
 			end
 		end
+		if state.autoFavValue then
+			if (tonumber(tool:GetAttribute("Value")) or 0) >= (tonumber(state.favMinValue) or 1e12) then
+				return true
+			end
+		end
 		return false
 	end
 
@@ -3674,7 +3686,7 @@ do
 		local minPct = tonumber(state.favLuckMin) or 4
 		local n = 0
 		for _, tool in ipairs(getCrystalTools()) do
-			if Library.Unloaded or not (state.autoFavLuck or state.autoFavRarity or state.autoFavWeight) then
+			if Library.Unloaded or not (state.autoFavLuck or state.autoFavRarity or state.autoFavWeight or state.autoFavValue) then
 				break
 			end
 			if wantsFavorite(tool, minPct) and not isToolFavorited(tool) then
@@ -3695,7 +3707,7 @@ do
 		end
 		state.favThread = task.spawn(function()
 			pcall(runPass)
-			while (state.autoFavLuck or state.autoFavRarity or state.autoFavWeight) and not Library.Unloaded do
+			while (state.autoFavLuck or state.autoFavRarity or state.autoFavWeight or state.autoFavValue) and not Library.Unloaded do
 				pcall(runPass)
 				task.wait(0.75)
 			end
@@ -3707,6 +3719,7 @@ do
 		state.autoFavLuck = false
 		state.autoFavRarity = false
 		state.autoFavWeight = false
+		state.autoFavValue = false
 	end
 
 	function Fav.favoriteAll()
@@ -4862,7 +4875,7 @@ local WIN_H = isMobile and 340 or 440
 
 local Window = Library:CreateWindow({
 	Title = "Qentury Hub",
-	Footer = "rebuild / Main + Shop + Drop + Favorite + Server + Misc",
+	Footer = "Qentury Hub | Mine a Mountain",
 	NotifySide = "Right",
 	ShowCustomCursor = false,
 	Resizable = true,
@@ -5058,14 +5071,20 @@ Main:AddDropdown("MineMinLuck", {
 
 Main:AddDropdown("MineMinValue", {
 	Text = "Min Value (Auto-Mine)",
-	Values = { "0", "1b", "2b", "3b", "4b", "5b" },
+	Values = { "0", "500b", "1t", "5t", "10t" },
 	Default = "0",
 	Multi = false,
 	Tooltip = "Skip crystals worth less than this (Auto Pickup + TP + Farm). 0 = all.",
 	Callback = function(v)
 		local s = tostring(v or "0"):lower()
-		local n = tonumber((s:gsub("b", ""))) or 0
-		state.mineMinValue = s:find("b") and n * 1e9 or n
+		local n = tonumber((s:gsub("[bt]", ""))) or 0
+		if s:find("t") then
+			state.mineMinValue = n * 1e12
+		elseif s:find("b") then
+			state.mineMinValue = n * 1e9
+		else
+			state.mineMinValue = n
+		end
 	end,
 })
 
@@ -5157,6 +5176,8 @@ Main:AddToggle("CrystalESP", {
 		end
 	end,
 })
+
+Main:AddDivider()
 
 Main:AddSlider("EspScale", {
 	Text = "ESP text scale",
@@ -5849,7 +5870,7 @@ FavBox:AddToggle("AutoFavLuck", {
 			Fav.start()
 			Library:Notify({ Title = "Favorite", Description = "Luck auto ON", Time = 2 })
 		else
-			if not (state.autoFavRarity or state.autoFavWeight) then
+			if not (state.autoFavRarity or state.autoFavWeight or state.autoFavValue) then
 				Fav.stop()
 			end
 			Library:Notify({ Title = "Favorite", Description = "Luck auto OFF", Time = 2 })
@@ -5884,7 +5905,7 @@ FavBox:AddToggle("AutoFavRarity", {
 			Fav.start()
 			Library:Notify({ Title = "Favorite", Description = "Rarity auto ON", Time = 2 })
 		else
-			if not (state.autoFavLuck or state.autoFavWeight) then
+			if not (state.autoFavLuck or state.autoFavWeight or state.autoFavValue) then
 				Fav.stop()
 			end
 			Library:Notify({ Title = "Favorite", Description = "Rarity auto OFF", Time = 2 })
@@ -5919,10 +5940,44 @@ FavBox:AddToggle("AutoFavWeight", {
 			Fav.start()
 			Library:Notify({ Title = "Favorite", Description = "Weight auto ON", Time = 2 })
 		else
-			if not (state.autoFavLuck or state.autoFavRarity) then
+			if not (state.autoFavLuck or state.autoFavRarity or state.autoFavValue) then
 				Fav.stop()
 			end
 			Library:Notify({ Title = "Favorite", Description = "Weight auto OFF", Time = 2 })
+		end
+		refreshFavStatus()
+	end,
+})
+
+FavBox:AddSlider("FavValueMin", {
+	Text = "Min Value (Auto-Fav)",
+	Default = 1,
+	Min = 1,
+	Max = 500,
+	Rounding = 0,
+	Suffix = "T $",
+	Tooltip = "Favorite crystals worth at least this many trillion (1-500T).",
+	Callback = function(v)
+		state.favMinValue = v * 1e12
+		refreshFavStatus()
+	end,
+})
+
+FavBox:AddToggle("AutoFavValue", {
+	Text = "Auto Favorite by Value",
+	Default = false,
+	Tooltip = "Loop: favorite bag tools worth >= min value.",
+	Callback = function(v)
+		state.autoFavValue = v
+		if v then
+			state.favMinValue = (tonumber(Options.FavValueMin and Options.FavValueMin.Value) or 1) * 1e12
+			Fav.start()
+			Library:Notify({ Title = "Favorite", Description = "Value auto ON", Time = 2 })
+		else
+			if not (state.autoFavLuck or state.autoFavRarity or state.autoFavWeight) then
+				Fav.stop()
+			end
+			Library:Notify({ Title = "Favorite", Description = "Value auto OFF", Time = 2 })
 		end
 		refreshFavStatus()
 	end,
@@ -6299,6 +6354,7 @@ local function stopFeatures()
 	state.autoFavLuck = false
 	state.autoFavRarity = false
 	state.autoFavWeight = false
+	state.autoFavValue = false
 	state.autoBuyBomb = false
 	Boulders.stop()
 	Drop.stop()
@@ -6348,8 +6404,14 @@ task.defer(function()
 	pcall(function()
 		local valV = Options.MineMinValue and Options.MineMinValue.Value
 		local s = tostring(valV or "0"):lower()
-		local n = tonumber((s:gsub("b", ""))) or 0
-		state.mineMinValue = s:find("b") and n * 1e9 or n
+		local n = tonumber((s:gsub("[bt]", ""))) or 0
+		if s:find("t") then
+			state.mineMinValue = n * 1e12
+		elseif s:find("b") then
+			state.mineMinValue = n * 1e9
+		else
+			state.mineMinValue = n
+		end
 	end)
 	pcall(function()
 		state.antiAfkInterval = Options.AntiAfkInterval and Options.AntiAfkInterval.Value or 120
@@ -6394,6 +6456,9 @@ task.defer(function()
 	end)
 	pcall(function()
 		state.favMinWeight = sizeLabelToRank(Options.FavWeightSelect and Options.FavWeightSelect.Value) or 4
+	end)
+	pcall(function()
+		state.favMinValue = (tonumber(Options.FavValueMin and Options.FavValueMin.Value) or 1) * 1e12
 	end)
 	pcall(refreshFavStatus)
 	pcall(Upgrades.refreshPrices)
