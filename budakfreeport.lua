@@ -5021,8 +5021,8 @@ end
 --========================================================
 local isMobile = Library.IsMobile == true
 	or (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled)
-local WIN_W = isMobile and 400 or 520
-local WIN_H = isMobile and 340 or 440
+local WIN_W = isMobile and 360 or 520
+local WIN_H = isMobile and 300 or 440
 
 local Window = Library:CreateWindow({
 	Title = "Qentury Hub",
@@ -5038,9 +5038,17 @@ local Window = Library:CreateWindow({
 
 pcall(function()
 	if Library.SetDPIScale then
-		Library:SetDPIScale(isMobile and 80 or 90)
+		Library:SetDPIScale(isMobile and 70 or 90)
 	end
 end)
+if isMobile then
+	pcall(function()
+		if gethui then
+			Window.Center = true
+			Window.AutoShow = true
+		end
+	end)
+end
 
 local Tabs = {
 	Main = Window:AddTab("Main", "gem", "Auto mine + ESP + TP"),
