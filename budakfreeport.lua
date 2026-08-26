@@ -5021,8 +5021,8 @@ end
 --========================================================
 local isMobile = Library.IsMobile == true
 	or (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled)
-local WIN_W = isMobile and 340 or 520
-local WIN_H = isMobile and 280 or 440
+local WIN_W = isMobile and 400 or 560
+local WIN_H = isMobile and 340 or 480
 
 local Window = Library:CreateWindow({
 	Title = "Qentury Hub",
@@ -5038,29 +5038,9 @@ local Window = Library:CreateWindow({
 
 pcall(function()
 	if Library.SetDPIScale then
-		Library:SetDPIScale(isMobile and 65 or 90)
+		Library:SetDPIScale(isMobile and 80 or 90)
 	end
 end)
-if isMobile then
-	pcall(function()
-		Window.Center = true
-		Window.AutoShow = true
-		if Window.SetPosition then
-			Window:SetPosition(UDim2.fromScale(0.5, 0.5))
-		end
-		if Window.Show then
-			Window:Show()
-		end
-		-- paksa ScreenGui tetap enable di HP
-		local hui = gethui and gethui() or game:GetService("CoreGui")
-		for _, sg in ipairs(hui:GetDescendants()) do
-			if sg:IsA("ScreenGui") and sg.Name == "Obsidian" then
-				sg.Enabled = true
-				sg.DisplayOrder = 999
-			end
-		end
-	end)
-end
 
 local Tabs = {
 	Main = Window:AddTab("Main", "gem", "Auto mine + ESP + TP"),
@@ -5123,6 +5103,61 @@ local function forceFullWidthTabs()
 				end
 			end
 		end
+	end
+	-- force Settings single column (no left/right), per section collapsed
+	local cfgPane, themePane
+	for _, p2 in ipairs(root:GetDescendants()) do
+		if p2:IsA("ScrollingFrame") then
+			local hasCfg, hasTheme = false, false
+			for _, lbl in ipairs(p2:GetDescendants()) do
+				if lbl:IsA("TextLabel") then
+					if lbl.Text == "Configuration" then
+						hasCfg = true
+					elseif lbl.Text == "Themes" then
+						hasTheme = true
+					end
+				end
+			end
+			if hasCfg then
+				cfgPane = p2
+			end
+			if hasTheme then
+				themePane = p2
+			end
+		end
+	end
+	if cfgPane and themePane and cfgPane ~= themePane then
+		local toMove = {}
+		for _, child in ipairs(cfgPane:GetChildren()) do
+			if child:IsA("Frame") then
+				for _, lbl in ipairs(child:GetDescendants()) do
+					if lbl:IsA("TextLabel") and lbl.Text == "Configuration" then
+						toMove[#toMove + 1] = child
+						break
+					end
+				end
+			end
+		end
+		for _, gb in ipairs(toMove) do
+			gb.Parent = themePane
+		end
+		cfgPane.Visible = false
+		cfgPane.Size = UDim2.new(0, 0, 1, 0)
+		themePane.Visible = true
+		themePane.Size = UDim2.new(1, -6, 1, 0)
+		themePane.Position = UDim2.fromScale(0, 0)
+	elseif themePane then
+		themePane.Visible = true
+		themePane.Size = UDim2.new(1, -6, 1, 0)
+		themePane.Position = UDim2.fromScale(0, 0)
+		if cfgPane then
+			cfgPane.Visible = false
+			cfgPane.Size = UDim2.new(0, 0, 1, 0)
+		end
+	elseif cfgPane then
+		cfgPane.Visible = true
+		cfgPane.Size = UDim2.new(1, -6, 1, 0)
+		cfgPane.Position = UDim2.fromScale(0, 0)
 	end
 end
 
@@ -6500,7 +6535,9 @@ ServerAct:AddButton({
 local MenuGroup = Tabs.Settings:AddGroupbox({
 	Side = "Left",
 	Name = "Menu",
-	IconName = "wrench"
+	IconName = "wrench",
+	Collapsed = true,
+	DisableCollapsing = false,
 })
 
 MenuGroup:AddToggle("KeybindMenuOpen", {
@@ -6587,6 +6624,20 @@ SaveManager:BuildConfigSection(Tabs.Settings)
 
 -- Builds theme menu on the left side
 ThemeManager:ApplyToTab(Tabs.Settings)
+
+-- per section default collapsed + single column (force handles layout, this just collapses)
+pcall(function()
+	for _, gb in pairs(Tabs.Settings.Groupboxes) do
+		if gb.SetCollapsed then
+			gb:SetCollapsed(true)
+		end
+	end
+	for _, tb in pairs(Tabs.Settings.Tabboxes or {}) do
+		if tb.SetCollapsed then
+			tb:SetCollapsed(true)
+		end
+	end
+end)
 
 SaveManager:LoadAutoloadConfig()
 
