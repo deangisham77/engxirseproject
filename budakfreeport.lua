@@ -5021,8 +5021,8 @@ end
 --========================================================
 local isMobile = Library.IsMobile == true
 	or (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled)
-local WIN_W = isMobile and 360 or 520
-local WIN_H = isMobile and 300 or 440
+local WIN_W = isMobile and 340 or 520
+local WIN_H = isMobile and 280 or 440
 
 local Window = Library:CreateWindow({
 	Title = "Qentury Hub",
@@ -5038,14 +5038,26 @@ local Window = Library:CreateWindow({
 
 pcall(function()
 	if Library.SetDPIScale then
-		Library:SetDPIScale(isMobile and 70 or 90)
+		Library:SetDPIScale(isMobile and 65 or 90)
 	end
 end)
 if isMobile then
 	pcall(function()
-		if gethui then
-			Window.Center = true
-			Window.AutoShow = true
+		Window.Center = true
+		Window.AutoShow = true
+		if Window.SetPosition then
+			Window:SetPosition(UDim2.fromScale(0.5, 0.5))
+		end
+		if Window.Show then
+			Window:Show()
+		end
+		-- paksa ScreenGui tetap enable di HP
+		local hui = gethui and gethui() or game:GetService("CoreGui")
+		for _, sg in ipairs(hui:GetDescendants()) do
+			if sg:IsA("ScreenGui") and sg.Name == "Obsidian" then
+				sg.Enabled = true
+				sg.DisplayOrder = 999
+			end
 		end
 	end)
 end
