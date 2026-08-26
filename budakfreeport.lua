@@ -1,4 +1,4 @@
-	--========================================================
+--========================================================
 -- QENTURY HUB (rebuild)
 -- Shells/rebuild/ / UI: deividcomsono Obsidian
 -- Phase 1: Main + Shop (Bombs + Radars) + Settings
@@ -19,8 +19,8 @@ end)
 
 pcall(function()
 	local hui = gethui and gethui() or game:GetService("CoreGui")
-	for _, old in ipairs(hui:GetChildren()) do
-		if old.Name == "Obsidian" then
+	for _, old in ipairs(hui:GetDescendants()) do
+		if old:IsA("ScreenGui") and old.Name == "Obsidian" then
 			old:Destroy()
 		end
 	end
@@ -265,6 +265,11 @@ local state = {
 	runeDropSel = nil,
 	runeDropCount = 1,
 	runeDropThread = nil,
+	-- Plot Place Rune
+	runePlace = false,
+	runePlaceSel = nil,
+	runePlaceCount = 1,
+	placeRuneThread = nil,
 	-- Shop / Radars
 	autoBuyRadar = false,
 	radarTargets = { CrystalRadar = true },
@@ -3490,6 +3495,152 @@ do
 end
 
 --========================================================
+-- PLOT PLACE RUNE (live plot detect + TP if far + PlotPlaceRequest)
+--========================================================
+do
+	local function ownPlot()
+		local pl = workspace:FindFirstChild("Things") and workspace.Things:FindFirstChild("Plots") and workspace.Things.Plots:FindFirstChild("Slots")
+		local slots = pl
+		if not slots then
+			return nil, nil
+		end
+		for _, m in ipairs(slots:GetChildren()) do
+			if m:IsA("Model") and m.Name == LP.Name then
+				local r = m:FindFirstChild("Region")
+				return m, (r and r:IsA("BasePart")) and r or nil
+			end
+		end
+		return nil, nil
+	end
+
+	local function nearPlot(region)
+		local hrp = getHRP()
+		if not hrp or not region then
+			return false
+		end
+		local localPos = region.CFrame:PointToObjectSpace(hrp.Position)
+		local half = region.Size * 0.5
+		return math.abs(localPos.X) <= half.X + 3 and math.abs(localPos.Z) <= half.Z + 3
+	end
+
+	state.PlotPlace = state.PlotPlace or {}
+
+	function state.PlotPlace.stop()
+		state.runePlace = false
+	end
+
+	function state.PlotPlace.start()
+		if state.placeRuneThread then
+			return
+		end
+		local runeToolsForPlace = function()
+			local tools = {}
+			local function scan(c)
+				if not c then
+					return
+				end
+				for _, t in ipairs(c:GetChildren()) do
+					if t:IsA("Tool") and type(t:GetAttribute("RuneId")) == "string" then
+						tools[#tools + 1] = t
+					end
+				end
+			end
+			scan(LP:FindFirstChildOfClass("Backpack"))
+			scan(LP.Character)
+			return tools
+		end
+		state.runePlace = true
+		state.placeRuneThread = task.spawn(function()
+			local ok, err = pcall(function()
+				local count = math.max(1, tonumber(state.runePlaceCount) or 1)
+				local sel = state.runePlaceSel
+				local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+				local dr = game:GetService("ReplicatedStorage").Remotes:FindFirstChild("PlotPlaceRequest")
+				if not dr or not hum then
+					return
+				end
+				local seen = {}
+				local ids = {}
+				for _, t in ipairs(runeToolsForPlace()) do
+					local id = t:GetAttribute("RuneId")
+					if type(id) == "string" and (sel == nil or id == sel) and not seen[id] then
+						seen[id] = true
+						ids[#ids + 1] = id
+					end
+				end
+				local placed = 0
+				for _, id in ipairs(ids) do
+					if not state.runePlace or Library.Unloaded then
+						break
+					end
+					local tool
+					for _, t in ipairs(runeToolsForPlace()) do
+						if t:GetAttribute("RuneId") == id then
+							tool = t
+							break
+						end
+					end
+					if not tool then
+						continue
+					end
+					local plot, region = ownPlot()
+					if not plot or not region then
+						continue
+					end
+					-- TP near plot if far (plot shifts per server)
+					if not nearPlot(region) then
+						steppedTeleport(region.Position, 4)
+						task.wait(0.4)
+					end
+					pcall(function()
+						hum:EquipTool(tool)
+					end)
+					task.wait(0.4)
+					local name = tool.Name
+					for i = 1, count do
+						if not state.runePlace or Library.Unloaded then
+							break
+						end
+						local _, reg = ownPlot()
+						if not reg then
+							break
+						end
+						pcall(function()
+							dr:FireServer(name, reg.Position, 0, tool)
+						end)
+						placed = placed + 1
+						task.wait(0.2)
+					end
+				end
+				state.runePlace = false
+				pcall(function()
+					if Toggles.RunePlace then
+						Toggles.RunePlace:SetValue(false)
+					end
+				end)
+				if placed > 0 then
+					Library:Notify({
+						Title = "Place Rune",
+						Description = string.format("placed %s", tostring(placed)),
+						Time = 2,
+					})
+				end
+			end)
+			if not ok then
+				warn("[PlotPlace] " .. tostring(err))
+				state.runePlace = false
+				pcall(function()
+					if Toggles.RunePlace then
+						Toggles.RunePlace:SetValue(false)
+					end
+				end)
+			end
+			state.placeRuneThread = nil
+		end)
+	end
+end
+
+--========================================================
 -- FAVORITE (ToggleFavorite / server-authoritative / v4.2.3)
 --========================================================
 local Fav = {}
@@ -4875,7 +5026,7 @@ local WIN_H = isMobile and 340 or 440
 
 local Window = Library:CreateWindow({
 	Title = "Qentury Hub",
-	Footer = "Qentury Hub | Mine a Mountain",
+	Footer = "rebuild / Main + Shop + Drop + Favorite + Server + Misc",
 	NotifySide = "Right",
 	ShowCustomCursor = false,
 	Resizable = true,
@@ -4895,12 +5046,12 @@ local Tabs = {
 	Main = Window:AddTab("Main", "gem", "Auto mine + ESP + TP"),
 	-- Runes + Boulders in one tab; sections collapsed by default
 	RuneBoulder = Window:AddTab("Rune & Boulder", "boxes", "Runes + Boulders"),
-	Drop = Window:AddTab("Drop", "minus", "Drop crystals from bag"),
+	Drop = Window:AddTab("Drop & Place", "minus", "Drop / place runes"),
 	Favorite = Window:AddTab("Favorite", "star", "Auto favorite crystals"),
 	Shop = Window:AddTab("Shop", "shopping-cart", "Bombs & more"),
 	Server = Window:AddTab("Server", "server", "Players / hop / rejoin"),
 	Misc = Window:AddTab("Misc", "shield", "Godmode / fall / ragdoll"),
-	Settings = Window:AddTab("Settings", "settings", "UI"),
+	Settings = Window:AddTab("UI Settings", "settings", "UI"),
 }
 
 local Main = Tabs.Main:AddLeftGroupbox("Main", "gem")
@@ -4917,7 +5068,17 @@ local function forceFullWidthTabs()
 			if ch:IsA("ScrollingFrame") then
 				local sx = ch.Size.X.Scale
 				if sx > 0.4 and sx < 0.6 then
-					table.insert(halves, ch)
+					-- skip Settings panes: keep Save Manager (left) + Theme Manager (right) split
+					local isSettings = false
+					for _, lbl in ipairs(ch:GetDescendants()) do
+						if lbl:IsA("TextLabel") and (lbl.Text == "Configuration" or lbl.Text == "Themes") then
+							isSettings = true
+							break
+						end
+					end
+					if not isSettings then
+						table.insert(halves, ch)
+					end
 				end
 			end
 		end
@@ -6107,6 +6268,42 @@ RuneBox:AddToggle("RuneDrop", {
 	end,
 })
 
+local PlaceBox = Tabs.Drop:AddLeftGroupbox("Place", "gem", true, true)
+PlaceBox:AddLabel("Place runes to your plot (live object detect + TP if far)", true)
+PlaceBox:AddDropdown("RunePlaceSelect", {
+	Text = "Rune to place",
+	Values = { "All", "Luck Rune", "Haste Rune", "Storm Rune", "Fortune Rune", "Detonation Rune", "Preservation Rune", "Weight Rune", "Excavator Rune", "Warmth Rune", "Colossus Rune" },
+	Default = "All",
+	Multi = false,
+	Tooltip = "Which rune type to place. All = N of each type.",
+	Callback = function(v)
+		state.runePlaceSel = state.DropRune and state.DropRune.map and state.DropRune.map[v]
+	end,
+})
+PlaceBox:AddSlider("RunePlaceCount", {
+	Text = "Runes to place",
+	Default = 1,
+	Min = 1,
+	Max = 500,
+	Rounding = 0,
+	Tooltip = "Place this many of each selected rune, then auto-stop.",
+	Callback = function(v)
+		state.runePlaceCount = v
+	end,
+})
+PlaceBox:AddToggle("RunePlace", {
+	Text = "Place Runes (auto)",
+	Default = false,
+	Tooltip = "Auto-place runes to your plot (PlotPlaceRequest). Detects plot live, TP if far, auto-stop.",
+	Callback = function(v)
+		if v then
+			state.PlotPlace.start()
+		else
+			state.PlotPlace.stop()
+		end
+	end,
+})
+
 DropBox:AddDivider()
 
 DropBox:AddSlider("DropValueTargetB", {
@@ -6278,51 +6475,100 @@ ServerAct:AddButton({
 })
 
 --========================================================
--- SETTINGS (minimal)
+-- UI SETTINGS (Obsidian Example.lua style)
 --========================================================
-local Menu = Tabs.Settings:AddLeftGroupbox("Menu", "wrench")
-Menu:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
-	Default = "RightShift",
-	NoUI = true,
-	Text = "Menu keybind",
+local MenuGroup = Tabs.Settings:AddGroupbox({
+	Side = "Left",
+	Name = "Menu",
+	IconName = "wrench"
 })
-Menu:AddButton("Unload", function()
+
+MenuGroup:AddToggle("KeybindMenuOpen", {
+	Default = Library.KeybindFrame.Visible,
+	Text = "Open Keybind Menu",
+	Callback = function(value)
+		Library.KeybindFrame.Visible = value
+	end,
+})
+MenuGroup:AddToggle("ShowCustomCursor", {
+	Text = "Custom Cursor",
+	Default = Library.ShowCustomCursor,
+	Callback = function(Value)
+		Library.ShowCustomCursor = Value
+	end,
+})
+if Window.SetAlwaysOnTop then
+	MenuGroup:AddToggle("AlwaysOnTop", {
+		Text = "Always On Top",
+		Default = Window.AlwaysOnTop,
+		Callback = function(Value)
+			Window:SetAlwaysOnTop(Value)
+		end,
+	})
+end
+MenuGroup:AddDropdown("NotificationSide", {
+	Values = { "Left", "Right" },
+	Default = "Right",
+
+	Text = "Notification Side",
+
+	Callback = function(Value)
+		Library:SetNotifySide(Value)
+	end,
+})
+MenuGroup:AddDropdown("DPIDropdown", {
+	Values = { "50%", "75%", "100%", "125%", "150%", "175%", "200%" },
+	Default = "100%",
+
+	Text = "DPI Scale",
+
+	Callback = function(Value)
+		Value = Value:gsub("%%", "")
+		local DPI = tonumber(Value)
+
+		Library:SetDPIScale(DPI)
+	end,
+})
+
+MenuGroup:AddSlider("UICornerSlider", {
+	Text = "Corner Radius",
+	Default = Library.CornerRadius,
+	Min = 0,
+	Max = 20,
+	Rounding = 0,
+	Callback = function(value)
+		Window:SetCornerRadius(value)
+	end
+})
+
+MenuGroup:AddDivider()
+MenuGroup:AddLabel("Menu bind")
+	:AddKeyPicker("MenuKeybind", { Default = "RightShift", NoUI = true, Text = "Menu keybind" })
+
+MenuGroup:AddButton("Unload", function()
 	Library:Unload()
 end)
+
 Library.ToggleKeybind = Options.MenuKeybind
 
+-- Addons:
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
+
 SaveManager:IgnoreThemeSettings()
+
 SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+
 ThemeManager:SetFolder("QenturyHub")
 SaveManager:SetFolder("QenturyHub/MineAMountainRebuild")
 
-do
-	local tab = Tabs.Settings
-	local origRight = tab.AddRightGroupbox
-	if type(origRight) == "function" then
-		tab.AddRightGroupbox = function(self, name, icon)
-			return self:AddLeftGroupbox(name, icon)
-		end
-	end
-	SaveManager:BuildConfigSection(Tabs.Settings)
-	if type(origRight) == "function" then
-		tab.AddRightGroupbox = origRight
-	end
-end
+-- Builds config menu on the right side of the tab
+SaveManager:BuildConfigSection(Tabs.Settings)
 
-if ThemeManager.ApplyToTab then
-	ThemeManager:ApplyToTab(Tabs.Settings)
-end
+-- Builds theme menu on the left side
+ThemeManager:ApplyToTab(Tabs.Settings)
 
-if SaveManager.LoadAutoloadConfig then
-	task.defer(function()
-		pcall(function()
-			SaveManager:LoadAutoloadConfig()
-		end)
-	end)
-end
+SaveManager:LoadAutoloadConfig()
 
 --========================================================
 -- CLEANUP
@@ -6356,6 +6602,8 @@ local function stopFeatures()
 	state.autoFavWeight = false
 	state.autoFavValue = false
 	state.autoBuyBomb = false
+	state.runeDrop = false
+	state.runePlace = false
 	Boulders.stop()
 	Drop.stop()
 	Fav.stop()
