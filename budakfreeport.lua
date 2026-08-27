@@ -1,4 +1,4 @@
---========================================================
+	--========================================================
 -- QENTURY HUB (rebuild)
 -- Shells/rebuild/ / UI: deividcomsono Obsidian
 -- Phase 1: Main + Shop (Bombs + Radars) + Settings
@@ -19,8 +19,8 @@ end)
 
 pcall(function()
 	local hui = gethui and gethui() or game:GetService("CoreGui")
-	for _, old in ipairs(hui:GetChildren()) do
-		if old.Name == "Obsidian" then
+	for _, old in ipairs(hui:GetDescendants()) do
+		if old:IsA("ScreenGui") and old.Name == "Obsidian" then
 			old:Destroy()
 		end
 	end
@@ -242,8 +242,10 @@ local state = {
 	autoFavLuck = false,
 	autoFavRarity = false,
 	autoFavWeight = false,
+	autoFavValue = false,
 	favLuckMin = 4,
 	favMinWeight = 4,
+	favMinValue = 1e12,
 	favRarityTiers = { [5] = true, [6] = true }, -- L + M default
 	favThread = nil,
 	-- Shop / Bombs
@@ -258,6 +260,16 @@ local state = {
 	destroyLowRarity = false,
 	destroyMaxTier = 6,
 	destroyThread = nil,
+	-- Drop Rune
+	runeDrop = false,
+	runeDropSel = nil,
+	runeDropCount = 1,
+	runeDropThread = nil,
+	-- Plot Place Rune
+	runePlace = false,
+	runePlaceSel = nil,
+	runePlaceCount = 1,
+	placeRuneThread = nil,
 	-- Shop / Radars
 	autoBuyRadar = false,
 	radarTargets = { CrystalRadar = true },
@@ -2872,6 +2884,17 @@ do
 			return
 		end
 		state.breakThread = task.spawn(function()
+			-- teleport ke tengah gunung dulu sebelum cari boulder
+			pcall(function()
+				local cx = workspace:GetAttribute("MountainCenterX")
+				local cz = workspace:GetAttribute("MountainCenterZ")
+				local base = workspace:GetAttribute("MountainBaseY") or 0
+				local peak = workspace:GetAttribute("MountainPeakY") or (base + 100)
+				if typeof(cx) == "number" and typeof(cz) == "number" then
+					local goal = Vector3.new(cx, base + (peak - base) * 0.5, cz)
+					steppedTeleport(goal, 4)
+				end
+			end)
 			while state.autoBreak and not Library.Unloaded do
 				local m = Boulders.nearest()
 				if not state.autoBreak then
@@ -2947,14 +2970,14 @@ do
 							end
 							task.wait(0.3)
 						end
-						if state.autoRejoin then
-							Library:Notify({
-								Title = "Auto Rejoin",
-								Description = "Farm clear / rejoining?",
-								Time = 2,
-							})
-							task.wait(0.35)
-							-- same as Server.rejoin (inline - Server local defined later)
+					if state.autoRejoin then
+						Library:Notify({
+							Title = "Auto Rejoin",
+							Description = "Farm clear / rejoining in 5s?",
+							Time = 3,
+						})
+						task.wait(5)
+						-- same as Server.rejoin (inline - Server local defined later)
 							local ok, err = pcall(function()
 								local placeId = game.PlaceId
 								local jobId = game.JobId
@@ -3348,6 +3371,276 @@ do
 end
 
 --========================================================
+-- DROP RUNE (equip + CrystalDropRequest -> DroppedRunes)
+--========================================================
+do
+	local RUNE_MAP = {
+		["Luck Rune"] = "LuckRune",
+		["Haste Rune"] = "HasteRune",
+		["Storm Rune"] = "StormRune",
+		["Fortune Rune"] = "FortuneRune",
+		["Detonation Rune"] = "DetonationRune",
+		["Preservation Rune"] = "PreservationRune",
+		["Weight Rune"] = "WeightRune",
+		["Excavator Rune"] = "ExcavatorRune",
+		["Warmth Rune"] = "WarmthRune",
+		["Colossus Rune"] = "ColossusRune",
+	}
+
+	local function runeTools()
+		local tools = {}
+		local function scan(c)
+			if not c then
+				return
+			end
+			for _, t in ipairs(c:GetChildren()) do
+				if t:IsA("Tool") and type(t:GetAttribute("RuneId")) == "string" then
+					tools[#tools + 1] = t
+				end
+			end
+		end
+		scan(LP:FindFirstChildOfClass("Backpack"))
+		scan(LP.Character)
+		return tools
+	end
+
+	state.DropRune = state.DropRune or {}
+	state.DropRune.map = RUNE_MAP
+
+	function state.DropRune.stop()
+		state.runeDrop = false
+	end
+
+	function state.DropRune.start()
+		if state.runeDropThread then
+			return
+		end
+		state.runeDrop = true
+		state.runeDropThread = task.spawn(function()
+			local ok, err = pcall(function()
+				local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+				local budget = math.max(1, tonumber(state.runeDropCount) or 1)
+				local sel = state.runeDropSel
+				local dropped = 0
+				local seen = {}
+				local ids = {}
+				for _, t in ipairs(runeTools()) do
+					local id = t:GetAttribute("RuneId")
+					if type(id) == "string" and (sel == nil or id == sel) and not seen[id] then
+						seen[id] = true
+						ids[#ids + 1] = id
+					end
+				end
+				for _, id in ipairs(ids) do
+					if not state.runeDrop or Library.Unloaded then
+						break
+					end
+					local tool
+					for _, t in ipairs(runeTools()) do
+						if t:GetAttribute("RuneId") == id then
+							tool = t
+							break
+						end
+					end
+					if not tool or not hum then
+						continue
+					end
+				pcall(function()
+					hum:EquipTool(tool)
+				end)
+				task.wait(0.25)
+				local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+				local dr = remotes and remotes:FindFirstChild("CrystalDropRequest")
+				if not dr then
+					continue
+				end
+				local name = tool.Name
+				for i = 1, budget do
+					if not state.runeDrop or Library.Unloaded then
+						break
+					end
+					pcall(function()
+						dr:FireServer(name)
+					end)
+					dropped = dropped + 1
+					task.wait(0.15)
+				end
+				end
+				state.runeDrop = false
+				pcall(function()
+					if Toggles.RuneDrop then
+						Toggles.RuneDrop:SetValue(false)
+					end
+				end)
+				if dropped > 0 then
+					Library:Notify({
+						Title = "Drop Rune",
+						Description = string.format("dropped %s", tostring(dropped)),
+						Time = 2,
+					})
+				end
+			end)
+			if not ok then
+				warn("[DropRune] " .. tostring(err))
+				state.runeDrop = false
+				pcall(function()
+					if Toggles.RuneDrop then
+						Toggles.RuneDrop:SetValue(false)
+					end
+				end)
+			end
+			state.runeDropThread = nil
+		end)
+	end
+end
+
+--========================================================
+-- PLOT PLACE RUNE (live plot detect + TP if far + PlotPlaceRequest)
+--========================================================
+do
+	local function ownPlot()
+		local pl = workspace:FindFirstChild("Things") and workspace.Things:FindFirstChild("Plots") and workspace.Things.Plots:FindFirstChild("Slots")
+		local slots = pl
+		if not slots then
+			return nil, nil
+		end
+		for _, m in ipairs(slots:GetChildren()) do
+			if m:IsA("Model") and m.Name == LP.Name then
+				local r = m:FindFirstChild("Region")
+				return m, (r and r:IsA("BasePart")) and r or nil
+			end
+		end
+		return nil, nil
+	end
+
+	local function nearPlot(region)
+		local hrp = getHRP()
+		if not hrp or not region then
+			return false
+		end
+		local localPos = region.CFrame:PointToObjectSpace(hrp.Position)
+		local half = region.Size * 0.5
+		return math.abs(localPos.X) <= half.X + 3 and math.abs(localPos.Z) <= half.Z + 3
+	end
+
+	state.PlotPlace = state.PlotPlace or {}
+
+	function state.PlotPlace.stop()
+		state.runePlace = false
+	end
+
+	function state.PlotPlace.start()
+		if state.placeRuneThread then
+			return
+		end
+		local runeToolsForPlace = function()
+			local tools = {}
+			local function scan(c)
+				if not c then
+					return
+				end
+				for _, t in ipairs(c:GetChildren()) do
+					if t:IsA("Tool") and type(t:GetAttribute("RuneId")) == "string" then
+						tools[#tools + 1] = t
+					end
+				end
+			end
+			scan(LP:FindFirstChildOfClass("Backpack"))
+			scan(LP.Character)
+			return tools
+		end
+		state.runePlace = true
+		state.placeRuneThread = task.spawn(function()
+			local ok, err = pcall(function()
+				local count = math.max(1, tonumber(state.runePlaceCount) or 1)
+				local sel = state.runePlaceSel
+				local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+				local dr = game:GetService("ReplicatedStorage").Remotes:FindFirstChild("PlotPlaceRequest")
+				if not dr or not hum then
+					return
+				end
+				local seen = {}
+				local ids = {}
+				for _, t in ipairs(runeToolsForPlace()) do
+					local id = t:GetAttribute("RuneId")
+					if type(id) == "string" and (sel == nil or id == sel) and not seen[id] then
+						seen[id] = true
+						ids[#ids + 1] = id
+					end
+				end
+				local placed = 0
+				for _, id in ipairs(ids) do
+					if not state.runePlace or Library.Unloaded then
+						break
+					end
+					local tool
+					for _, t in ipairs(runeToolsForPlace()) do
+						if t:GetAttribute("RuneId") == id then
+							tool = t
+							break
+						end
+					end
+					if not tool then
+						continue
+					end
+					local plot, region = ownPlot()
+					if not plot or not region then
+						continue
+					end
+					-- TP near plot if far (plot shifts per server)
+					if not nearPlot(region) then
+						steppedTeleport(region.Position, 4)
+						task.wait(0.4)
+					end
+					pcall(function()
+						hum:EquipTool(tool)
+					end)
+					task.wait(0.4)
+					local name = tool.Name
+					for i = 1, count do
+						if not state.runePlace or Library.Unloaded then
+							break
+						end
+						local _, reg = ownPlot()
+						if not reg then
+							break
+						end
+						pcall(function()
+							dr:FireServer(name, reg.Position, 0, tool)
+						end)
+						placed = placed + 1
+						task.wait(0.2)
+					end
+				end
+				state.runePlace = false
+				pcall(function()
+					if Toggles.RunePlace then
+						Toggles.RunePlace:SetValue(false)
+					end
+				end)
+				if placed > 0 then
+					Library:Notify({
+						Title = "Place Rune",
+						Description = string.format("placed %s", tostring(placed)),
+						Time = 2,
+					})
+				end
+			end)
+			if not ok then
+				warn("[PlotPlace] " .. tostring(err))
+				state.runePlace = false
+				pcall(function()
+					if Toggles.RunePlace then
+						Toggles.RunePlace:SetValue(false)
+					end
+				end)
+			end
+			state.placeRuneThread = nil
+		end)
+	end
+end
+
+--========================================================
 -- FAVORITE (ToggleFavorite / server-authoritative / v4.2.3)
 --========================================================
 local Fav = {}
@@ -3460,9 +3753,10 @@ do
 	function Fav.statusText()
 		rebuildFavIndex()
 		local tools = getCrystalTools()
-		local favN, matchLuck, matchRar, matchWt = 0, 0, 0, 0
+		local favN, matchLuck, matchRar, matchWt, matchVal = 0, 0, 0, 0, 0
 		local minPct = tonumber(state.favLuckMin) or 4
 		local minWt = tonumber(state.favMinWeight) or 4
+		local minVal = tonumber(state.favMinValue) or 1e12
 		for _, t in ipairs(tools) do
 			if isToolFavorited(t) then
 				favN += 1
@@ -3478,15 +3772,19 @@ do
 			if wtRank and wtRank >= minWt then
 				matchWt += 1
 			end
+			if (tonumber(t:GetAttribute("Value")) or 0) >= minVal then
+				matchVal += 1
+			end
 		end
 		return string.format(
-			"Bag: %d / Fav: %d\nLuck ? %.0f%%: %d / Rarity: %d / Weight: %d",
+			"Bag: %d / Fav: %d\nLuck ? %.0f%%: %d / Rarity: %d / Weight: %d / Value: %d",
 			#tools,
 			favN,
 			minPct,
 			matchLuck,
 			matchRar,
-			matchWt
+			matchWt,
+			matchVal
 		)
 	end
 
@@ -3526,6 +3824,11 @@ do
 				return true
 			end
 		end
+		if state.autoFavValue then
+			if (tonumber(tool:GetAttribute("Value")) or 0) >= (tonumber(state.favMinValue) or 1e12) then
+				return true
+			end
+		end
 		return false
 	end
 
@@ -3534,7 +3837,7 @@ do
 		local minPct = tonumber(state.favLuckMin) or 4
 		local n = 0
 		for _, tool in ipairs(getCrystalTools()) do
-			if Library.Unloaded or not (state.autoFavLuck or state.autoFavRarity or state.autoFavWeight) then
+			if Library.Unloaded or not (state.autoFavLuck or state.autoFavRarity or state.autoFavWeight or state.autoFavValue) then
 				break
 			end
 			if wantsFavorite(tool, minPct) and not isToolFavorited(tool) then
@@ -3555,7 +3858,7 @@ do
 		end
 		state.favThread = task.spawn(function()
 			pcall(runPass)
-			while (state.autoFavLuck or state.autoFavRarity or state.autoFavWeight) and not Library.Unloaded do
+			while (state.autoFavLuck or state.autoFavRarity or state.autoFavWeight or state.autoFavValue) and not Library.Unloaded do
 				pcall(runPass)
 				task.wait(0.75)
 			end
@@ -3567,6 +3870,7 @@ do
 		state.autoFavLuck = false
 		state.autoFavRarity = false
 		state.autoFavWeight = false
+		state.autoFavValue = false
 	end
 
 	function Fav.favoriteAll()
@@ -4742,12 +5046,12 @@ local Tabs = {
 	Main = Window:AddTab("Main", "gem", "Auto mine + ESP + TP"),
 	-- Runes + Boulders in one tab; sections collapsed by default
 	RuneBoulder = Window:AddTab("Rune & Boulder", "boxes", "Runes + Boulders"),
-	Drop = Window:AddTab("Drop", "minus", "Drop crystals from bag"),
+	Drop = Window:AddTab("Drop & Place", "minus", "Drop / place runes"),
 	Favorite = Window:AddTab("Favorite", "star", "Auto favorite crystals"),
 	Shop = Window:AddTab("Shop", "shopping-cart", "Bombs & more"),
 	Server = Window:AddTab("Server", "server", "Players / hop / rejoin"),
 	Misc = Window:AddTab("Misc", "shield", "Godmode / fall / ragdoll"),
-	Settings = Window:AddTab("Settings", "settings", "UI"),
+	Settings = Window:AddTab("UI Settings", "settings", "UI"),
 }
 
 local Main = Tabs.Main:AddLeftGroupbox("Main", "gem")
@@ -4764,7 +5068,17 @@ local function forceFullWidthTabs()
 			if ch:IsA("ScrollingFrame") then
 				local sx = ch.Size.X.Scale
 				if sx > 0.4 and sx < 0.6 then
-					table.insert(halves, ch)
+					-- skip Settings panes: keep Save Manager (left) + Theme Manager (right) split
+					local isSettings = false
+					for _, lbl in ipairs(ch:GetDescendants()) do
+						if lbl:IsA("TextLabel") and (lbl.Text == "Configuration" or lbl.Text == "Themes") then
+							isSettings = true
+							break
+						end
+					end
+					if not isSettings then
+						table.insert(halves, ch)
+					end
 				end
 			end
 		end
@@ -4918,14 +5232,20 @@ Main:AddDropdown("MineMinLuck", {
 
 Main:AddDropdown("MineMinValue", {
 	Text = "Min Value (Auto-Mine)",
-	Values = { "0", "1b", "2b", "3b", "4b", "5b" },
+	Values = { "0", "500b", "1t", "5t", "10t" },
 	Default = "0",
 	Multi = false,
 	Tooltip = "Skip crystals worth less than this (Auto Pickup + TP + Farm). 0 = all.",
 	Callback = function(v)
 		local s = tostring(v or "0"):lower()
-		local n = tonumber((s:gsub("b", ""))) or 0
-		state.mineMinValue = s:find("b") and n * 1e9 or n
+		local n = tonumber((s:gsub("[bt]", ""))) or 0
+		if s:find("t") then
+			state.mineMinValue = n * 1e12
+		elseif s:find("b") then
+			state.mineMinValue = n * 1e9
+		else
+			state.mineMinValue = n
+		end
 	end,
 })
 
@@ -5017,6 +5337,8 @@ Main:AddToggle("CrystalESP", {
 		end
 	end,
 })
+
+Main:AddDivider()
 
 Main:AddSlider("EspScale", {
 	Text = "ESP text scale",
@@ -5688,11 +6010,11 @@ end
 FavBox:AddSlider("FavLuckMin", {
 	Text = "Min Luck %",
 	Default = 4,
-	Min = 1,
-	Max = 500,
+	Min = 0,
+	Max = 5000,
 	Rounding = 0,
 	Suffix = "%",
-	Tooltip = "Auto-favorite crystals with luck ? this percent (1-500).",
+	Tooltip = "Auto-favorite crystals with luck >= this percent (0-5000).",
 	Callback = function(v)
 		state.favLuckMin = v
 		refreshFavStatus()
@@ -5709,7 +6031,7 @@ FavBox:AddToggle("AutoFavLuck", {
 			Fav.start()
 			Library:Notify({ Title = "Favorite", Description = "Luck auto ON", Time = 2 })
 		else
-			if not (state.autoFavRarity or state.autoFavWeight) then
+			if not (state.autoFavRarity or state.autoFavWeight or state.autoFavValue) then
 				Fav.stop()
 			end
 			Library:Notify({ Title = "Favorite", Description = "Luck auto OFF", Time = 2 })
@@ -5744,7 +6066,7 @@ FavBox:AddToggle("AutoFavRarity", {
 			Fav.start()
 			Library:Notify({ Title = "Favorite", Description = "Rarity auto ON", Time = 2 })
 		else
-			if not (state.autoFavLuck or state.autoFavWeight) then
+			if not (state.autoFavLuck or state.autoFavWeight or state.autoFavValue) then
 				Fav.stop()
 			end
 			Library:Notify({ Title = "Favorite", Description = "Rarity auto OFF", Time = 2 })
@@ -5779,10 +6101,44 @@ FavBox:AddToggle("AutoFavWeight", {
 			Fav.start()
 			Library:Notify({ Title = "Favorite", Description = "Weight auto ON", Time = 2 })
 		else
-			if not (state.autoFavLuck or state.autoFavRarity) then
+			if not (state.autoFavLuck or state.autoFavRarity or state.autoFavValue) then
 				Fav.stop()
 			end
 			Library:Notify({ Title = "Favorite", Description = "Weight auto OFF", Time = 2 })
+		end
+		refreshFavStatus()
+	end,
+})
+
+FavBox:AddSlider("FavValueMin", {
+	Text = "Min Value (Auto-Fav)",
+	Default = 1,
+	Min = 1,
+	Max = 500,
+	Rounding = 0,
+	Suffix = "T $",
+	Tooltip = "Favorite crystals worth at least this many trillion (1-500T).",
+	Callback = function(v)
+		state.favMinValue = v * 1e12
+		refreshFavStatus()
+	end,
+})
+
+FavBox:AddToggle("AutoFavValue", {
+	Text = "Auto Favorite by Value",
+	Default = false,
+	Tooltip = "Loop: favorite bag tools worth >= min value.",
+	Callback = function(v)
+		state.autoFavValue = v
+		if v then
+			state.favMinValue = (tonumber(Options.FavValueMin and Options.FavValueMin.Value) or 1) * 1e12
+			Fav.start()
+			Library:Notify({ Title = "Favorite", Description = "Value auto ON", Time = 2 })
+		else
+			if not (state.autoFavLuck or state.autoFavRarity or state.autoFavWeight) then
+				Fav.stop()
+			end
+			Library:Notify({ Title = "Favorite", Description = "Value auto OFF", Time = 2 })
 		end
 		refreshFavStatus()
 	end,
@@ -5818,7 +6174,7 @@ end)
 --========================================================
 -- DROP TAB
 --========================================================
-local DropBox = Tabs.Drop:AddLeftGroupbox("Drop", "minus")
+local DropBox = Tabs.Drop:AddLeftGroupbox("Crystal", "gem", true, true)
 
 DropBox:AddLabel("CrystalDropRequest / not sell / skip Favorited", true)
 
@@ -5874,6 +6230,77 @@ DropBox:AddToggle("DropAll", {
 			Library:Notify({ Title = "Drop All", Description = "OFF", Time = 2 })
 		end
 		state.refreshDropStatus()
+	end,
+})
+
+local RuneBox = Tabs.Drop:AddLeftGroupbox("Rune", "gem", true, true)
+RuneBox:AddDropdown("RuneDropSelect", {
+	Text = "Rune to drop",
+	Values = { "All", "Luck Rune", "Haste Rune", "Storm Rune", "Fortune Rune", "Detonation Rune", "Preservation Rune", "Weight Rune", "Excavator Rune", "Warmth Rune", "Colossus Rune" },
+	Default = "All",
+	Multi = false,
+	Tooltip = "Which rune type to drop. All = every rune in backpack.",
+	Callback = function(v)
+		state.runeDropSel = state.DropRune and state.DropRune.map and state.DropRune.map[v]
+	end,
+})
+RuneBox:AddSlider("RuneDropCount", {
+	Text = "Runes to drop",
+	Default = 1,
+	Min = 1,
+	Max = 500,
+	Rounding = 0,
+	Tooltip = "Drop this many of each selected rune (1 fire = 1 rune), then auto-stop. All = N per rune type.",
+	Callback = function(v)
+		state.runeDropCount = v
+	end,
+})
+RuneBox:AddToggle("RuneDrop", {
+	Text = "Drop Runes (auto)",
+	Default = false,
+	Tooltip = "Drop RuneDropCount of each selected rune (All = N per type), then auto-stop.",
+	Callback = function(v)
+		if v then
+			state.DropRune.start()
+		else
+			state.DropRune.stop()
+		end
+	end,
+})
+
+local PlaceBox = Tabs.Drop:AddLeftGroupbox("Place", "gem", true, true)
+PlaceBox:AddLabel("Place runes to your plot (live object detect + TP if far)", true)
+PlaceBox:AddDropdown("RunePlaceSelect", {
+	Text = "Rune to place",
+	Values = { "All", "Luck Rune", "Haste Rune", "Storm Rune", "Fortune Rune", "Detonation Rune", "Preservation Rune", "Weight Rune", "Excavator Rune", "Warmth Rune", "Colossus Rune" },
+	Default = "All",
+	Multi = false,
+	Tooltip = "Which rune type to place. All = N of each type.",
+	Callback = function(v)
+		state.runePlaceSel = state.DropRune and state.DropRune.map and state.DropRune.map[v]
+	end,
+})
+PlaceBox:AddSlider("RunePlaceCount", {
+	Text = "Runes to place",
+	Default = 1,
+	Min = 1,
+	Max = 500,
+	Rounding = 0,
+	Tooltip = "Place this many of each selected rune, then auto-stop.",
+	Callback = function(v)
+		state.runePlaceCount = v
+	end,
+})
+PlaceBox:AddToggle("RunePlace", {
+	Text = "Place Runes (auto)",
+	Default = false,
+	Tooltip = "Auto-place runes to your plot (PlotPlaceRequest). Detects plot live, TP if far, auto-stop.",
+	Callback = function(v)
+		if v then
+			state.PlotPlace.start()
+		else
+			state.PlotPlace.stop()
+		end
 	end,
 })
 
@@ -6048,51 +6475,100 @@ ServerAct:AddButton({
 })
 
 --========================================================
--- SETTINGS (minimal)
+-- UI SETTINGS (Obsidian Example.lua style)
 --========================================================
-local Menu = Tabs.Settings:AddLeftGroupbox("Menu", "wrench")
-Menu:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
-	Default = "RightShift",
-	NoUI = true,
-	Text = "Menu keybind",
+local MenuGroup = Tabs.Settings:AddGroupbox({
+	Side = "Left",
+	Name = "Menu",
+	IconName = "wrench"
 })
-Menu:AddButton("Unload", function()
+
+MenuGroup:AddToggle("KeybindMenuOpen", {
+	Default = Library.KeybindFrame.Visible,
+	Text = "Open Keybind Menu",
+	Callback = function(value)
+		Library.KeybindFrame.Visible = value
+	end,
+})
+MenuGroup:AddToggle("ShowCustomCursor", {
+	Text = "Custom Cursor",
+	Default = Library.ShowCustomCursor,
+	Callback = function(Value)
+		Library.ShowCustomCursor = Value
+	end,
+})
+if Window.SetAlwaysOnTop then
+	MenuGroup:AddToggle("AlwaysOnTop", {
+		Text = "Always On Top",
+		Default = Window.AlwaysOnTop,
+		Callback = function(Value)
+			Window:SetAlwaysOnTop(Value)
+		end,
+	})
+end
+MenuGroup:AddDropdown("NotificationSide", {
+	Values = { "Left", "Right" },
+	Default = "Right",
+
+	Text = "Notification Side",
+
+	Callback = function(Value)
+		Library:SetNotifySide(Value)
+	end,
+})
+MenuGroup:AddDropdown("DPIDropdown", {
+	Values = { "50%", "75%", "100%", "125%", "150%", "175%", "200%" },
+	Default = "100%",
+
+	Text = "DPI Scale",
+
+	Callback = function(Value)
+		Value = Value:gsub("%%", "")
+		local DPI = tonumber(Value)
+
+		Library:SetDPIScale(DPI)
+	end,
+})
+
+MenuGroup:AddSlider("UICornerSlider", {
+	Text = "Corner Radius",
+	Default = Library.CornerRadius,
+	Min = 0,
+	Max = 20,
+	Rounding = 0,
+	Callback = function(value)
+		Window:SetCornerRadius(value)
+	end
+})
+
+MenuGroup:AddDivider()
+MenuGroup:AddLabel("Menu bind")
+	:AddKeyPicker("MenuKeybind", { Default = "RightShift", NoUI = true, Text = "Menu keybind" })
+
+MenuGroup:AddButton("Unload", function()
 	Library:Unload()
 end)
+
 Library.ToggleKeybind = Options.MenuKeybind
 
+-- Addons:
 ThemeManager:SetLibrary(Library)
 SaveManager:SetLibrary(Library)
+
 SaveManager:IgnoreThemeSettings()
+
 SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+
 ThemeManager:SetFolder("QenturyHub")
 SaveManager:SetFolder("QenturyHub/MineAMountainRebuild")
 
-do
-	local tab = Tabs.Settings
-	local origRight = tab.AddRightGroupbox
-	if type(origRight) == "function" then
-		tab.AddRightGroupbox = function(self, name, icon)
-			return self:AddLeftGroupbox(name, icon)
-		end
-	end
-	SaveManager:BuildConfigSection(Tabs.Settings)
-	if type(origRight) == "function" then
-		tab.AddRightGroupbox = origRight
-	end
-end
+-- Builds config menu on the right side of the tab
+SaveManager:BuildConfigSection(Tabs.Settings)
 
-if ThemeManager.ApplyToTab then
-	ThemeManager:ApplyToTab(Tabs.Settings)
-end
+-- Builds theme menu on the left side
+ThemeManager:ApplyToTab(Tabs.Settings)
 
-if SaveManager.LoadAutoloadConfig then
-	task.defer(function()
-		pcall(function()
-			SaveManager:LoadAutoloadConfig()
-		end)
-	end)
-end
+SaveManager:LoadAutoloadConfig()
 
 --========================================================
 -- CLEANUP
@@ -6124,7 +6600,10 @@ local function stopFeatures()
 	state.autoFavLuck = false
 	state.autoFavRarity = false
 	state.autoFavWeight = false
+	state.autoFavValue = false
 	state.autoBuyBomb = false
+	state.runeDrop = false
+	state.runePlace = false
 	Boulders.stop()
 	Drop.stop()
 	Fav.stop()
@@ -6173,8 +6652,14 @@ task.defer(function()
 	pcall(function()
 		local valV = Options.MineMinValue and Options.MineMinValue.Value
 		local s = tostring(valV or "0"):lower()
-		local n = tonumber((s:gsub("b", ""))) or 0
-		state.mineMinValue = s:find("b") and n * 1e9 or n
+		local n = tonumber((s:gsub("[bt]", ""))) or 0
+		if s:find("t") then
+			state.mineMinValue = n * 1e12
+		elseif s:find("b") then
+			state.mineMinValue = n * 1e9
+		else
+			state.mineMinValue = n
+		end
 	end)
 	pcall(function()
 		state.antiAfkInterval = Options.AntiAfkInterval and Options.AntiAfkInterval.Value or 120
@@ -6219,6 +6704,9 @@ task.defer(function()
 	end)
 	pcall(function()
 		state.favMinWeight = sizeLabelToRank(Options.FavWeightSelect and Options.FavWeightSelect.Value) or 4
+	end)
+	pcall(function()
+		state.favMinValue = (tonumber(Options.FavValueMin and Options.FavValueMin.Value) or 1) * 1e12
 	end)
 	pcall(refreshFavStatus)
 	pcall(Upgrades.refreshPrices)
