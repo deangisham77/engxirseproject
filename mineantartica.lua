@@ -57,7 +57,7 @@ local TUNE = {
     tickS = 0.4, -- interval loop vacuum (detik)
     sellTpWait = 1.5, sellWait = 1, -- tunggu sell (detik)
     monEveryS = 5, monTickS = 1, -- refresh monitor (detik)
-    tpStep = 55, tpInstant = 60, tpStepWait = 0.05, -- teleport stepped (stud, stud, detik)
+    tpStep = 25, tpInstant = 60, tpStepWait = 0.1, -- teleport stepped (stud, stud, detik). KECIL = aman kick
     promptRange = 1000, promptRestore = 0.3, -- fire prompt (stud, detik)
 }
 
@@ -553,7 +553,7 @@ MoveBox:AddToggle("Fly", { Text = "Fly (WASD + Space/Ctrl)", Default = false })
 MoveBox:AddSlider("FlySpeed", { Text = "Fly speed", Default = 50, Min = 10, Max = 150, Rounding = 0 })
 MoveBox:AddToggle("Noclip", { Text = "NoClip", Default = false })
 MoveBox:AddToggle("Speed", { Text = "Speed booster", Default = false })
-MoveBox:AddSlider("SpeedVal", { Text = "Speed", Default = 32, Min = 16, Max = 120, Rounding = 0 })
+MoveBox:AddSlider("SpeedVal", { Text = "Speed (risiko kick!)", Default = 32, Min = 16, Max = 120, Rounding = 0 })
 
 pcall(function()
     ThemeManager:SetLibrary(Library)
@@ -755,9 +755,10 @@ task.spawn(function()
 end)
 
 getgenv()._ANT_HUB_DBG = function()
-    return string.format("vacuum=%s teleport=%s autoSell=%s minRar=%d monRar=%d monSort=%s",
+    return string.format("vacuum=%s teleport=%s autoSell=%s minRar=%d monRar=%d monSort=%s tick=%ds lalu target=%s",
         tostring(Cfg.vacuum), tostring(Cfg.teleport), tostring(Cfg.autoSell),
-        Cfg.minRarity, Cfg.monRarity, tostring(Cfg.monSort))
+        Cfg.minRarity, Cfg.monRarity, tostring(Cfg.monSort),
+        math.floor(os.clock() - (Stat.lastTick or 0)), tostring(Stat.lastTarget or "-"))
 end
 
 local function refreshMonitor()
@@ -799,7 +800,7 @@ local function refreshMonitor()
             local txt = string.format('%d. <font color="%s">[%s] %s</font> %s +%s %s %.0fm', i,
                 RARITY_HEX[rar] or "#FFFFFF", badge,
                 r.m:GetAttribute("GemName") or r.m.Name, fmtMoney(r.value),
-                string.format("%.1f%%", r.luck * 100), kg, r.d)
+                string.format("%.1f%%", r.luck), kg, r.d)
             pcall(function()
                 slot.btn:SetText(txt)
                 slot.btn:SetVisible(true)
@@ -830,6 +831,7 @@ end)
 task.spawn(function()
     while alive and (RL_STATE == nil or RL_STATE.alive()) do
         local ok, err = pcall(function()
+            Stat.lastTick = os.clock()
             local h = getHRP()
             if not h then
                 return
@@ -843,8 +845,8 @@ task.spawn(function()
                 return
             end
             local myPos = h.Position
-            local best, bestD, bestP, bestPos = nil, math.huge, nil, nil
-            local function consider(m)
+            local best, bestD, bestP, bestPos, bestScore = nil, math.huge, nil, nil, math.huge
+            local function consider(m, w)
                 if (RARITY_RANK[m:GetAttribute("Rarity")] or 1) < Cfg.minRarity then
                     return
                 end
@@ -859,22 +861,20 @@ task.spawn(function()
                     local pos = claimPos(m, pr)
                     if pos then
                         local d = (pos - myPos).Magnitude
-                        if d < bestD then
-                            best, bestD, bestP, bestPos = m, d, pr, pos
+                        local score = d * (w or 1)
+                        if score < bestScore then
+                            best, bestD, bestP, bestPos, bestScore = m, d, pr, pos, score
                         end
                     end
                 end
             end
-            -- DroppedGems dulu (free-for-all, bisa despawn), tanpa filter Owner
+            -- semua pool dinilai, terdekat menang (drop bisa despawn: bobot jarak 0.8x)
             for _, m in ipairs(DG:GetChildren()) do
-                consider(m)
+                consider(m, 0.8)
             end
-            -- lalu semua Freed di SpawnedGems (tak ada pemilik = bebas ambil)
-            if not best then
-                for _, m in ipairs(SG:GetChildren()) do
-                    if m:GetAttribute("Freed") then
-                        consider(m)
-                    end
+            for _, m in ipairs(SG:GetChildren()) do
+                if m:GetAttribute("Freed") then
+                    consider(m, 1)
                 end
             end
             if not best then
@@ -889,6 +889,11 @@ task.spawn(function()
                 return
             end
             Stat.swept = false
+            Stat.lastTarget = best.Name .. " " .. math.floor(bestD) .. "st"
+            if os.clock() - (Stat.lastBeat or 0) > 30 then
+                Stat.lastBeat = os.clock()
+                print("[hub] kerja: " .. Stat.lastTarget)
+            end
             local uid = best:GetAttribute("Uid") or best.Name
             if os.clock() - (Stat.tryAt[uid] or 0) < TUNE.retryS then
                 return
