@@ -53,7 +53,7 @@ local RARITY_C3 = {
     Legendary = Color3.fromRGB(255, 170, 45), Mythic = Color3.fromRGB(255, 70, 70),
     Exotic = Color3.fromRGB(255, 216, 74),
 }
-local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRarity = 1, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9, antiAfk = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic" } }
+local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRarity = 1, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9, antiAfk = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic" }, antiLag = false, noRender = false }
 local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
 -- angka tuning satu tempat (jarak server: prompt ~15-17, dig <12)
@@ -384,6 +384,36 @@ function Server.resetCharacter()
         end
     end)
 end
+function Server.peak()
+    local h = getHRP()
+    if not h then
+        return false, "no hrp"
+    end
+    local rp = RaycastParams.new()
+    rp.FilterType = Enum.RaycastFilterType.Include
+    rp.FilterDescendantsInstances = { workspace.Terrain }
+    local cx, cz = h.Position.X, h.Position.Z
+    local top = h.Position.Y + 1500
+    local bestPos, bestY
+    local x = cx - 400
+    while x <= cx + 400 do
+        local z = cz - 400
+        while z <= cz + 400 do
+            local hit = workspace:Raycast(Vector3.new(x, top, z), Vector3.new(0, -4000, 0), rp)
+            if hit and (not bestY or hit.Position.Y > bestY) then
+                bestY = hit.Position.Y
+                bestPos = hit.Position
+            end
+            z += 100
+        end
+        x += 100
+    end
+    if not bestPos then
+        return false, "no peak"
+    end
+    tpTo(h, CFrame.new(bestPos + Vector3.new(0, 6, 0)))
+    return true, "Y=" .. math.floor(bestY)
+end
 
 Stat.skipPick = Stat.skipPick or {}
 Stat.skipBomb = Stat.skipBomb or {}
@@ -448,7 +478,46 @@ local function buyBombs()
     return false
 end
 
-local flyBV, flyBG, flyConn
+local flyBV, flyBG, flyConn, flyGui
+local flyUp, flyDn = false, false
+-- grafik hemat (simpan setting asli buat restore)
+local gfxSaved
+local function setAntiLag(on)
+    local L = game:GetService("Lighting")
+    if on then
+        if not gfxSaved then
+            gfxSaved = { shadows = L.GlobalShadows, decor = workspace.Terrain.Decoration, fx = {} }
+            for _, f in ipairs(L:GetChildren()) do
+                if f:IsA("PostEffect") then
+                    gfxSaved.fx[f] = f.Enabled
+                end
+            end
+        end
+        L.GlobalShadows = false
+        pcall(function() workspace.Terrain.Decoration = false end)
+        for _, f in ipairs(L:GetChildren()) do
+            if f:IsA("PostEffect") then
+                f.Enabled = false
+            end
+        end
+    elseif gfxSaved then
+        L.GlobalShadows = gfxSaved.shadows
+        pcall(function() workspace.Terrain.Decoration = gfxSaved.decor end)
+        for f, en in pairs(gfxSaved.fx) do
+            if f.Parent then
+                f.Enabled = en
+            end
+        end
+        gfxSaved = nil
+    end
+end
+
+local function setNoRender(on)
+    pcall(function()
+        game:GetService("RunService"):Set3dRenderingEnabled(not on)
+    end)
+end
+
 local function stopFly()
     if flyConn then
         pcall(function() flyConn:Disconnect() end)
@@ -462,11 +531,56 @@ local function stopFly()
         pcall(function() flyBG:Destroy() end)
         flyBG = nil
     end
+    if flyGui then
+        pcall(function() flyGui:Destroy() end)
+        flyGui = nil
+    end
+    flyUp, flyDn = false, false
     local char = LP.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if hum then
         hum.PlatformStand = false
     end
+end
+
+-- tombol ▲▼ HP (mouse/keyboard tetap jalan)
+local function flyButtons()
+    if not UIS.TouchEnabled then
+        return
+    end
+    local pg = LP:FindFirstChild("PlayerGui")
+    if not pg or flyGui then
+        return
+    end
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "ANT_Fly"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    local function mk(txt, x)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.fromOffset(64, 64)
+        b.Position = UDim2.new(1, x, 1, -160)
+        b.AnchorPoint = Vector2.new(1, 1)
+        b.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+        b.BackgroundTransparency = 0.3
+        b.TextColor3 = Color3.new(1, 1, 1)
+        b.Font = Enum.Font.GothamBlack
+        b.TextSize = 28
+        b.Text = txt
+        b.AutoButtonColor = true
+        b.Parent = gui
+        return b
+    end
+    local up = mk("▲", -84)
+    local dn = mk("▼", -12)
+    up.MouseButton1Down:Connect(function() flyUp = true end)
+    up.MouseButton1Up:Connect(function() flyUp = false end)
+    up.MouseLeave:Connect(function() flyUp = false end)
+    dn.MouseButton1Down:Connect(function() flyDn = true end)
+    dn.MouseButton1Up:Connect(function() flyDn = false end)
+    dn.MouseLeave:Connect(function() flyDn = false end)
+    gui.Parent = pg
+    flyGui = gui
 end
 
 local function restoreCollide()
@@ -492,9 +606,13 @@ getgenv()._ANT_HUB_UNLOAD = function()
     Cfg.speed = false
     Cfg.antiAfk = false
     Cfg.esp = false
+    Cfg.antiLag = false
+    Cfg.noRender = false
     pcall(stopFly)
     pcall(restoreCollide)
     pcall(setAfk, false)
+    pcall(setAntiLag, false)
+    pcall(setNoRender, false)
     pcall(espClear)
     pcall(function()
         local char = LP.Character
@@ -559,32 +677,32 @@ task.spawn(function()
                 flyBV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
                 flyBV.Velocity = Vector3.zero
                 flyBV.Parent = h
+                flyButtons()
                 flyConn = RunS.Heartbeat:Connect(function()
                     if not Cfg.fly or flyBV == nil or flyBG == nil then
                         return
                     end
-                    local h2 = LP.Character and LP.Character:FindFirstChild("HumanoidRootPart")
+                    local char2 = LP.Character
+                    local h2 = char2 and char2:FindFirstChild("HumanoidRootPart")
+                    local hum2 = char2 and char2:FindFirstChildOfClass("Humanoid")
                     if not h2 then
                         return
                     end
                     local cam = workspace.CurrentCamera
+                    -- horizontal: MoveDirection (joystick HP + WASD PC)
                     local move = Vector3.zero
-                    if UIS:IsKeyDown(Enum.KeyCode.W) then
-                        move += cam.CFrame.LookVector
+                    if hum2 then
+                        local md = hum2.MoveDirection
+                        move = Vector3.new(md.X, 0, md.Z)
+                        if move.Magnitude > 1 then
+                            move = move.Unit
+                        end
                     end
-                    if UIS:IsKeyDown(Enum.KeyCode.S) then
-                        move -= cam.CFrame.LookVector
-                    end
-                    if UIS:IsKeyDown(Enum.KeyCode.A) then
-                        move -= cam.CFrame.RightVector
-                    end
-                    if UIS:IsKeyDown(Enum.KeyCode.D) then
-                        move += cam.CFrame.RightVector
-                    end
-                    if UIS:IsKeyDown(Enum.KeyCode.Space) then
+                    -- vertikal: keyboard atau tombol HP
+                    if UIS:IsKeyDown(Enum.KeyCode.Space) or flyUp then
                         move += Vector3.new(0, 1, 0)
                     end
-                    if UIS:IsKeyDown(Enum.KeyCode.LeftControl) then
+                    if UIS:IsKeyDown(Enum.KeyCode.LeftControl) or flyDn then
                         move -= Vector3.new(0, 1, 0)
                     end
                     if move.Magnitude > 0 then
@@ -797,6 +915,10 @@ SrvAct:AddButton({ Text = "Go Home", Func = function()
     local ok, err = Server.goHome()
     notify("Go Home", ok and "OK" or tostring(err))
 end })
+SrvAct:AddButton({ Text = "Teleport Peak", Func = function()
+    local ok, msg = Server.peak()
+    notify(ok and "Peak" or "Peak gagal", tostring(msg))
+end })
 SrvAct:AddButton({ Text = "Reset Character", Func = function()
     local ok, err = Server.resetCharacter()
     if not ok then
@@ -805,12 +927,16 @@ SrvAct:AddButton({ Text = "Reset Character", Func = function()
 end })
 
 local MoveBox = MiscTab:AddGroupbox({ Side = "Left", Name = "Movement" })
-MoveBox:AddToggle("Fly", { Text = "Fly (WASD + Space/Ctrl)", Default = false })
+MoveBox:AddToggle("Fly", { Text = "Fly (joystick/analog + ▲▼)", Default = false })
 MoveBox:AddSlider("FlySpeed", { Text = "Fly speed", Default = 50, Min = 10, Max = 150, Rounding = 0 })
 MoveBox:AddToggle("Noclip", { Text = "NoClip", Default = false })
 MoveBox:AddToggle("AntiAfk", { Text = "Anti-AFK", Default = false })
 MoveBox:AddToggle("Speed", { Text = "Speed booster", Default = false })
 MoveBox:AddSlider("SpeedVal", { Text = "Speed (risiko kick!)", Default = 32, Min = 16, Max = 120, Rounding = 0 })
+
+local GfxBox = MiscTab:AddGroupbox({ Side = "Left", Name = "Graphic" })
+GfxBox:AddToggle("AntiLag", { Text = "Anti lag", Default = false })
+GfxBox:AddToggle("NoRender", { Text = "No render (layar hitam, farm jalan)", Default = false })
 
 pcall(function()
     ThemeManager:SetLibrary(Library)
@@ -896,6 +1022,14 @@ Toggles.Noclip:OnChanged(function(v)
     end
 end)
 Toggles.AntiAfk:OnChanged(function(v) Cfg.antiAfk = v end)
+Toggles.AntiLag:OnChanged(function(v)
+    Cfg.antiLag = v
+    setAntiLag(v)
+end)
+Toggles.NoRender:OnChanged(function(v)
+    Cfg.noRender = v
+    setNoRender(v)
+end)
 Options.FlySpeed:OnChanged(function(v) Cfg.flySpeed = math.clamp(math.floor(v), 10, 150) end)
 Options.DPI:OnChanged(function(v)
     pcall(function() Library:SetDPIScale(math.clamp(math.floor(v), 50, 150)) end)
