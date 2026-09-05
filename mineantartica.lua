@@ -28,6 +28,8 @@ local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local UIS = game:GetService("UserInputService")
 local RunS = game:GetService("RunService")
+local TeleportS = game:GetService("TeleportService")
+local HttpS = game:GetService("HttpService")
 local LP = Players.LocalPlayer
 
 local RequestSell = RS:WaitForChild("GemRemotes"):WaitForChild("RequestSell")
@@ -45,12 +47,18 @@ local DG = workspace:WaitForChild("DroppedGems")
 local RARITY_LIST = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic" }
 local RARITY_RANK = { Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Exotic = 7 }
 local RARITY_HEX = { Common = "#CD945C", Uncommon = "#5FDC69", Rare = "#469BFF", Epic = "#B45FFF", Legendary = "#FFAA2D", Mythic = "#FF4646", Exotic = "#FFD84A" }
-local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRarity = 1, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9 }
+local RARITY_C3 = {
+    Common = Color3.fromRGB(205, 148, 92), Uncommon = Color3.fromRGB(95, 220, 105),
+    Rare = Color3.fromRGB(70, 155, 255), Epic = Color3.fromRGB(180, 95, 255),
+    Legendary = Color3.fromRGB(255, 170, 45), Mythic = Color3.fromRGB(255, 70, 70),
+    Exotic = Color3.fromRGB(255, 216, 74),
+}
+local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRarity = 1, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9, antiAfk = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic" } }
 local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
 -- angka tuning satu tempat (jarak server: prompt ~15-17, dig <12)
 local TUNE = {
-    pickupRange = 14, -- fire langsung tanpa teleport (stud, dari part prompt)
+    pickupRange = 20, -- fire langsung tanpa teleport (stud; >18 mungkin ditolak server)
     tpLift = 4, -- melayang di atas mesh (stud)
     settleWait = 0.7, -- tunggu replikasi posisi server pasca-TP (detik)
     retryS = 3, -- jeda coba ulang per crystal (detik)
@@ -203,6 +211,180 @@ local function firePrompt(pr)
     return ok
 end
 
+-- ESP crystal (highlight + billboard), incremental + cap
+local espMarks = {}
+local ESP_CAP = 150
+local function espClear()
+    for m, e in pairs(espMarks) do
+        pcall(function() e.hl:Destroy() end)
+        pcall(function() e.gui:Destroy() end)
+        espMarks[m] = nil
+    end
+end
+local function espRefresh()
+    if not Cfg.esp then
+        espClear()
+        return
+    end
+    local want = {}
+    for _, r in ipairs(Cfg.espRar) do
+        want[r] = true
+    end
+    for m, e in pairs(espMarks) do
+        if not m.Parent or not want[m:GetAttribute("Rarity")] then
+            pcall(function() e.hl:Destroy() end)
+            pcall(function() e.gui:Destroy() end)
+            espMarks[m] = nil
+        end
+    end
+    local h = getHRP()
+    local myPos = h and h.Position or Vector3.zero
+    local cand = {}
+    local function scan(folder)
+        for _, m in ipairs(folder:GetChildren()) do
+            if want[m:GetAttribute("Rarity")] and not espMarks[m] then
+                local mesh = m:FindFirstChild("Mesh_0", true)
+                if mesh then
+                    table.insert(cand, { m = m, mesh = mesh, d = (mesh.Position - myPos).Magnitude })
+                end
+            end
+        end
+    end
+    scan(SG)
+    scan(DG)
+    table.sort(cand, function(a, b) return a.d < b.d end)
+    local marked = 0
+    for _ in pairs(espMarks) do
+        marked += 1
+    end
+    for _, c in ipairs(cand) do
+        if marked >= ESP_CAP then
+            break
+        end
+        local col = RARITY_C3[c.m:GetAttribute("Rarity")] or Color3.new(1, 1, 1)
+        local hl = Instance.new("Highlight")
+        hl.Name = "ANT_ESP"
+        hl.Adornee = c.m
+        hl.DepthMode = Enum.HighlightDepthMode.Occluded
+        hl.FillColor = col
+        hl.OutlineColor = col
+        hl.FillTransparency = 0.75
+        hl.OutlineTransparency = 0.1
+        hl.Parent = c.m
+        local bb = Instance.new("BillboardGui")
+        bb.Name = "ANT_ESPGUI"
+        bb.Adornee = c.mesh
+        bb.AlwaysOnTop = false
+        bb.Size = UDim2.fromOffset(200, 40)
+        bb.StudsOffsetWorldSpace = Vector3.new(0, 3, 0)
+        bb.MaxDistance = 1500
+        bb.Parent = c.m
+        local lb = Instance.new("TextLabel")
+        lb.BackgroundTransparency = 1
+        lb.Size = UDim2.fromScale(1, 1)
+        lb.Font = Enum.Font.GothamBold
+        lb.TextSize = 12
+        lb.TextStrokeTransparency = 0.3
+        lb.TextColor3 = Color3.new(1, 1, 1)
+        lb.RichText = true
+        lb.TextYAlignment = Enum.TextYAlignment.Center
+        local rar = c.m:GetAttribute("Rarity") or "Common"
+        local luck = tonumber(c.m:GetAttribute("Luck")) or 0
+        lb.Text = string.format('<font color="%s">[%s]</font> %s\n%s  +%.1f%%',
+            RARITY_HEX[rar] or "#FFFFFF", rar:sub(1, 1),
+            c.m:GetAttribute("GemName") or c.m.Name,
+            fmtMoney(tonumber(c.m:GetAttribute("Value")) or 0), luck)
+        lb.Parent = bb
+        espMarks[c.m] = { hl = hl, gui = bb }
+        marked += 1
+    end
+end
+
+-- server actions (adaptasi tab Server qentury)
+local Server = {}
+function Server.playerNames()
+    local names = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then
+            table.insert(names, p.Name)
+        end
+    end
+    table.sort(names)
+    if #names == 0 then
+        table.insert(names, "(none)")
+    end
+    return names
+end
+function Server.teleportTo(name)
+    if not name or name == "" or name == "(none)" then
+        return false, "no player"
+    end
+    local p = Players:FindFirstChild(name)
+    if not p or not p.Character then
+        return false, "not found"
+    end
+    local t = p.Character:FindFirstChild("HumanoidRootPart") or p.Character:FindFirstChild("Head")
+    if not t then
+        return false, "no hrp"
+    end
+    local h = getHRP()
+    if not h then
+        return false, "no hrp (kamu)"
+    end
+    tpTo(h, CFrame.new(t.Position + Vector3.new(0, 4, 0)))
+    return true
+end
+function Server.goHome()
+    return pcall(function()
+        RS:WaitForChild("BaseRemotes"):WaitForChild("TeleportHome"):FireServer()
+    end)
+end
+function Server.rejoin()
+    return pcall(function()
+        local placeId = game.PlaceId
+        local jobId = game.JobId
+        if #Players:GetPlayers() <= 1 then
+            LP:Kick("\nRejoining...")
+            task.wait()
+            TeleportS:Teleport(placeId, LP)
+        else
+            TeleportS:TeleportToPlaceInstance(placeId, jobId, LP)
+        end
+    end)
+end
+function Server.hop()
+    return pcall(function()
+        local url = string.format(
+            "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
+            game.PlaceId)
+        local body = game:HttpGet(url)
+        local data = HttpS:JSONDecode(body)
+        if not data or not data.data then
+            error("no servers")
+        end
+        local list = {}
+        for _, s in ipairs(data.data) do
+            if s.playing and s.maxPlayers and s.id and s.playing < s.maxPlayers and s.id ~= game.JobId then
+                table.insert(list, s.id)
+            end
+        end
+        if #list == 0 then
+            error("no free servers")
+        end
+        TeleportS:TeleportToPlaceInstance(game.PlaceId, list[math.random(1, #list)], LP)
+    end)
+end
+function Server.resetCharacter()
+    return pcall(function()
+        local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.Health = 0
+        else
+            error("no humanoid")
+        end
+    end)
+end
+
 Stat.skipPick = Stat.skipPick or {}
 Stat.skipBomb = Stat.skipBomb or {}
 
@@ -308,8 +490,12 @@ getgenv()._ANT_HUB_UNLOAD = function()
     Cfg.fly = false
     Cfg.noclip = false
     Cfg.speed = false
+    Cfg.antiAfk = false
+    Cfg.esp = false
     pcall(stopFly)
     pcall(restoreCollide)
+    pcall(setAfk, false)
+    pcall(espClear)
     pcall(function()
         local char = LP.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -333,6 +519,22 @@ end
 
 -- movement (fly + noclip), pola cake file
 local noclipConn
+local afkConn
+local function setAfk(on)
+    if on and not afkConn then
+        afkConn = LP.Idled:Connect(function()
+            pcall(function()
+                local vim = game:GetService("VirtualInputManager")
+                vim:SendKeyEvent(true, Enum.KeyCode.W, false, game)
+                task.wait(0.1)
+                vim:SendKeyEvent(false, Enum.KeyCode.W, false, game)
+            end)
+        end)
+    elseif not on and afkConn then
+        pcall(function() afkConn:Disconnect() end)
+        afkConn = nil
+    end
+end
 task.spawn(function()
     while alive and (RL_STATE == nil or RL_STATE.alive()) do
         task.wait(0.2)
@@ -425,12 +627,14 @@ task.spawn(function()
                 hum.WalkSpeed = Cfg.speedVal
             end
         end
+        setAfk(Cfg.antiAfk)
     end
     stopFly()
     if noclipConn then
         pcall(function() noclipConn:Disconnect() end)
         noclipConn = nil
     end
+    setAfk(false)
     restoreCollide()
 end)
 
@@ -462,6 +666,7 @@ local Options = Library.Options
 local MainTab = Window:AddTab({ Name = "Main", Icon = "gem", Description = "Vacuum + sell", SingleColumn = true })
 local ShopTab = Window:AddTab({ Name = "Shop", Icon = "shopping-cart", Description = "Auto upgrade", SingleColumn = true })
 local MiscTab = Window:AddTab({ Name = "Misc", Icon = "rocket", Description = "Movement", SingleColumn = true })
+local ServerTab = Window:AddTab({ Name = "Server", Icon = "server", Description = "Players + hop" })
 local SettingsTab = Window:AddTab({ Name = "Setting", Icon = "settings", Description = "UI" })
 
 local FarmBox = MainTab:AddGroupbox({ Side = "Left", Name = "Vacuum" })
@@ -475,6 +680,10 @@ SellBox:AddSlider("SellPct", { Text = "Sell at", Default = 100, Min = 50, Max = 
 SellBox:AddButton({ Text = "Sell Now", Func = function()
     Stat.sellNow = true
 end })
+
+local EspBox = MainTab:AddGroupbox({ Side = "Left", Name = "ESP", Collapsed = true })
+EspBox:AddToggle("Esp", { Text = "ESP crystal", Default = false })
+EspBox:AddDropdown("EspRar", { Text = "Rarity", Values = RARITY_LIST, Multi = true, Default = RARITY_LIST })
 
 local MonitorBox = MainTab:AddGroupbox({ Side = "Left", Name = "Monitor Top 10" })
 MonitorBox:AddDropdown("MonRarity", { Text = "Rarity", Values = RARITY_LIST, Default = 1 })
@@ -548,10 +757,58 @@ Library.ToggleKeybind = Options.MenuKeybind
 local DisplayBox = SettingsTab:AddGroupbox({ Side = "Right", Name = "Display" })
 DisplayBox:AddSlider("DPI", { Text = "DPI scale", Default = 100, Min = 50, Max = 150, Rounding = 0, Suffix = "%" })
 
+local SrvPlayers = ServerTab:AddGroupbox({ Side = "Left", Name = "Players" })
+SrvPlayers:AddDropdown("ServerPlayer", { Text = "Player", Values = Server.playerNames(), Default = 1, Searchable = true })
+SrvPlayers:AddButton({ Text = "Refresh Players", Func = function()
+    local vals = Server.playerNames()
+    pcall(function()
+        local dd = Options.ServerPlayer
+        if dd then
+            if dd.SetValues then
+                dd:SetValues(vals)
+            end
+            if dd.SetValue and vals[1] then
+                dd:SetValue(vals[1])
+            end
+        end
+    end)
+    notify("Players", tostring(#vals) .. " listed")
+end })
+SrvPlayers:AddButton({ Text = "Teleport to Player", Func = function()
+    local name = Options.ServerPlayer and Options.ServerPlayer.Value
+    local ok, err = Server.teleportTo(name)
+    notify("TP Player", ok and ("-> " .. tostring(name)) or tostring(err))
+end })
+
+local SrvAct = ServerTab:AddGroupbox({ Side = "Left", Name = "Server Actions" })
+SrvAct:AddButton({ Text = "Rejoin", Func = function()
+    local ok, err = Server.rejoin()
+    if not ok then
+        notify("Rejoin", tostring(err))
+    end
+end })
+SrvAct:AddButton({ Text = "Hop Server", Func = function()
+    local ok, err = Server.hop()
+    if not ok then
+        notify("Hop", tostring(err))
+    end
+end })
+SrvAct:AddButton({ Text = "Go Home", Func = function()
+    local ok, err = Server.goHome()
+    notify("Go Home", ok and "OK" or tostring(err))
+end })
+SrvAct:AddButton({ Text = "Reset Character", Func = function()
+    local ok, err = Server.resetCharacter()
+    if not ok then
+        notify("Reset", tostring(err))
+    end
+end })
+
 local MoveBox = MiscTab:AddGroupbox({ Side = "Left", Name = "Movement" })
 MoveBox:AddToggle("Fly", { Text = "Fly (WASD + Space/Ctrl)", Default = false })
 MoveBox:AddSlider("FlySpeed", { Text = "Fly speed", Default = 50, Min = 10, Max = 150, Rounding = 0 })
 MoveBox:AddToggle("Noclip", { Text = "NoClip", Default = false })
+MoveBox:AddToggle("AntiAfk", { Text = "Anti-AFK", Default = false })
 MoveBox:AddToggle("Speed", { Text = "Speed booster", Default = false })
 MoveBox:AddSlider("SpeedVal", { Text = "Speed (risiko kick!)", Default = 32, Min = 16, Max = 120, Rounding = 0 })
 
@@ -568,6 +825,28 @@ end)
 
 Toggles.Vacuum:OnChanged(function(v) Cfg.vacuum = v end)
 Toggles.Teleport:OnChanged(function(v) Cfg.teleport = v end)
+Toggles.Esp:OnChanged(function(v)
+    Cfg.esp = v
+    if not v then
+        espClear()
+    end
+end)
+Options.EspRar:OnChanged(function(v)
+    local list = {}
+    if type(v) == "table" then
+        for k, on in pairs(v) do
+            if on then
+                table.insert(list, type(k) == "number" and v[k] or k)
+            end
+        end
+    elseif type(v) == "string" then
+        list = { v }
+    end
+    if #list == 0 then
+        list = { "Common" }
+    end
+    Cfg.espRar = list
+end)
 Toggles.AutoSell:OnChanged(function(v) Cfg.autoSell = v end)
 Options.SellPct:OnChanged(function(v) Cfg.sellPct = math.clamp(math.floor(v), 50, 100) end)
 Toggles.Fly:OnChanged(function(v) Cfg.fly = v end)
@@ -616,6 +895,7 @@ Toggles.Noclip:OnChanged(function(v)
         restoreCollide()
     end
 end)
+Toggles.AntiAfk:OnChanged(function(v) Cfg.antiAfk = v end)
 Options.FlySpeed:OnChanged(function(v) Cfg.flySpeed = math.clamp(math.floor(v), 10, 150) end)
 Options.DPI:OnChanged(function(v)
     pcall(function() Library:SetDPIScale(math.clamp(math.floor(v), 50, 150)) end)
@@ -819,6 +1099,7 @@ task.spawn(function()
                 Stat.monAt = os.clock()
                 Stat.monRefresh = false
                 refreshMonitor()
+                espRefresh()
             end
         end)
         if not ok then
