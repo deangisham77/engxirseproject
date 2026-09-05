@@ -53,7 +53,7 @@ local RARITY_C3 = {
     Legendary = Color3.fromRGB(255, 170, 45), Mythic = Color3.fromRGB(255, 70, 70),
     Exotic = Color3.fromRGB(255, 216, 74),
 }
-local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRarity = 1, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9, antiAfk = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic" }, antiLag = false, noRender = false }
+local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRarity = 6, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9, antiAfk = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic" }, antiLag = false, noRender = false }
 local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
 -- angka tuning satu tempat (jarak server: prompt ~15-17, dig <12)
@@ -661,7 +661,10 @@ task.spawn(function()
         end
         -- fly manager
         local wantFly = Cfg.fly
-        local hasFly = flyBV ~= nil
+        local hasFly = flyBV ~= nil and flyBV.Parent ~= nil
+        if not hasFly and (flyBV ~= nil or flyBG ~= nil or flyConn ~= nil) then
+            stopFly() -- objek yatim pasca-respawn, bersihkan biar dibuat ulang
+        end
         if wantFly and not hasFly then
             local char = LP.Character
             local h = char and char:FindFirstChild("HumanoidRootPart")
@@ -804,7 +807,7 @@ EspBox:AddToggle("Esp", { Text = "ESP crystal", Default = false })
 EspBox:AddDropdown("EspRar", { Text = "Rarity", Values = RARITY_LIST, Multi = true, Default = RARITY_LIST })
 
 local MonitorBox = MainTab:AddGroupbox({ Side = "Left", Name = "Monitor Top 10" })
-MonitorBox:AddDropdown("MonRarity", { Text = "Rarity", Values = RARITY_LIST, Default = 1 })
+MonitorBox:AddDropdown("MonRarity", { Text = "Rarity", Values = RARITY_LIST, Default = 6 })
 MonitorBox:AddDropdown("MonSort", { Text = "Sort by", Values = { "Value", "Luck" }, Default = 1 })
 MonitorBox:AddButton({ Text = "Refresh", Func = function()
     Stat.monRefresh = true
@@ -863,7 +866,8 @@ BombBox:AddButton({ Text = "Buy Now", Func = function()
     buyBombs()
 end })
 
-local MenuBox = SettingsTab:AddGroupbox({ Side = "Left", Name = "Menu" })MenuBox:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", { Default = "RightShift", NoUI = true, Text = "Menu keybind" })
+local MenuBox = SettingsTab:AddGroupbox({ Side = "Left", Name = "Menu" })
+MenuBox:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", { Default = "RightShift", NoUI = true, Text = "Menu keybind" })
 MenuBox:AddButton({ Text = "Unload", Func = function()
     if getgenv()._ANT_HUB_UNLOAD then
         pcall(getgenv()._ANT_HUB_UNLOAD)
