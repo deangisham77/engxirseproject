@@ -857,10 +857,15 @@ end })
 
 local BombBox = ShopTab:AddGroupbox({ Side = "Left", Name = "Bomb" })
 local bombIds = {}
+local bombFirst = nil
 for _, v in ipairs(BombData.List) do
-    table.insert(bombIds, v.id)
+    local label = string.format("%s (%s)", v.id, fmtMoney(v.price))
+    table.insert(bombIds, label)
+    if not bombFirst then
+        bombFirst = label
+    end
 end
-BombBox:AddDropdown("BombSel", { Text = "Bomb", Values = bombIds, Multi = true, Default = { "ClassicBomb" } })
+BombBox:AddDropdown("BombSel", { Text = "Bomb", Values = bombIds, Multi = true, Default = { bombFirst } })
 BombBox:AddToggle("AutoBomb", { Text = "Auto buy", Default = false })
 BombBox:AddButton({ Text = "Buy Now", Func = function()
     buyBombs()
@@ -992,18 +997,20 @@ Options.PickList:OnChanged(function(v)
 end)
 Options.BombSel:OnChanged(function(v)
     local list = {}
+    local function put(s)
+        local id = tostring(s):match("^(%S+)")
+        if id then
+            table.insert(list, id)
+        end
+    end
     if type(v) == "table" then
         for k, on in pairs(v) do
             if on then
-                if type(k) == "number" then
-                    table.insert(list, v[k])
-                else
-                    table.insert(list, k)
-                end
+                put(type(k) == "number" and v[k] or k)
             end
         end
     elseif type(v) == "string" then
-        list = { v }
+        put(v)
     end
     Cfg.bombSel = list
 end)
