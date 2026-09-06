@@ -1,6 +1,6 @@
-	--========================================================
+--========================================================
 -- QENTURY HUB (rebuild)
--- Shells/rebuild/ / UI: deividcomsono Obsidian
+-- qenturyrebuild/ / UI: ObsidianUltra (joustingmatch/ObsidianUltra)
 -- Phase 1: Main + Shop (Bombs + Radars) + Settings
 -- Source: qentury v4.2.3 Main + donnie Auto Farm (via remake2)
 --========================================================
@@ -27,10 +27,11 @@ pcall(function()
 end)
 
 --========================================================
--- OBSIDIAN (https://github.com/deividcomsono/Obsidian)
+-- OBSIDIAN ULTRA (https://github.com/joustingmatch/ObsidianUltra)
 -- docs: https://docs.mspaint.cc/obsidian
+-- memory: docs/ui-obsidian-ultra-memory.md
 --========================================================
-local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local repo = "https://raw.githubusercontent.com/joustingmatch/ObsidianUltra/main/"
 local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
 local SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
@@ -5021,8 +5022,8 @@ end
 --========================================================
 local isMobile = Library.IsMobile == true
 	or (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled)
-local WIN_W = isMobile and 400 or 520
-local WIN_H = isMobile and 340 or 440
+local WIN_W = isMobile and 400 or 560
+local WIN_H = isMobile and 340 or 480
 
 local Window = Library:CreateWindow({
 	Title = "Qentury Hub",
@@ -5034,6 +5035,17 @@ local Window = Library:CreateWindow({
 	AutoShow = true,
 	Size = UDim2.fromOffset(WIN_W, WIN_H),
 	MobileButtonsSide = "Right",
+	Minimizable = true,
+	MinimizeKeybind = Enum.KeyCode.RightBracket,
+	FuzzySearch = true,
+	SearchValues = true,
+	SearchKeybind = Enum.KeyCode.F,
+	Animations = {
+		TabSwitch = true,
+		Dropdown = true,
+		SubTabUnderline = true,
+	},
+	TabTransitionTime = 0.22,
 })
 
 pcall(function()
@@ -5043,82 +5055,22 @@ pcall(function()
 end)
 
 local Tabs = {
-	Main = Window:AddTab("Main", "gem", "Auto mine + ESP + TP"),
-	-- Runes + Boulders in one tab; sections collapsed by default
-	RuneBoulder = Window:AddTab("Rune & Boulder", "boxes", "Runes + Boulders"),
-	Drop = Window:AddTab("Drop & Place", "minus", "Drop / place runes"),
-	Favorite = Window:AddTab("Favorite", "star", "Auto favorite crystals"),
-	Shop = Window:AddTab("Shop", "shopping-cart", "Bombs & more"),
-	Server = Window:AddTab("Server", "server", "Players / hop / rejoin"),
-	Misc = Window:AddTab("Misc", "shield", "Godmode / fall / ragdoll"),
-	Settings = Window:AddTab("UI Settings", "settings", "UI"),
+	Main = Window:AddTab({ Name = "Main", Icon = "gem", Description = "Auto mine + ESP + TP", SingleColumn = true }),
+	RuneBoulder = Window:AddTab({ Name = "Rune & Boulder", Icon = "boxes", Description = "Runes + Boulders", SingleColumn = true }),
+	Drop = Window:AddTab({ Name = "Drop & Place", Icon = "minus", Description = "Drop / place runes", SingleColumn = true }),
+	Favorite = Window:AddTab({ Name = "Favorite", Icon = "star", Description = "Auto favorite crystals", SingleColumn = true }),
+	Shop = Window:AddTab({ Name = "Shop", Icon = "shopping-cart", Description = "Bombs & more", SingleColumn = true }),
+	Server = Window:AddTab({ Name = "Server", Icon = "server", Description = "Players / hop / rejoin", SingleColumn = true }),
+	Misc = Window:AddTab({ Name = "Misc", Icon = "shield", Description = "Godmode / fall / ragdoll", SingleColumn = true }),
+	Settings = Window:AddTab({ Name = "UI Settings", Icon = "settings", Description = "UI", SingleColumn = true }),
 }
 
+-- Rune & Boulder sections become sub tabs (own left/right columns each)
+Tabs.RuneBoulder:SetSubTabAlignment("Center")
+local RuneTab = Tabs.RuneBoulder:AddSubTab({ Name = "Rune", Icon = "sparkles" })
+local BoulderTab = Tabs.RuneBoulder:AddSubTab({ Name = "Boulder", Icon = "boxes" })
+
 local Main = Tabs.Main:AddLeftGroupbox("Main", "gem")
-
--- full-width left column (Obsidian default is half)
-local function forceFullWidthTabs()
-	local root = Library.ScreenGui
-	if not root then
-		return
-	end
-	for _, parent in ipairs(root:GetDescendants()) do
-		local halves = {}
-		for _, ch in ipairs(parent:GetChildren()) do
-			if ch:IsA("ScrollingFrame") then
-				local sx = ch.Size.X.Scale
-				if sx > 0.4 and sx < 0.6 then
-					-- skip Settings panes: keep Save Manager (left) + Theme Manager (right) split
-					local isSettings = false
-					for _, lbl in ipairs(ch:GetDescendants()) do
-						if lbl:IsA("TextLabel") and (lbl.Text == "Configuration" or lbl.Text == "Themes") then
-							isSettings = true
-							break
-						end
-					end
-					if not isSettings then
-						table.insert(halves, ch)
-					end
-				end
-			end
-		end
-		if #halves >= 2 then
-			table.sort(halves, function(a, b)
-				return a.AbsoluteSize.X > b.AbsoluteSize.X
-			end)
-			local left = halves[1]
-			for _, h in ipairs(halves) do
-				if #h:GetChildren() >= #left:GetChildren() then
-					left = h
-				end
-			end
-			for _, h in ipairs(halves) do
-				if h == left then
-					h.Visible = true
-					h.Size = UDim2.new(1, -6, 1, 0)
-					h.Position = UDim2.fromScale(0, 0)
-				else
-					h.Visible = false
-					h.Size = UDim2.new(0, 0, 1, 0)
-				end
-			end
-		end
-	end
-end
-
-task.spawn(function()
-	for _ = 1, 6 do
-		task.wait(0.25)
-		if Library.Unloaded then
-			break
-		end
-		forceFullWidthTabs()
-	end
-	while not Library.Unloaded do
-		task.wait(2)
-		forceFullWidthTabs()
-	end
-end)
 
 -- --- Main controls (from qentury v4.2.3 Main tab) ---
 Main:AddToggle("AutoMineV2", {
@@ -5425,7 +5377,7 @@ Main:AddButton({
 -- RUNES TAB
 --========================================================
 -- groupbox args: title, icon, visible, collapsed, disableCollapse
-local RBox = Tabs.RuneBoulder:AddLeftGroupbox("Runes", "star", true, true)
+local RBox = RuneTab:AddLeftGroupbox("Runes", "star", true, true)
 
 RBox:AddToggle("RuneESP", {
 	Text = "Rune ESP",
@@ -5521,7 +5473,7 @@ RBox:AddUIPassthrough("RuneListUI", {
 --========================================================
 -- BOULDERS TAB
 --========================================================
-local BBox = Tabs.RuneBoulder:AddLeftGroupbox("Boulders", "box", true, true)
+local BBox = BoulderTab:AddLeftGroupbox("Boulders", "box", true, true)
 
 local boulderStatusLabel = BBox:AddLabel("World: ? / Listed: ?", true)
 
@@ -6475,100 +6427,67 @@ ServerAct:AddButton({
 })
 
 --========================================================
--- UI SETTINGS (Obsidian Example.lua style)
+-- UI SETTINGS (unload + save manager only, single column, collapsed)
 --========================================================
-local MenuGroup = Tabs.Settings:AddGroupbox({
-	Side = "Left",
-	Name = "Menu",
-	IconName = "wrench"
-})
-
-MenuGroup:AddToggle("KeybindMenuOpen", {
-	Default = Library.KeybindFrame.Visible,
-	Text = "Open Keybind Menu",
-	Callback = function(value)
-		Library.KeybindFrame.Visible = value
-	end,
-})
-MenuGroup:AddToggle("ShowCustomCursor", {
-	Text = "Custom Cursor",
-	Default = Library.ShowCustomCursor,
-	Callback = function(Value)
-		Library.ShowCustomCursor = Value
-	end,
-})
-if Window.SetAlwaysOnTop then
-	MenuGroup:AddToggle("AlwaysOnTop", {
-		Text = "Always On Top",
-		Default = Window.AlwaysOnTop,
-		Callback = function(Value)
-			Window:SetAlwaysOnTop(Value)
-		end,
-	})
-end
+local MenuGroup = Tabs.Settings:AddLeftGroupbox("Menu", "wrench", true, true)
+MenuGroup:AddButton("Unload", function()
+	Library:Unload()
+end)
 MenuGroup:AddDropdown("NotificationSide", {
+	Text = "Notification Side",
 	Values = { "Left", "Right" },
 	Default = "Right",
-
-	Text = "Notification Side",
-
 	Callback = function(Value)
 		Library:SetNotifySide(Value)
 	end,
 })
-MenuGroup:AddDropdown("DPIDropdown", {
+MenuGroup:AddDropdown("DPIScale", {
+	Text = "DPI Scale",
 	Values = { "50%", "75%", "100%", "125%", "150%", "175%", "200%" },
 	Default = "100%",
-
-	Text = "DPI Scale",
-
 	Callback = function(Value)
-		Value = Value:gsub("%%", "")
-		local DPI = tonumber(Value)
-
-		Library:SetDPIScale(DPI)
+		Library:SetDPIScale(tonumber((Value:gsub("%%", ""))))
 	end,
 })
-
-MenuGroup:AddSlider("UICornerSlider", {
+MenuGroup:AddSlider("CornerRadius", {
 	Text = "Corner Radius",
-	Default = Library.CornerRadius,
+	Default = 4,
 	Min = 0,
 	Max = 20,
 	Rounding = 0,
-	Callback = function(value)
-		Window:SetCornerRadius(value)
-	end
+	Callback = function(Value)
+		Window:SetCornerRadius(Value)
+	end,
 })
-
-MenuGroup:AddDivider()
-MenuGroup:AddLabel("Menu bind")
-	:AddKeyPicker("MenuKeybind", { Default = "RightShift", NoUI = true, Text = "Menu keybind" })
-
-MenuGroup:AddButton("Unload", function()
-	Library:Unload()
-end)
-
+MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
+	Default = "RightShift",
+	NoUI = true,
+	Text = "Menu keybind",
+})
 Library.ToggleKeybind = Options.MenuKeybind
 
--- Addons:
 ThemeManager:SetLibrary(Library)
-SaveManager:SetLibrary(Library)
-
-SaveManager:IgnoreThemeSettings()
-
-SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
-
-ThemeManager:SetFolder("QenturyHub")
-SaveManager:SetFolder("QenturyHub/MineAMountainRebuild")
-
--- Builds config menu on the right side of the tab
-SaveManager:BuildConfigSection(Tabs.Settings)
-
--- Builds theme menu on the left side
+ThemeManager:SetFolder("QenturyRebuild")
 ThemeManager:ApplyToTab(Tabs.Settings)
-
-SaveManager:LoadAutoloadConfig()
+SaveManager:SetLibrary(Library)
+SaveManager:IgnoreThemeSettings()
+SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+SaveManager:SetFolder("QenturyRebuild")
+SaveManager:BuildConfigSection(Tabs.Settings)
+pcall(function()
+	for _, gb in pairs(Tabs.Settings.Groupboxes) do
+		if gb.SetCollapsed then
+			gb:SetCollapsed(true)
+		end
+	end
+end)
+if SaveManager.LoadAutoloadConfig then
+	task.defer(function()
+		pcall(function()
+			SaveManager:LoadAutoloadConfig()
+		end)
+	end)
+end
 
 --========================================================
 -- CLEANUP
@@ -6641,7 +6560,6 @@ Library:OnUnload(stopFeatures)
 
 task.defer(function()
 	task.wait(0.2)
-	forceFullWidthTabs()
 	state.listTier = rarityToTier(Options.ListRarity and Options.ListRarity.Value) or 5
 	state.mineMinTier = rarityToTier(Options.MineMinRarity and Options.MineMinRarity.Value) or 1
 	state.mineMinSize = sizeLabelToRank(Options.MineMinSize and Options.MineMinSize.Value) or 1
