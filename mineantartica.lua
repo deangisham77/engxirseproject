@@ -376,13 +376,45 @@ function Server.hop()
 end
 function Server.resetCharacter()
     return pcall(function()
-        local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+        local char = LP.Character
+        local hum = char and char:FindFirstChildWhichIsA("Humanoid")
         if hum then
-            hum.Health = 0
+            hum:ChangeState(Enum.HumanoidStateType.Dead)
+        elseif char then
+            char:BreakJoints()
         else
-            error("no humanoid")
+            error("no character")
         end
     end)
+end
+-- refresh ala IY: respawn via void lalu balik ke posisi semula
+function Server.refresh()
+    local char = LP.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then
+        return false, "no hrp"
+    end
+    local pos = root.CFrame
+    local camPos = workspace.CurrentCamera.CFrame
+    local ok, err = Server.resetCharacter()
+    if not ok then
+        return false, err
+    end
+    task.spawn(function()
+        local nc = LP.CharacterAdded:Wait()
+        local hum = nc:WaitForChild("Humanoid", 10)
+        if hum then
+            local nhrp = nc:WaitForChild("HumanoidRootPart", 10)
+            if nhrp then
+                task.wait(0.2)
+                pcall(function()
+                    nhrp.CFrame = pos
+                    workspace.CurrentCamera.CFrame = camPos
+                end)
+            end
+        end
+    end)
+    return true
 end
 function Server.peak()
     local h = getHRP()
@@ -933,6 +965,10 @@ SrvAct:AddButton({ Text = "Reset Character", Func = function()
     if not ok then
         notify("Reset", tostring(err))
     end
+end })
+SrvAct:AddButton({ Text = "Refresh (posisi balik)", Func = function()
+    local ok, err = Server.refresh()
+    notify("Refresh", ok and "Respawn..." or tostring(err))
 end })
 
 local MoveBox = MiscTab:AddGroupbox({ Side = "Left", Name = "Movement" })
