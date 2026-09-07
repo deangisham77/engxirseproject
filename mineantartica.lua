@@ -670,8 +670,32 @@ end
 -- movement (fly + noclip), pola cake file
 local noclipConn
 local afkConn
+local afkLast = 0
+local function afkNudge()
+    -- gerak mikro tiap 60 detik biar tak pernah idle (lebih agresif dari event Idled saja)
+    if os.clock() - afkLast < 60 then
+        return
+    end
+    afkLast = os.clock()
+    pcall(function()
+        local vim = game:GetService("VirtualInputManager")
+        vim:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+        task.wait(0.1)
+        vim:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+    end)
+end
 local function setAfk(on)
     if on and not afkConn then
+        -- ala IY: bungkam dulu listener Idled milik game (fungsi kick-nya sendiri)
+        pcall(function()
+            local gc = getconnections
+            if typeof(gc) == "function" then
+                for _, c in ipairs(gc(LP.Idled)) do
+                    pcall(function() c:Disable() end)
+                    pcall(function() c:Disconnect() end)
+                end
+            end
+        end)
         afkConn = LP.Idled:Connect(function()
             pcall(function()
                 local vim = game:GetService("VirtualInputManager")
@@ -781,6 +805,9 @@ task.spawn(function()
             end
         end
         setAfk(Cfg.antiAfk)
+        if Cfg.antiAfk then
+            afkNudge()
+        end
     end
     stopFly()
     if noclipConn then
