@@ -357,26 +357,49 @@ function Server.rejoin()
         end
     end)
 end
-function Server.hop()
+function Server.hop(prefer)
+    prefer = prefer == "low" and "low" or "full"
     return pcall(function()
-        local url = string.format(
-            "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100",
-            game.PlaceId)
-        local body = game:HttpGet(url)
-        local data = HttpS:JSONDecode(body)
-        if not data or not data.data then
-            error("no servers")
-        end
-        local list = {}
-        for _, s in ipairs(data.data) do
-            if s.playing and s.maxPlayers and s.id and s.playing < s.maxPlayers and s.id ~= game.JobId then
-                table.insert(list, s.id)
+        local all = {}
+        local cursor = ""
+        for _ = 1, 3 do -- 3 halaman x 100 server biar pool besar
+            local url = string.format(
+                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Desc&limit=100%s",
+                game.PlaceId, cursor ~= "" and ("&cursor=" .. cursor) or "")
+            local body = game:HttpGet(url)
+            local data = HttpS:JSONDecode(body)
+            if not data or not data.data then
+                break
+            end
+            for _, s in ipairs(data.data) do
+                if s.playing and s.maxPlayers and s.id and s.playing < s.maxPlayers and s.id ~= game.JobId then
+                    table.insert(all, s)
+                end
+            end
+            cursor = data.nextPageCursor or ""
+            if cursor == "" then
+                break
             end
         end
-        if #list == 0 then
+        if #all == 0 then
             error("no free servers")
         end
-        TeleportS:TeleportToPlaceInstance(game.PlaceId, list[math.random(1, #list)], LP)
+        table.sort(all, function(a, b) return (a.playing or 0) > (b.playing or 0) end)
+        -- full: paling ramai dulu. low: paling sepi dulu. acak di 3 teratas/bawah biar tak numpuk.
+        local pool = {}
+        if prefer == "low" then
+            for i = #all, math.max(1, #all - 2), -1 do
+                table.insert(pool, all[i])
+            end
+        else
+            for i = 1, math.min(3, #all) do
+                pool[i] = all[i]
+            end
+        end
+        local pick = pool[math.random(1, #pool)]
+        notify("Hop", string.format("-> %d/%d pemain", pick.playing, pick.maxPlayers))
+        print("[hub] hop ke " .. tostring(pick.id) .. " (" .. tostring(pick.playing) .. "/" .. tostring(pick.maxPlayers) .. ")")
+        TeleportS:TeleportToPlaceInstance(game.PlaceId, pick.id, LP)
     end)
 end
 function Server.resetCharacter()
@@ -994,7 +1017,13 @@ SrvAct:AddButton({ Text = "Rejoin", Func = function()
     end
 end })
 SrvAct:AddButton({ Text = "Hop Server", Func = function()
-    local ok, err = Server.hop()
+    local ok, err = Server.hop("full")
+    if not ok then
+        notify("Hop", tostring(err))
+    end
+end })
+SrvAct:AddButton({ Text = "Hop Server (Sepi)", Func = function()
+    local ok, err = Server.hop("low")
     if not ok then
         notify("Hop", tostring(err))
     end
