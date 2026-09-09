@@ -1,4 +1,4 @@
--- Antarctica Hub (ObsidianUltra UI): vacuum-only pickup + auto sell, TANPA dig
+-- Antarctica Hub (ObsidianUltra UI): vacuum pickup + auto sell + auto dig 360°
 -- Game: Mine Antarctica | Freed = bebas ambil (tak ada pemilik) | Nempel = wajib dig manual
 -- Cara kerja: DroppedGems prioritas -> Freed, teleport stepped -> fire prompt (hold 0)
 -- UI: https://github.com/joustingmatch/ObsidianUltra (fork Obsidian, API kompatibel)
@@ -39,6 +39,10 @@ local UpgradeState = RS:WaitForChild("UpgradeRemotes"):WaitForChild("UpgradeStat
 local BuyPickaxe = RS:WaitForChild("ShopRemotes"):WaitForChild("BuyPickaxe")
 local EquipPickaxe = RS:WaitForChild("ShopRemotes"):WaitForChild("EquipPickaxe")
 local BuyBomb = RS:WaitForChild("BombRemotes"):WaitForChild("BuyBomb")
+local DigRequest = RS:WaitForChild("DigRemotes"):WaitForChild("DigRequest")
+local MeteorActive = RS:WaitForChild("MeteorRemotes"):WaitForChild("Active")
+local MeteorImpact = RS:WaitForChild("MeteorRemotes"):WaitForChild("ImpactPos")
+local MeteorPhase = RS:WaitForChild("MeteorRemotes"):WaitForChild("Phase")
 local PickaxeData = require(RS:WaitForChild("PickaxeData"))
 local BombData = require(RS:WaitForChild("BombData"))
 local SG = workspace:WaitForChild("SpawnedGems")
@@ -53,7 +57,7 @@ local RARITY_C3 = {
     Legendary = Color3.fromRGB(255, 170, 45), Mythic = Color3.fromRGB(255, 70, 70),
     Exotic = Color3.fromRGB(255, 216, 74),
 }
-local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRarity = 6, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9, antiAfk = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic" }, antiLag = false, noRender = false }
+local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9, antiAfk = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic" }, antiLag = false, noRender = false, dig = false, digRadius = 8 }
 local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
 -- angka tuning satu tempat (jarak server: prompt ~15-17, dig <12)
@@ -67,6 +71,7 @@ local TUNE = {
     monEveryS = 5, monTickS = 1, -- refresh monitor (detik)
     tpStep = 25, tpInstant = 60, tpStepWait = 0.1, -- teleport stepped (stud, stud, detik). KECIL = aman kick
     promptRange = 1000, promptRestore = 0.3, -- fire prompt (stud, detik)
+    digTick = 0.45, digDirs = 8, -- auto dig 360° (detik per tembakan, jumlah arah)
 }
 
 -- helper di atas UI: callback tombol capture local ini (qentury/cake taruh helper duluan juga)
@@ -640,6 +645,7 @@ getgenv()._ANT_HUB_UNLOAD = function()
     Cfg.esp = false
     Cfg.antiLag = false
     Cfg.noRender = false
+    Cfg.dig = false
     pcall(stopFly)
     pcall(restoreCollide)
     pcall(setAfk, false)
@@ -854,6 +860,10 @@ FarmBox:AddToggle("Vacuum", { Text = "Auto vacuum (no dig)", Default = false })
 FarmBox:AddToggle("Teleport", { Text = "Teleport ke freed (radius maksimal)", Default = false })
 FarmBox:AddDropdown("MinRarity", { Text = "Min rarity", Values = RARITY_LIST, Default = 1 })
 
+local DigBox = MainTab:AddGroupbox({ Side = "Left", Name = "Auto Dig 360°" })
+DigBox:AddToggle("AutoDig", { Text = "Auto dig sekeliling (glacier saja)", Default = false })
+DigBox:AddSlider("DigRadius", { Text = "Radius dig", Default = 8, Min = 6, Max = 20, Rounding = 0, Suffix = "st" })
+
 local SellBox = MainTab:AddGroupbox({ Side = "Left", Name = "Auto Sell" })
 SellBox:AddToggle("AutoSell", { Text = "Sell", Default = false })
 SellBox:AddSlider("SellPct", { Text = "Sell at", Default = 100, Min = 50, Max = 100, Rounding = 0, Suffix = "%" })
@@ -866,9 +876,19 @@ EspBox:AddToggle("Esp", { Text = "ESP crystal", Default = false })
 EspBox:AddDropdown("EspRar", { Text = "Rarity", Values = RARITY_LIST, Multi = true, Default = RARITY_LIST })
 
 local MonitorBox = MainTab:AddGroupbox({ Side = "Left", Name = "Monitor Top 10" })
-MonitorBox:AddDropdown("MonRarity", { Text = "Rarity", Values = RARITY_LIST, Default = 6 })
+MonitorBox:AddDropdown("MonRarity", { Text = "Rarity", Values = RARITY_LIST, Multi = true, Default = { "Mythic" } })
 MonitorBox:AddDropdown("MonSort", { Text = "Sort by", Values = { "Value", "Luck" }, Default = 1 })
 MonitorBox:AddButton({ Text = "Refresh", Func = function()
+    Stat.monRefresh = true
+end })
+MonitorBox:AddButton({ Text = "Select All Rarity", Func = function()
+    Cfg.monRar = { table.unpack(RARITY_LIST) }
+    pcall(function() Options.MonRarity:SetValue(Cfg.monRar) end)
+    Stat.monRefresh = true
+end })
+MonitorBox:AddButton({ Text = "Clear Rarity", Func = function()
+    Cfg.monRar = {}
+    pcall(function() Options.MonRarity:SetValue({}) end)
     Stat.monRefresh = true
 end })
 local MonSlots = {}
@@ -966,7 +986,7 @@ SrvPlayers:AddButton({ Text = "Teleport to Player", Func = function()
     notify("TP Player", ok and ("-> " .. tostring(name)) or tostring(err))
 end })
 
-local SrvAct = ServerTab:AddGroupbox({ Side = "Left", Name = "Server Actions" })
+local SrvAct = ServerTab:AddGroupbox({ Side = "Right", Name = "Server Actions" })
 SrvAct:AddButton({ Text = "Rejoin", Func = function()
     local ok, err = Server.rejoin()
     if not ok then
@@ -998,6 +1018,34 @@ SrvAct:AddButton({ Text = "Refresh (posisi balik)", Func = function()
     notify("Refresh", ok and "Respawn..." or tostring(err))
 end })
 
+local SrvMet = ServerTab:AddGroupbox({ Side = "Left", Name = "Meteor" })
+local MeteorLabel = SrvMet:AddLabel("meteor: - (tak ada event)", true)
+SrvMet:AddButton({ Text = "Teleport to Impact", Func = function()
+    local h = getHRP()
+    if not h then
+        notify("Meteor", "No HRP.")
+        return
+    end
+    local okA, active = pcall(function() return MeteorActive.Value end)
+    local okP, pos = pcall(function() return MeteorImpact.Value end)
+    if not okA or not active then
+        notify("Meteor", "Tak ada event aktif.")
+        return
+    end
+    if not okP or not pos then
+        notify("Meteor", "ImpactPos tak terbaca.")
+        return
+    end
+    local ok, err = pcall(function()
+        tpTo(h, CFrame.new(pos + Vector3.new(0, TUNE.tpLift, 0)))
+    end)
+    if ok then
+        print("[hub] tp meteor " .. tostring(pos))
+    else
+        notify("Meteor", "TP gagal: " .. tostring(err):sub(1, 60))
+    end
+end })
+
 local MoveBox = MiscTab:AddGroupbox({ Side = "Left", Name = "Movement" })
 MoveBox:AddToggle("Fly", { Text = "Fly (joystick/analog + ▲▼)", Default = false })
 MoveBox:AddSlider("FlySpeed", { Text = "Fly speed", Default = 50, Min = 10, Max = 150, Rounding = 0 })
@@ -1016,12 +1064,29 @@ pcall(function()
     ThemeManager:ApplyToTab(SettingsTab)
     SaveManager:SetLibrary(Library)
     SaveManager:SetFolder("AntarcticaHub")
-    SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
+    SaveManager:SetIgnoreIndexes({ "MenuKeybind", "WindowLayout" })
     SaveManager:BuildConfigSection(SettingsTab)
     SaveManager:LoadAutoloadConfig()
+    -- selalu tengah: abaikan posisi window tersimpan di autoload config
+    pcall(function()
+        local mf = Window and Window.MainFrame
+        if mf then
+            mf.Position = UDim2.new(0.5, -mf.Size.X.Offset / 2, 0.5, -mf.Size.Y.Offset / 2)
+        end
+    end)
 end)
 
 Toggles.Vacuum:OnChanged(function(v) Cfg.vacuum = v end)
+Toggles.AutoDig:OnChanged(function(v)
+    Cfg.dig = v
+    if v then
+        Stat.digNoPick = false
+        print("[hub] autodig ON r=" .. tostring(Cfg.digRadius))
+    else
+        print("[hub] autodig OFF")
+    end
+end)
+Options.DigRadius:OnChanged(function(v) Cfg.digRadius = math.clamp(math.floor(v), 6, 20) end)
 Toggles.Teleport:OnChanged(function(v) Cfg.teleport = v end)
 Toggles.Esp:OnChanged(function(v)
     Cfg.esp = v
@@ -1116,11 +1181,24 @@ Options.MinRarity:OnChanged(function(v)
     end
 end)
 Options.MonRarity:OnChanged(function(v)
-    if type(v) == "number" then
-        Cfg.monRarity = math.clamp(math.floor(v), 1, #RARITY_LIST)
+    local list = {}
+    if type(v) == "table" then
+        for k, on in pairs(v) do
+            if on then
+                local name = type(k) == "number" and v[k] or k
+                if RARITY_RANK[name] then
+                    table.insert(list, name)
+                end
+            end
+        end
+    elseif type(v) == "number" then
+        -- migrasi save lama (single index)
+        list = { RARITY_LIST[math.clamp(math.floor(v), 1, #RARITY_LIST)] }
     elseif type(v) == "string" then
-        Cfg.monRarity = RARITY_RANK[v] or 1
+        list = { v }
     end
+    Cfg.monRar = list
+    Stat.monRefresh = true
 end)
 Options.MonSort:OnChanged(function(v)
     if type(v) == "string" then
@@ -1170,6 +1248,49 @@ if RL_STATE then
     end)
 else
     hookUpgrade()
+end
+
+-- meteor: label jarak live + notif saat event mulai. koneksi ikut teardown reload.
+local function meteorText()
+    local okA, active = pcall(function() return MeteorActive.Value end)
+    if not okA or not active then
+        return "meteor: - (tak ada event)"
+    end
+    local okP, pos = pcall(function() return MeteorImpact.Value end)
+    local okH, h = pcall(getHRP)
+    local ph = ""
+    pcall(function() ph = tostring(MeteorPhase.Value) end)
+    if okP and pos and okH and h then
+        local d = math.floor((h.Position - pos).Magnitude)
+        if d < 12 then
+            return string.format("meteor: [%s] HERE!", ph)
+        end
+        return string.format("meteor: [%s] %dm", ph, d)
+    end
+    return "meteor: [" .. tostring(ph) .. "] aktif"
+end
+
+local function hookMeteor()
+    MeteorActive.Changed:Connect(function(v)
+        if v then
+            notify("Meteor", "Incoming! TP dari tab Server.")
+            print("[hub] meteor incoming")
+        else
+            print("[hub] meteor end")
+        end
+    end)
+end
+if RL_STATE then
+    RL_STATE.connect(MeteorActive.Changed, function(v)
+        if v then
+            notify("Meteor", "Incoming! TP dari tab Server.")
+            print("[hub] meteor incoming")
+        else
+            print("[hub] meteor end")
+        end
+    end)
+else
+    hookMeteor()
 end
 
 local WARM_STEPS = { 10, 50, 100 }
@@ -1242,10 +1363,12 @@ task.spawn(function()
     end
 end)
 
+getgenv()._ANT_HUB = { cfg = Cfg, stat = Stat, tune = TUNE }
 getgenv()._ANT_HUB_DBG = function()
-    return string.format("vacuum=%s teleport=%s autoSell=%s minRar=%d monRar=%d monSort=%s tick=%ds lalu target=%s",
+    return string.format("vacuum=%s teleport=%s autoSell=%s dig=%s r=%d minRar=%d monRar=%s monSort=%s tick=%ds lalu target=%s",
         tostring(Cfg.vacuum), tostring(Cfg.teleport), tostring(Cfg.autoSell),
-        Cfg.minRarity, Cfg.monRarity, tostring(Cfg.monSort),
+        tostring(Cfg.dig), Cfg.digRadius,
+        Cfg.minRarity, table.concat(Cfg.monRar, "+"), tostring(Cfg.monSort),
         math.floor(os.clock() - (Stat.lastTick or 0)), tostring(Stat.lastTarget or "-"))
 end
 
@@ -1253,10 +1376,13 @@ local function refreshMonitor()
     local h = getHRP()
     local myPos = h and h.Position or Vector3.zero
     local rows = {}
-    local wantRar = RARITY_LIST[Cfg.monRarity] or "Common"
+    local want = {}
+    for _, r in ipairs(Cfg.monRar) do
+        want[r] = true
+    end
     local function scan(folder)
         for _, m in ipairs(folder:GetChildren()) do
-            if m:GetAttribute("Rarity") == wantRar then
+            if want[m:GetAttribute("Rarity")] then
                 local pos = claimPos(m)
                 if pos then
                     table.insert(rows, {
@@ -1309,6 +1435,7 @@ task.spawn(function()
                 refreshMonitor()
                 espRefresh()
             end
+            pcall(function() MeteorLabel:SetText(meteorText()) end)
         end)
         if not ok then
             warn("[hub] monitor " .. tostring(err))
@@ -1409,6 +1536,98 @@ task.spawn(function()
             warn("[hub] " .. tostring(err))
         end
         task.wait(TUNE.tickS)
+    end
+end)
+
+-- auto dig 360°: tembak titik tanah melingkar sekitar karakter, 1 arah per tick.
+-- server terima Vector3 mentah (tanpa cek hadap), jadi semua sisi kena asal dekat (<12st aman).
+local digRay = RaycastParams.new()
+digRay.FilterType = Enum.RaycastFilterType.Include
+digRay.FilterDescendantsInstances = { workspace.Terrain }
+
+local function equippedPickaxe()
+    local c = LP.Character
+    if c then
+        for _, t in ipairs(c:GetChildren()) do
+            if t:IsA("Tool") and t:GetAttribute("Cooldown") ~= nil then
+                return t
+            end
+        end
+    end
+    return nil
+end
+
+local function ensurePickaxe()
+    if equippedPickaxe() then
+        return true
+    end
+    local bp = LP:FindFirstChild("Backpack")
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if bp and hum then
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") and t:GetAttribute("Cooldown") ~= nil then
+                pcall(function() hum:EquipTool(t) end)
+                task.wait(0.3)
+                if equippedPickaxe() ~= nil then
+                    Stat.digEquipWait = os.clock() + 1 -- kasih server 1 tick lihat pickaxe terpasang
+                    return true
+                end
+                return false
+            end
+        end
+    end
+    return false
+end
+
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if not Cfg.dig or Stat.selling or Stat.sellNow then
+                return
+            end
+            if LP:GetAttribute("BagFull") == true then
+                return
+            end
+            if LP:GetAttribute("IsMiningGem") then
+                return
+            end
+            local h = getHRP()
+            if not h then
+                return
+            end
+            if not ensurePickaxe() then
+                if not Stat.digNoPick then
+                    Stat.digNoPick = true
+                    notify("Dig", "Tak ada pickaxe di tas.")
+                end
+                return
+            end
+            Stat.digNoPick = false
+            if os.clock() < (Stat.digEquipWait or 0) then
+                return
+            end
+            Stat.digStep = ((Stat.digStep or 0) + 1) % TUNE.digDirs
+            local a = math.rad(Stat.digStep * (360 / TUNE.digDirs))
+            local center = h.Position
+            local target = center + Vector3.new(math.cos(a), 0, math.sin(a)) * Cfg.digRadius
+            local hit = workspace:Raycast(target + Vector3.new(0, 30, 0), Vector3.new(0, -120, 0), digRay)
+            if hit then
+                if (hit.Position - center).Magnitude > Cfg.digRadius + 4 then
+                    return -- jurang/lereng curam: server pasti "Too far", hemat request
+                end
+                pcall(function() DigRequest:FireServer(hit.Position) end)
+                Stat.lastDig = { step = Stat.digStep, pos = hit.Position }
+                if os.clock() - (Stat.lastDigBeat or 0) > 30 then
+                    Stat.lastDigBeat = os.clock()
+                    print("[hub] dig 360° r=" .. Cfg.digRadius)
+                end
+            end
+        end)
+        if not ok then
+            warn("[hub] dig " .. tostring(err))
+        end
+        task.wait(TUNE.digTick)
     end
 end)
 
