@@ -1,6 +1,6 @@
 -- Antarctica event webhook: weather + meteor + bomb restock -> Discord
 -- File: event-webhook.luau | live-reload label: event-webhook
--- Sinyal: WeatherRemotes.State / MeteorRemotes.Active+Event / BombRemotes.ShopState
+-- Sinyal: WeatherRemotes.State / MeteorRemotes.Active / BombRemotes.ShopState
 
 local WEBHOOK_URL = "https://discord.com/api/webhooks/1547577222074990693/a4Vn8k6nONnAYSoX_FAkg8Og3J81AIBM5OpZuu4PyFTbvcdO8_mKQHT4NUMKCty8DSo8"
 local MENTION = "<@&1539600129412309022>"
@@ -193,25 +193,17 @@ local function notifyWeather(state)
 	send("🌦️ Cuaca mulai: " .. tostring(state), weatherDesc(state) .. "\n" .. weatherTimers(), COLOR[state] or 9807270)
 end
 
-local function notifyMeteor(kind, detail)
-	if not once("m:" .. tostring(kind) .. ":" .. tostring(MPhase.Value), 300) then
+local function notifyMeteor(kind)
+	if not once("m:aktif", 900) then
 		return
 	end
-	local impact = MImpact.Value
-	local pos = string.format("(%.0f, %.0f, %.0f)", impact.X, impact.Y, impact.Z)
 	local now = os.time()
 	local ze = asInt(MZoneEnd.Value)
-	local extra = {
-		{ name = "Fase", value = "`" .. tostring(MPhase.Value) .. "`", inline = true },
-		{ name = "Impact", value = "`" .. pos .. "`", inline = true },
-	}
+	local extra = {}
 	if ze > now then
 		table.insert(extra, { name = "Zona tutup", value = string.format("<t:%d:R>", ze), inline = true })
 	end
-	if detail and detail ~= "" then
-		table.insert(extra, { name = "Detail", value = detail:sub(1, 500), inline = false })
-	end
-	send("☄️ Meteor: " .. kind, "Aktif=`" .. tostring(MActive.Value) .. "`", 16746496, extra)
+	send("☄️ " .. kind, "Aktif=`true`", 16746496, extra)
 end
 
 local function stockSig(stock)
@@ -316,38 +308,15 @@ STATE.connect(WState:GetPropertyChangedSignal("Value"), function()
 	end
 end)
 
--- Event: meteor Active / Phase
+-- Event: meteor aktif saja (+countdown zona tutup di isi pesan)
 STATE.connect(MActive:GetPropertyChangedSignal("Value"), function()
 	local a = MActive.Value
 	if a ~= lastMActive then
 		lastMActive = a
-		notifyMeteor(a and "AKTIF — meteor jatuh!" or "selesai", "")
-	end
-end)
-STATE.connect(MPhase:GetPropertyChangedSignal("Value"), function()
-	local p = MPhase.Value
-	if p ~= lastMPhase then
-		lastMPhase = p
-		if p ~= "" then
-			notifyMeteor("fase: " .. tostring(p), "")
+		if a then
+			notifyMeteor("METEOR JATUH!")
 		end
 	end
-end)
-
--- Event: meteor payload langsung (warn/fall/impact)
-STATE.connect(MEvent.OnClientEvent, function(p1)
-	local detail = ""
-	if typeof(p1) == "string" then
-		detail = p1
-	elseif typeof(p1) == "table" then
-		local ok, js = pcall(function()
-			return HttpService:JSONEncode(p1)
-		end)
-		detail = ok and js or tostring(p1)
-	else
-		detail = tostring(p1)
-	end
-	notifyMeteor("event", detail)
 end)
 
 -- Event: bom ShopState broadcast (stock + refreshIn)
@@ -564,14 +533,11 @@ while STATE.alive() do
 	end
 	if MActive.Value ~= lastMActive then
 		lastMActive = MActive.Value
-		notifyMeteor(lastMActive and "AKTIF — meteor jatuh!" or "selesai", "")
-	end
-	if MPhase.Value ~= lastMPhase then
-		lastMPhase = MPhase.Value
-		if lastMPhase ~= "" then
-			notifyMeteor("fase: " .. tostring(lastMPhase), "")
+		if lastMActive then
+			notifyMeteor("METEOR JATUH!")
 		end
 	end
+	lastMPhase = MPhase.Value
 	if os.clock() - lastGuiPoll > 30 then
 		lastGuiPoll = os.clock()
 		local s = readGuiStock()
