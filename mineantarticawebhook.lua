@@ -10,6 +10,19 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local VirtualUser = game:GetService("VirtualUser")
 
+-- Shim: jalan juga via loadstring (tanpa live-reload)
+if typeof(STATE) ~= "table" then
+	STATE = {
+		connect = function(sig, fn)
+			return sig:Connect(fn)
+		end,
+		onCleanup = function() end,
+		alive = function()
+			return true
+		end,
+	}
+end
+
 local LocalPlayer = Players.LocalPlayer
 local WeatherRemotes = ReplicatedStorage:WaitForChild("WeatherRemotes")
 local MeteorRemotes = ReplicatedStorage:WaitForChild("MeteorRemotes")
