@@ -72,6 +72,7 @@ local TUNE = {
     tpStep = 25, tpInstant = 60, tpStepWait = 0.1, -- teleport stepped (stud, stud, detik). KECIL = aman kick
     promptRange = 1000, promptRestore = 0.3, -- fire prompt (stud, detik)
     digTick = 0.45, digDirs = 8, -- auto dig 360° (detik per tembakan, jumlah arah)
+    bombTick = 3, -- interval coba auto buy bomb (detik)
 }
 
 -- helper di atas UI: callback tombol capture local ini (qentury/cake taruh helper duluan juga)
@@ -511,13 +512,12 @@ local function bombPrice(id)
 end
 
 local function buyBombs()
+    -- coba terus: tanpa blacklist permanen (gagal = coba lagi tick berikut)
     local sel = {}
     for _, id in ipairs(Cfg.bombSel) do
-        if not Stat.skipBomb[id] then
-            local price = bombPrice(id)
-            if price then
-                table.insert(sel, { id = id, price = price })
-            end
+        local price = bombPrice(id)
+        if price then
+            table.insert(sel, { id = id, price = price })
         end
     end
     table.sort(sel, function(a, b) return a.price < b.price end)
@@ -530,9 +530,8 @@ local function buyBombs()
                 notify("Bomb", "Beli: " .. b.id)
                 print("[hub] beli bomb " .. b.id)
                 return true
-            else
-                Stat.skipBomb[b.id] = true
             end
+            -- gagal: lanjut id berikut, tick berikut coba lagi
         end
     end
     return false
@@ -1360,12 +1359,7 @@ local function doUpgrade()
             end
         end
     end
-    -- bomb pilihan: termurah dulu, verifikasi coins turun
-    if Cfg.autoBomb then
-        if buyBombs() then
-            return
-        end
-    end
+    -- bomb punya loop sendiri (terus-menerus), tak numpang di sini
 end
 
 local function upgradeLabel()
@@ -1380,7 +1374,7 @@ end
 task.spawn(function()
     while alive and (RL_STATE == nil or RL_STATE.alive()) do
         local ok, err = pcall(function()
-            if (Cfg.upWarmth or Cfg.upCarry or Cfg.autoBomb) and not Stat.selling then
+            if (Cfg.upWarmth or Cfg.upCarry) and not Stat.selling then
                 doUpgrade()
                 upgradeLabel()
             end
@@ -1389,6 +1383,21 @@ task.spawn(function()
             warn("[hub] upgrade " .. tostring(err))
         end
         task.wait(10)
+    end
+end)
+
+-- auto buy bomb: loop sendiri tiap bombTick, coba terus sampai sukses / toggle mati
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if Cfg.autoBomb and not Stat.selling then
+                buyBombs()
+            end
+        end)
+        if not ok then
+            warn("[hub] bomb " .. tostring(err))
+        end
+        task.wait(TUNE.bombTick)
     end
 end)
 
