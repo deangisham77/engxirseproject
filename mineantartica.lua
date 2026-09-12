@@ -47,17 +47,18 @@ local PickaxeData = require(RS:WaitForChild("PickaxeData"))
 local BombData = require(RS:WaitForChild("BombData"))
 local SG = workspace:WaitForChild("SpawnedGems")
 local DG = workspace:WaitForChild("DroppedGems")
+local BD = workspace:WaitForChild("Boulders")
 
-local RARITY_LIST = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic" }
-local RARITY_RANK = { Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Exotic = 7 }
-local RARITY_HEX = { Common = "#CD945C", Uncommon = "#5FDC69", Rare = "#469BFF", Epic = "#B45FFF", Legendary = "#FFAA2D", Mythic = "#FF4646", Exotic = "#FFD84A" }
+local RARITY_LIST = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }
+local RARITY_RANK = { Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Exotic = 7, Zenith = 8 }
+local RARITY_HEX = { Common = "#CD945C", Uncommon = "#5FDC69", Rare = "#469BFF", Epic = "#B45FFF", Legendary = "#FFAA2D", Mythic = "#FF4646", Exotic = "#FFD84A", Zenith = "#6EEBFF" }
 local RARITY_C3 = {
     Common = Color3.fromRGB(205, 148, 92), Uncommon = Color3.fromRGB(95, 220, 105),
     Rare = Color3.fromRGB(70, 155, 255), Epic = Color3.fromRGB(180, 95, 255),
     Legendary = Color3.fromRGB(255, 170, 45), Mythic = Color3.fromRGB(255, 70, 70),
-    Exotic = Color3.fromRGB(255, 216, 74),
+    Exotic = Color3.fromRGB(255, 216, 74), Zenith = Color3.fromRGB(110, 235, 255),
 }
-local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9, antiAfk = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic" }, antiLag = false, noRender = false, dig = false, digRadius = 8 }
+local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9, antiAfk = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }, espBoulder = true, antiLag = false, noRender = false, dig = false, digRadius = 8 }
 local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
 -- angka tuning satu tempat (jarak server: prompt ~15-17, dig <12)
@@ -237,7 +238,7 @@ local function espRefresh()
         want[r] = true
     end
     for m, e in pairs(espMarks) do
-        if not m.Parent or not want[m:GetAttribute("Rarity")] then
+        if not m.Parent or (not e.b and not want[m:GetAttribute("Rarity")]) or (e.b and not Cfg.espBoulder) then
             pcall(function() e.hl:Destroy() end)
             pcall(function() e.gui:Destroy() end)
             espMarks[m] = nil
@@ -258,6 +259,18 @@ local function espRefresh()
     end
     scan(SG)
     scan(DG)
+    -- boulder: toggle sendiri (tak punya rarity), label mutasi
+    if Cfg.espBoulder then
+        for _, m in ipairs(BD:GetChildren()) do
+            if not espMarks[m] then
+                local mesh = m:FindFirstChild("Mesh_0", true) or m:FindFirstChildWhichIsA("BasePart", true)
+                if mesh then
+                    table.insert(cand, { m = m, mesh = mesh, d = (mesh.Position - myPos).Magnitude,
+                        bid = m:GetAttribute("BoulderId") or m.Name })
+                end
+            end
+        end
+    end
     table.sort(cand, function(a, b) return a.d < b.d end)
     local marked = 0
     for _ in pairs(espMarks) do
@@ -268,6 +281,9 @@ local function espRefresh()
             break
         end
         local col = RARITY_C3[c.m:GetAttribute("Rarity")] or Color3.new(1, 1, 1)
+        if c.bid then
+            col = Color3.fromRGB(255, 200, 100) -- boulder: oranye
+        end
         local hl = Instance.new("Highlight")
         hl.Name = "ANT_ESP"
         hl.Adornee = c.m
@@ -296,12 +312,16 @@ local function espRefresh()
         lb.TextYAlignment = Enum.TextYAlignment.Center
         local rar = c.m:GetAttribute("Rarity") or "Common"
         local luck = tonumber(c.m:GetAttribute("Luck")) or 0
-        lb.Text = string.format('<font color="%s">[%s]</font> %s\n%s  +%.1f%%',
-            RARITY_HEX[rar] or "#FFFFFF", rar:sub(1, 1),
-            c.m:GetAttribute("GemName") or c.m.Name,
-            fmtMoney(tonumber(c.m:GetAttribute("Value")) or 0), luck)
+        if c.bid then
+            lb.Text = string.format('[B] %s\n%.0fm', tostring(c.bid), c.d)
+        else
+            lb.Text = string.format('<font color="%s">[%s]</font> %s\n%s  +%.1f%%',
+                RARITY_HEX[rar] or "#FFFFFF", rar:sub(1, 1),
+                c.m:GetAttribute("GemName") or c.m.Name,
+                fmtMoney(tonumber(c.m:GetAttribute("Value")) or 0), luck)
+        end
         lb.Parent = bb
-        espMarks[c.m] = { hl = hl, gui = bb }
+        espMarks[c.m] = { hl = hl, gui = bb, b = c.bid ~= nil }
         marked += 1
     end
 end
@@ -909,6 +929,7 @@ end })
 
 local EspBox = MainTab:AddGroupbox({ Side = "Left", Name = "ESP", Collapsed = true })
 EspBox:AddToggle("Esp", { Text = "ESP crystal", Default = false })
+EspBox:AddToggle("EspBoulder", { Text = "ESP boulder", Default = true })
 EspBox:AddDropdown("EspRar", { Text = "Rarity", Values = RARITY_LIST, Multi = true, Default = RARITY_LIST })
 
 local MonitorBox = MainTab:AddGroupbox({ Side = "Left", Name = "Monitor Top 10" })
@@ -1135,6 +1156,9 @@ Toggles.Esp:OnChanged(function(v)
     if not v then
         espClear()
     end
+end)
+Toggles.EspBoulder:OnChanged(function(v)
+    Cfg.espBoulder = v
 end)
 Options.EspRar:OnChanged(function(v)
     local list = {}
