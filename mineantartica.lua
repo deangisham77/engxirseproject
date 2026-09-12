@@ -48,6 +48,7 @@ local BombData = require(RS:WaitForChild("BombData"))
 local SG = workspace:WaitForChild("SpawnedGems")
 local DG = workspace:WaitForChild("DroppedGems")
 local BD = workspace:WaitForChild("Boulders")
+local PR = workspace:FindFirstChild("PlotRunes") -- cache ulang di refresh (folder rilis belakangan)
 
 local RARITY_LIST = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }
 local RARITY_RANK = { Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Exotic = 7, Zenith = 8 }
@@ -58,7 +59,7 @@ local RARITY_C3 = {
     Legendary = Color3.fromRGB(255, 170, 45), Mythic = Color3.fromRGB(255, 70, 70),
     Exotic = Color3.fromRGB(255, 216, 74), Zenith = Color3.fromRGB(110, 235, 255),
 }
-local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9, antiAfk = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }, espBoulder = true, antiLag = false, noRender = false, dig = false, digRadius = 8 }
+local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9, antiAfk = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }, espBoulder = true, antiLag = false, noRender = false, dig = false, digRadius = 8, autoBoulder = false, autoRune = false }
 local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
 -- angka tuning satu tempat (jarak server: prompt ~15-17, dig <12)
@@ -74,6 +75,10 @@ local TUNE = {
     promptRange = 1000, promptRestore = 0.3, -- fire prompt (stud, detik)
     digTick = 0.45, digDirs = 8, -- auto dig 360° (detik per tembakan, jumlah arah)
     bombTick = 3, -- interval coba auto buy bomb (detik)
+    boulderTick = 0.6, runeTick = 1, -- loop auto boulder/rune (detik)
+    targetSlack = 15, -- toleransi ukur jarak client vs server (stud)
+    espCap = 150, monSlots = 10, -- cap ESP + slot tiap monitor
+    pruneEveryS = 600, -- bersih Stat.tryAt (detik)
 }
 
 -- helper di atas UI: callback tombol capture local ini (qentury/cake taruh helper duluan juga)
@@ -218,9 +223,50 @@ local function firePrompt(pr)
     return ok
 end
 
--- ESP crystal (highlight + billboard), incremental + cap
+-- prompt pertama di model (crystal/boulder/rune polanya sama)
+local function promptOf(m)
+    for _, d in ipairs(m:GetDescendants()) do
+        if d:IsA("ProximityPrompt") then
+            return d
+        end
+    end
+    return nil
+end
+
+-- batas fire = MaxActivationDistance prompt itu sendiri (server cek ini)
+local function promptRange(pr)
+    local r = TUNE.pickupRange
+    pcall(function()
+        if pr and pr.Parent then
+            r = tonumber(pr.MaxActivationDistance) or r
+        end
+    end)
+    return r
+end
+
+-- isi slot monitor generik (rows: {m, pos, name, ...}, fmt(i, r) -> teks)
+local function fillSlots(slots, rows, fmt)
+    for i = 1, TUNE.monSlots do
+        local slot = slots[i]
+        local r = rows[i]
+        if r and r.m.Parent then
+            slot.target = r.m
+            slot.pos = r.pos
+            slot.name = r.name
+            local txt = fmt(i, r)
+            pcall(function()
+                slot.btn:SetText(txt)
+                slot.btn:SetVisible(true)
+            end)
+        else
+            slot.target = nil
+            pcall(function() slot.btn:SetVisible(false) end)
+        end
+    end
+end
+
+-- ESP crystal (highlight + billboard), incremental + cap (cap di TUNE.espCap)
 local espMarks = {}
-local ESP_CAP = 150
 local function espClear()
     for m, e in pairs(espMarks) do
         pcall(function() e.hl:Destroy() end)
@@ -277,7 +323,7 @@ local function espRefresh()
         marked += 1
     end
     for _, c in ipairs(cand) do
-        if marked >= ESP_CAP then
+        if marked >= TUNE.espCap then
             break
         end
         local col = RARITY_C3[c.m:GetAttribute("Rarity")] or Color3.new(1, 1, 1)
@@ -287,16 +333,16 @@ local function espRefresh()
         local hl = Instance.new("Highlight")
         hl.Name = "ANT_ESP"
         hl.Adornee = c.m
-        hl.DepthMode = Enum.HighlightDepthMode.Occluded
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         hl.FillColor = col
         hl.OutlineColor = col
-        hl.FillTransparency = 0.75
-        hl.OutlineTransparency = 0.1
+        hl.FillTransparency = 0.5
+        hl.OutlineTransparency = 0
         hl.Parent = c.m
         local bb = Instance.new("BillboardGui")
         bb.Name = "ANT_ESPGUI"
         bb.Adornee = c.mesh
-        bb.AlwaysOnTop = false
+        bb.AlwaysOnTop = true
         bb.Size = UDim2.fromOffset(200, 40)
         bb.StudsOffsetWorldSpace = Vector3.new(0, 3, 0)
         bb.MaxDistance = 1500
@@ -304,8 +350,8 @@ local function espRefresh()
         local lb = Instance.new("TextLabel")
         lb.BackgroundTransparency = 1
         lb.Size = UDim2.fromScale(1, 1)
-        lb.Font = Enum.Font.GothamBold
-        lb.TextSize = 12
+        lb.Font = Enum.Font.GothamBlack
+        lb.TextSize = 14
         lb.TextStrokeTransparency = 0.3
         lb.TextColor3 = Color3.new(1, 1, 1)
         lb.RichText = true
@@ -497,7 +543,6 @@ function Server.peak()
 end
 
 Stat.skipPick = Stat.skipPick or {}
-Stat.skipBomb = Stat.skipBomb or {}
 
 local function buyPickaxe(idx, manual)
     local info = PickaxeData[idx]
@@ -557,7 +602,7 @@ local function buyBombs()
     return false
 end
 
-local flyBV, flyBG, flyConn, flyGui
+local flyConn, flyGui
 local flyUp, flyDn = false, false
 -- grafik hemat (simpan setting asli buat restore)
 local gfxSaved
@@ -601,14 +646,6 @@ local function stopFly()
     if flyConn then
         pcall(function() flyConn:Disconnect() end)
         flyConn = nil
-    end
-    if flyBV then
-        pcall(function() flyBV:Destroy() end)
-        flyBV = nil
-    end
-    if flyBG then
-        pcall(function() flyBG:Destroy() end)
-        flyBG = nil
     end
     if flyGui then
         pcall(function() flyGui:Destroy() end)
@@ -688,6 +725,14 @@ if typeof(RL_STATE) ~= "table" then
 end
 getgenv()._ANT_HUB_UNLOAD = function()
     alive = false
+    Cfg.vacuum = false
+    Cfg.teleport = false
+    Cfg.autoSell = false
+    Cfg.upWarmth = false
+    Cfg.upCarry = false
+    Cfg.autoBomb = false
+    Cfg.autoBoulder = false
+    Cfg.autoRune = false
     Cfg.fly = false
     Cfg.noclip = false
     Cfg.speed = false
@@ -715,6 +760,14 @@ end
 if RL_STATE then
     RL_STATE.onCleanup(function()
         alive = false
+        Cfg.vacuum = false
+        Cfg.autoSell = false
+        Cfg.upWarmth = false
+        Cfg.upCarry = false
+        Cfg.autoBomb = false
+        Cfg.autoBoulder = false
+        Cfg.autoRune = false
+        Cfg.dig = false
         Cfg.fly = false
         Cfg.noclip = false
         pcall(stopFly)
@@ -774,9 +827,6 @@ task.spawn(function()
         -- fly manager (CFrame-step: replikasi milik sendiri, fisika nol -> tak rubberband)
         local wantFly = Cfg.fly
         local hasFly = flyConn ~= nil
-        if not hasFly and (flyBV ~= nil or flyBG ~= nil) then
-            stopFly() -- objek yatim pasca-respawn, bersihkan biar dibuat ulang
-        end
         if wantFly and not hasFly then
             local char = LP.Character
             local h = char and char:FindFirstChild("HumanoidRootPart")
@@ -908,6 +958,7 @@ local Options = Library.Options
 local MainTab = Window:AddTab({ Name = "Main", Icon = "gem", Description = "Vacuum + sell", SingleColumn = true })
 local ShopTab = Window:AddTab({ Name = "Shop", Icon = "shopping-cart", Description = "Auto upgrade", SingleColumn = true })
 local MiscTab = Window:AddTab({ Name = "Misc", Icon = "rocket", Description = "Movement", SingleColumn = true })
+local BRTab = Window:AddTab({ Name = "B&R", Icon = "mountain", Description = "Boulder + rune" })
 local ServerTab = Window:AddTab({ Name = "Server", Icon = "server", Description = "Players + hop" })
 local SettingsTab = Window:AddTab({ Name = "Setting", Icon = "settings", Description = "UI" })
 
@@ -932,6 +983,33 @@ EspBox:AddToggle("Esp", { Text = "ESP crystal", Default = false })
 EspBox:AddToggle("EspBoulder", { Text = "ESP boulder", Default = true })
 EspBox:AddDropdown("EspRar", { Text = "Rarity", Values = RARITY_LIST, Multi = true, Default = RARITY_LIST })
 
+-- slot teleport generik (dipakai Monitor + tab B&R)
+local function brSlots(box, n, tag)
+    local slots = {}
+    for i = 1, n do
+        local idx = i
+        local btn = box:AddButton({ Text = "-", Func = function()
+            local s = slots[idx]
+            local h = getHRP()
+            if s.target and s.target.Parent and s.pos and h then
+                local ok, err = pcall(function()
+                    tpTo(h, CFrame.new(s.pos + Vector3.new(0, TUNE.tpLift, 0)))
+                end)
+                if ok then
+                    print("[hub] tp ke " .. s.name)
+                else
+                    notify(tag, "TP gagal: " .. tostring(err):sub(1, 60))
+                end
+            else
+                notify(tag, "Sudah hilang.")
+            end
+        end })
+        btn:SetVisible(false)
+        slots[i] = { btn = btn, target = nil, pos = nil, name = "-" }
+    end
+    return slots
+end
+
 local MonitorBox = MainTab:AddGroupbox({ Side = "Left", Name = "Monitor Top 10" })
 MonitorBox:AddDropdown("MonRarity", { Text = "Rarity", Values = RARITY_LIST, Multi = true, Default = { "Mythic" } })
 MonitorBox:AddDropdown("MonSort", { Text = "Sort by", Values = { "Value", "Luck" }, Default = 1 })
@@ -948,28 +1026,21 @@ MonitorBox:AddButton({ Text = "Clear Rarity", Func = function()
     pcall(function() Options.MonRarity:SetValue({}) end)
     Stat.monRefresh = true
 end })
-local MonSlots = {}
-for i = 1, 10 do
-    local idx = i
-    local btn = MonitorBox:AddButton({ Text = "-", Func = function()
-        local t = MonSlots[idx].target
-        local h = getHRP()
-        if t and t.Parent and h then
-            local ok, err = pcall(function()
-                tpTo(h, CFrame.new(claimPos(t) + Vector3.new(0, TUNE.tpLift, 0)))
-            end)
-            if ok then
-                print("[hub] tp ke " .. t.Name)
-            else
-                notify("Monitor", "TP gagal: " .. tostring(err):sub(1, 60))
-            end
-        else
-            notify("Monitor", "Crystal hilang.")
-        end
-    end })
-    btn:SetVisible(false)
-    MonSlots[i] = { btn = btn, target = nil }
-end
+local MonSlots = brSlots(MonitorBox, TUNE.monSlots, "Monitor")
+
+local BoulderBox = BRTab:AddGroupbox({ Side = "Left", Name = "Boulder Top 10" })
+BoulderBox:AddButton({ Text = "Refresh", Func = function()
+    Stat.monRefresh = true
+end })
+BoulderBox:AddToggle("AutoBoulder", { Text = "Auto mine boulder", Default = false })
+local BoulderSlots = brSlots(BoulderBox, TUNE.monSlots, "B&R")
+
+local RuneBox = BRTab:AddGroupbox({ Side = "Right", Name = "Rune" })
+RuneBox:AddButton({ Text = "Refresh", Func = function()
+    Stat.monRefresh = true
+end })
+RuneBox:AddToggle("AutoRune", { Text = "Auto pickup rune", Default = false })
+local RuneSlots = brSlots(RuneBox, TUNE.monSlots, "B&R")
 
 local ShopBox = ShopTab:AddGroupbox({ Side = "Left", Name = "Auto Upgrade" })
 ShopBox:AddToggle("UpWarmth", { Text = "Warmth", Default = false })
@@ -1159,6 +1230,18 @@ Toggles.Esp:OnChanged(function(v)
 end)
 Toggles.EspBoulder:OnChanged(function(v)
     Cfg.espBoulder = v
+end)
+Toggles.AutoBoulder:OnChanged(function(v)
+    Cfg.autoBoulder = v
+    if v then
+        print("[hub] auto boulder ON")
+    end
+end)
+Toggles.AutoRune:OnChanged(function(v)
+    Cfg.autoRune = v
+    if v then
+        print("[hub] auto rune ON")
+    end
 end)
 Options.EspRar:OnChanged(function(v)
     local list = {}
@@ -1448,6 +1531,68 @@ getgenv()._ANT_HUB_DBG = function()
         math.floor(os.clock() - (Stat.lastTick or 0)), tostring(Stat.lastTarget or "-"))
 end
 
+local function runePos(m)
+    local rm = m:FindFirstChild("RuneMesh", true)
+    if rm then
+        return rm.Position
+    end
+    return claimPos(m)
+end
+
+local function refreshBoulderMonitor()
+    local h = getHRP()
+    local myPos = h and h.Position or Vector3.zero
+    local rows = {}
+    if BD and BD.Parent then
+        for _, m in ipairs(BD:GetChildren()) do
+            local mesh = m:FindFirstChild("Mesh_0", true) or m:FindFirstChildWhichIsA("BasePart", true)
+            if mesh then
+                table.insert(rows, {
+                    m = m,
+                    name = tostring(m:GetAttribute("BoulderId") or m.Name),
+                    d = (mesh.Position - myPos).Magnitude,
+                    pos = mesh.Position,
+                })
+            end
+        end
+    end
+    table.sort(rows, function(a, b) return a.d < b.d end)
+    fillSlots(BoulderSlots, rows, function(i, r)
+        return string.format("%d. [B] %s %.0fm", i, r.name, r.d)
+    end)
+end
+
+local function refreshRuneMonitor()
+    if not PR or not PR.Parent then
+        PR = workspace:FindFirstChild("PlotRunes")
+    end
+    local h = getHRP()
+    local myPos = h and h.Position or Vector3.zero
+    local rows = {}
+    if PR then
+        for _, m in ipairs(PR:GetDescendants()) do
+            if m:IsA("Model") then
+                local rid = m:GetAttribute("RuneId")
+                if rid then
+                    local pos = runePos(m)
+                    if pos then
+                        table.insert(rows, {
+                            m = m,
+                            name = tostring(rid) .. " x" .. tostring(m:GetAttribute("Merged") or 1),
+                            d = (pos - myPos).Magnitude,
+                            pos = pos,
+                        })
+                    end
+                end
+            end
+        end
+    end
+    table.sort(rows, function(a, b) return a.d < b.d end)
+    fillSlots(RuneSlots, rows, function(i, r)
+        return string.format("%d. [R] %s %.0fm", i, r.name, r.d)
+    end)
+end
+
 local function refreshMonitor()
     local h = getHRP()
     local myPos = h and h.Position or Vector3.zero
@@ -1463,7 +1608,9 @@ local function refreshMonitor()
                 if pos then
                     table.insert(rows, {
                         m = m,
+                        name = m:GetAttribute("GemName") or m.Name,
                         d = (pos - myPos).Magnitude,
+                        pos = pos,
                         value = tonumber(m:GetAttribute("Value")) or 0,
                         luck = tonumber(m:GetAttribute("Luck")) or 0,
                         kg = tonumber(m:GetAttribute("Kg")) or 0,
@@ -1479,27 +1626,15 @@ local function refreshMonitor()
     else
         table.sort(rows, function(a, b) return a.value > b.value end)
     end
-    for i = 1, 10 do
-        local slot = MonSlots[i]
-        local r = rows[i]
-        if r and r.m.Parent then
-            slot.target = r.m
-            local rar = r.m:GetAttribute("Rarity") or "Common"
-            local badge = rar:sub(1, 1)
-            local kg = r.kg >= 1000 and string.format("%.2ft", r.kg / 1000) or string.format("%.1fkg", r.kg)
-            local txt = string.format('%d. <font color="%s">[%s] %s</font> %s +%s %s %.0fm', i,
-                RARITY_HEX[rar] or "#FFFFFF", badge,
-                r.m:GetAttribute("GemName") or r.m.Name, fmtMoney(r.value),
-                string.format("%.1f%%", r.luck), kg, r.d)
-            pcall(function()
-                slot.btn:SetText(txt)
-                slot.btn:SetVisible(true)
-            end)
-        else
-            slot.target = nil
-            pcall(function() slot.btn:SetVisible(false) end)
-        end
-    end
+    fillSlots(MonSlots, rows, function(i, r)
+        local rar = r.m:GetAttribute("Rarity") or "Common"
+        local badge = rar:sub(1, 1)
+        local kg = r.kg >= 1000 and string.format("%.2ft", r.kg / 1000) or string.format("%.1fkg", r.kg)
+        return string.format('%d. <font color="%s">[%s] %s</font> %s +%s %s %.0fm', i,
+            RARITY_HEX[rar] or "#FFFFFF", badge,
+            r.m:GetAttribute("GemName") or r.m.Name, fmtMoney(r.value),
+            string.format("%.1f%%", r.luck), kg, r.d)
+    end)
 end
 
 task.spawn(function()
@@ -1509,7 +1644,17 @@ task.spawn(function()
                 Stat.monAt = os.clock()
                 Stat.monRefresh = false
                 refreshMonitor()
+                refreshBoulderMonitor()
+                refreshRuneMonitor()
                 espRefresh()
+                if os.clock() - (Stat.pruneAt or 0) > TUNE.pruneEveryS then
+                    Stat.pruneAt = os.clock()
+                    for uid, t in pairs(Stat.tryAt) do
+                        if os.clock() - t > TUNE.retryS * 10 then
+                            Stat.tryAt[uid] = nil
+                        end
+                    end
+                end
             end
             pcall(function() MeteorLabel:SetText(meteorText()) end)
         end)
@@ -1542,23 +1687,12 @@ task.spawn(function()
                 if (RARITY_RANK[m:GetAttribute("Rarity")] or 1) < Cfg.minRarity then
                     return
                 end
-                local pr
-                for _, d in ipairs(m:GetDescendants()) do
-                    if d:IsA("ProximityPrompt") then
-                        pr = d
-                        break
-                    end
-                end
+                local pr = promptOf(m)
                 if pr then
                     local pos = claimPos(m, pr)
                     if pos then
                         local d = (pos - myPos).Magnitude
-                        -- batas fire = MaxActivationDistance prompt itu sendiri (server cek ini, mis. 74)
-                        local range = TUNE.pickupRange
-                        pcall(function()
-                            range = tonumber(pr.MaxActivationDistance) or range
-                        end)
-                        table.insert(cand, { m = m, d = d, pr = pr, pos = pos, score = d * (w or 1), range = range })
+                        table.insert(cand, { m = m, d = d, pr = pr, pos = pos, score = d * (w or 1), range = promptRange(pr) })
                     end
                 end
             end
@@ -1589,7 +1723,7 @@ task.spawn(function()
             local pick = nil
             for _, c in ipairs(cand) do
                 local uid = c.m:GetAttribute("Uid") or c.m.Name
-                if now - (Stat.tryAt[uid] or 0) >= TUNE.retryS and c.d <= c.range + 15 then
+                if now - (Stat.tryAt[uid] or 0) >= TUNE.retryS and c.d <= c.range + TUNE.targetSlack then
                     pick = c
                     break
                 end
@@ -1729,6 +1863,128 @@ task.spawn(function()
             warn("[hub] dig " .. tostring(err))
         end
         task.wait(TUNE.digTick)
+    end
+end)
+
+-- auto mine boulder: fire prompt BoulderMine berulang (HP besar, perlu banyak hit)
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if not Cfg.autoBoulder or Stat.selling then
+                return
+            end
+            local h = getHRP()
+            if not h then
+                return
+            end
+            local myPos = h.Position
+            local best, bestD, bestP = nil, math.huge, nil
+            if BD and BD.Parent then
+                for _, m in ipairs(BD:GetChildren()) do
+                    local pr = promptOf(m)
+                    if pr then
+                        local pos = claimPos(m, pr)
+                        if pos then
+                            local d = (pos - myPos).Magnitude
+                            if d < bestD then
+                                best, bestD, bestP = m, d, pr
+                            end
+                        end
+                    end
+                end
+            end
+            if not best then
+                return
+            end
+            local range = promptRange(bestP)
+            if bestD > range - 2 then
+                if not Cfg.teleport then
+                    return
+                end
+                local pos = claimPos(best, bestP)
+                if pos then
+                    tpTo(h, CFrame.new(pos + Vector3.new(0, TUNE.tpLift, 0)))
+                    task.wait(TUNE.settleWait)
+                    if best.Parent == nil then
+                        return
+                    end
+                end
+            end
+            firePrompt(bestP)
+            if os.clock() - (Stat.lastBoulderBeat or 0) > 30 then
+                Stat.lastBoulderBeat = os.clock()
+                print("[hub] mine boulder " .. best.Name .. " d=" .. math.floor(bestD))
+            end
+        end)
+        if not ok then
+            warn("[hub] boulder " .. tostring(err))
+        end
+        task.wait(TUNE.boulderTick)
+    end
+end)
+
+-- auto pickup rune: prompt RunePickup milik sendiri di PlotRunes
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if not Cfg.autoRune or Stat.selling then
+                return
+            end
+            if not PR or not PR.Parent then
+                PR = workspace:FindFirstChild("PlotRunes")
+            end
+            if not PR then
+                return
+            end
+            local h = getHRP()
+            if not h then
+                return
+            end
+            local myPos = h.Position
+            local best, bestD, bestP = nil, math.huge, nil
+            for _, m in ipairs(PR:GetDescendants()) do
+                if m:IsA("Model") and m:GetAttribute("RuneId") ~= nil and m:GetAttribute("OwnerId") == LP.UserId then
+                    local pr = promptOf(m)
+                    if pr then
+                        local pos = runePos(m)
+                        if pos then
+                            local d = (pos - myPos).Magnitude
+                            if d < bestD then
+                                best, bestD, bestP = m, d, pr
+                            end
+                        end
+                    end
+                end
+            end
+            if not best then
+                return
+            end
+            local uid = "rune_" .. tostring(best:GetDebugId())
+            if os.clock() - (Stat.tryAt[uid] or 0) < TUNE.retryS then
+                return
+            end
+            local range = promptRange(bestP)
+            if bestD > range - 2 then
+                if not Cfg.teleport then
+                    return
+                end
+                local pos = runePos(best)
+                if pos then
+                    tpTo(h, CFrame.new(pos + Vector3.new(0, TUNE.tpLift, 0)))
+                    task.wait(TUNE.settleWait)
+                    if best.Parent == nil then
+                        return
+                    end
+                end
+            end
+            Stat.tryAt[uid] = os.clock()
+            firePrompt(bestP)
+            print("[hub] pickup rune " .. tostring(best:GetAttribute("RuneId")))
+        end)
+        if not ok then
+            warn("[hub] rune " .. tostring(err))
+        end
+        task.wait(TUNE.runeTick)
     end
 end)
 
