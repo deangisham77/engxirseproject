@@ -62,7 +62,7 @@ local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
 -- angka tuning satu tempat (jarak server: prompt ~15-17, dig <12)
 local TUNE = {
-    pickupRange = 20, -- fire langsung tanpa teleport (stud; >18 mungkin ditolak server)
+    pickupRange = 20, -- fallback bila MaxActivationDistance prompt tak terbaca (stud)
     tpLift = 4, -- melayang di atas mesh (stud)
     settleWait = 0.7, -- tunggu replikasi posisi server pasca-TP (detik)
     retryS = 3, -- jeda coba ulang per crystal (detik)
@@ -596,6 +596,14 @@ local function stopFly()
     end
     flyUp, flyDn = false, false
     local char = LP.Character
+    local h0 = char and char:FindFirstChild("HumanoidRootPart")
+    if h0 then
+        pcall(function()
+            h0.AssemblyLinearVelocity = Vector3.zero
+            h0.AssemblyAngularVelocity = Vector3.zero
+            h0.CanCollide = true -- manager noclip matikan lagi bila ON
+        end)
+    end
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if hum then
         hum.PlatformStand = false
@@ -743,10 +751,10 @@ task.spawn(function()
         if not alive or (RL_STATE and not RL_STATE.alive()) then
             break
         end
-        -- fly manager
+        -- fly manager (CFrame-step: replikasi milik sendiri, fisika nol -> tak rubberband)
         local wantFly = Cfg.fly
-        local hasFly = flyBV ~= nil and flyBV.Parent ~= nil
-        if not hasFly and (flyBV ~= nil or flyBG ~= nil or flyConn ~= nil) then
+        local hasFly = flyConn ~= nil
+        if not hasFly and (flyBV ~= nil or flyBG ~= nil) then
             stopFly() -- objek yatim pasca-respawn, bersihkan biar dibuat ulang
         end
         if wantFly and not hasFly then
@@ -755,18 +763,14 @@ task.spawn(function()
             local hum = char and char:FindFirstChildOfClass("Humanoid")
             if h and hum then
                 hum.PlatformStand = true
-                flyBG = Instance.new("BodyGyro")
-                flyBG.P = 9e4
-                flyBG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-                flyBG.CFrame = h.CFrame
-                flyBG.Parent = h
-                flyBV = Instance.new("BodyVelocity")
-                flyBV.MaxForce = Vector3.new(9e9, 9e9, 9e9)
-                flyBV.Velocity = Vector3.zero
-                flyBV.Parent = h
+                pcall(function()
+                    h.CanCollide = false -- senggolan = koreksi server
+                    h.AssemblyLinearVelocity = Vector3.zero
+                    h.AssemblyAngularVelocity = Vector3.zero
+                end)
                 flyButtons()
-                flyConn = RunS.Heartbeat:Connect(function()
-                    if not Cfg.fly or flyBV == nil or flyBG == nil then
+                flyConn = RunS.Heartbeat:Connect(function(dt)
+                    if not Cfg.fly then
                         return
                     end
                     local char2 = LP.Character
@@ -792,11 +796,21 @@ task.spawn(function()
                     if UIS:IsKeyDown(Enum.KeyCode.LeftControl) or flyDn then
                         move -= Vector3.new(0, 1, 0)
                     end
-                    if move.Magnitude > 0 then
-                        move = move.Unit * Cfg.flySpeed
+                    if dt > 0.1 then
+                        dt = 0.1 -- lag spike: potong langkah biar tak lompat
                     end
-                    flyBV.Velocity = move
-                    flyBG.CFrame = cam.CFrame
+                    pcall(function()
+                        h2.AssemblyLinearVelocity = Vector3.zero
+                        h2.AssemblyAngularVelocity = Vector3.zero
+                        h2.CanCollide = false
+                    end)
+                    if move.Magnitude > 0 then
+                        local step = move.Unit * Cfg.flySpeed * dt
+                        -- hadap kamera (yaw) biar stabil
+                        local lv = cam.CFrame.LookVector
+                        local yaw = math.atan2(-lv.X, -lv.Z)
+                        h2.CFrame = CFrame.new(h2.Position + step) * CFrame.Angles(0, yaw, 0)
+                    end
                 end)
             end
         elseif not wantFly and hasFly then
@@ -1499,7 +1513,7 @@ task.spawn(function()
                 return
             end
             local myPos = h.Position
-            local best, bestD, bestP, bestPos, bestScore = nil, math.huge, nil, nil, math.huge
+            local cand = {}
             local function consider(m, w)
                 if (RARITY_RANK[m:GetAttribute("Rarity")] or 1) < Cfg.minRarity then
                     return
@@ -1515,10 +1529,12 @@ task.spawn(function()
                     local pos = claimPos(m, pr)
                     if pos then
                         local d = (pos - myPos).Magnitude
-                        local score = d * (w or 1)
-                        if score < bestScore then
-                            best, bestD, bestP, bestPos, bestScore = m, d, pr, pos, score
-                        end
+                        -- batas fire = MaxActivationDistance prompt itu sendiri (server cek ini, mis. 74)
+                        local range = TUNE.pickupRange
+                        pcall(function()
+                            range = tonumber(pr.MaxActivationDistance) or range
+                        end)
+                        table.insert(cand, { m = m, d = d, pr = pr, pos = pos, score = d * (w or 1), range = range })
                     end
                 end
             end
@@ -1531,7 +1547,7 @@ task.spawn(function()
                     consider(m, 1)
                 end
             end
-            if not best then
+            if #cand == 0 then
                 if Stat.basePos then
                     tpTo(h, Stat.basePos)
                     Stat.basePos = nil
@@ -1542,33 +1558,56 @@ task.spawn(function()
                 end
                 return
             end
+            -- urut skor: yg dalam jangkauan + tak cooldown ditembak dulu (biar 1 target macet tak blokir lain)
+            table.sort(cand, function(a, b) return a.score < b.score end)
+            local best = cand[1]
+            local now = os.clock()
+            local pick = nil
+            for _, c in ipairs(cand) do
+                local uid = c.m:GetAttribute("Uid") or c.m.Name
+                if now - (Stat.tryAt[uid] or 0) >= TUNE.retryS and c.d <= c.range + 15 then
+                    pick = c
+                    break
+                end
+            end
+            if not pick then
+                -- semua cooldown / jauh: coba yg terdekat biar server yg putuskan (hold E manual pun bisa)
+                local uid = best.m:GetAttribute("Uid") or best.m.Name
+                if now - (Stat.tryAt[uid] or 0) < TUNE.retryS then
+                    return
+                end
+                pick = best
+            end
+            best = pick
+            local bestD, bestP, bestPos = best.d, best.pr, best.pos
             Stat.swept = false
-            Stat.lastTarget = best.Name .. " " .. math.floor(bestD) .. "st"
+            Stat.lastTarget = best.m.Name .. " " .. math.floor(bestD) .. "st"
             if os.clock() - (Stat.lastBeat or 0) > 30 then
                 Stat.lastBeat = os.clock()
                 print("[hub] kerja: " .. Stat.lastTarget)
             end
-            local uid = best:GetAttribute("Uid") or best.Name
-            if os.clock() - (Stat.tryAt[uid] or 0) < TUNE.retryS then
-                return
-            end
-            if bestD > TUNE.pickupRange then
+            local uid = best.m:GetAttribute("Uid") or best.m.Name
+            if bestD > best.range - 2 then
                 if not Cfg.teleport then
+                    -- tanpa teleport tetap coba: titik ukur client bisa meleset dari server (model besar)
+                    Stat.tryAt[uid] = os.clock()
+                    firePrompt(bestP)
+                    print("[hub] pickup " .. best.m.Name .. " d=" .. math.floor(bestD))
                     return
                 end
                 if not Stat.basePos then
                     Stat.basePos = h.CFrame
                 end
-                local tp = (bestPos or best:GetPivot().Position) + Vector3.new(0, TUNE.tpLift, 0)
+                local tp = (bestPos or best.m:GetPivot().Position) + Vector3.new(0, TUNE.tpLift, 0)
                 tpTo(h, CFrame.new(tp))
                 task.wait(TUNE.settleWait)
-                if best.Parent == nil then
+                if best.m.Parent == nil then
                     return
                 end
             end
             Stat.tryAt[uid] = os.clock()
             firePrompt(bestP)
-            print("[hub] pickup " .. best.Name .. " d=" .. math.floor(bestD))
+            print("[hub] pickup " .. best.m.Name .. " d=" .. math.floor(bestD))
         end)
         if not ok then
             warn("[hub] " .. tostring(err))
