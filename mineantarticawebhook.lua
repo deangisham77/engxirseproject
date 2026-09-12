@@ -37,6 +37,9 @@ local MImpact = MeteorRemotes:WaitForChild("ImpactPos")
 local MZoneEnd = MeteorRemotes:WaitForChild("ZoneEnd")
 local MEvent = MeteorRemotes:WaitForChild("Event")
 local ShopState = BombRemotes:WaitForChild("ShopState")
+local AbuseRemotes = ReplicatedStorage:WaitForChild("AdminAbuseRemotes")
+local AbuseStarted = AbuseRemotes:WaitForChild("Started")
+local AbuseAllEnd = AbuseRemotes:WaitForChild("AllEnd")
 
 local WeatherData = require(ReplicatedStorage:WaitForChild("WeatherData"))
 local BombData = require(ReplicatedStorage:WaitForChild("BombData"))
@@ -69,6 +72,22 @@ local lastRefreshIn = nil
 local lastGuiPoll = 0
 local broadcastSynced = false
 local lastAfkPulse = 0
+local lastAbuse = false
+
+local function abuseActive()
+	local ae = asInt(AbuseAllEnd.Value)
+	if ae <= 0 then
+		return false, ae
+	end
+	local srv = 0
+	pcall(function()
+		srv = workspace:GetServerTimeNow()
+	end)
+	if srv <= 0 then
+		return false, ae
+	end
+	return srv < ae, ae
+end
 
 -- Anti-AFK (menyatu): lumpuhkan Idled bawaan + denyut 4 menit di loop utama
 do
@@ -236,6 +255,18 @@ local function stockLines(stock)
 	return table.concat(lines, "\n")
 end
 
+local function notifyAbuse()
+	if not once("aa", 1800) then
+		return
+	end
+	local on, ae = abuseActive()
+	local extra = {}
+	if on then
+		table.insert(extra, { name = "Berakhir", value = string.format("<t:%d:R>", ae), inline = true })
+	end
+	send("🔥 ADMIN ABUSE!", "Event admin aktif. Gas farm!", 16724582, extra)
+end
+
 local function notifyRestock(stock, refreshIn)
 	if not once("r:" .. stockSig(stock), 900) then
 		return
@@ -317,6 +348,12 @@ STATE.connect(MActive:GetPropertyChangedSignal("Value"), function()
 			notifyMeteor("METEOR JATUH!")
 		end
 	end
+end)
+
+-- Event: admin abuse mulai (Started) + tangkap via AllEnd di poll
+STATE.connect(AbuseStarted.OnClientEvent, function()
+	lastAbuse = true
+	notifyAbuse()
 end)
 
 -- Event: bom ShopState broadcast (stock + refreshIn)
@@ -513,6 +550,13 @@ do
 	if winfo and winfo.mult then
 		table.insert(extra, { name = "Mult cuaca", value = string.format("x%d, luck +%d", winfo.mult or 1, winfo.luck or 0), inline = true })
 	end
+	do
+		local on, ae = abuseActive()
+		lastAbuse = on
+		if on then
+			table.insert(extra, { name = "Admin Abuse", value = string.format("AKTIF sampai <t:%d:R>", ae), inline = false })
+		end
+	end
 	local guiStock = readGuiStock()
 	if guiStock then
 		lastStockSig = stockSig(guiStock)
@@ -538,6 +582,13 @@ while STATE.alive() do
 		end
 	end
 	lastMPhase = MPhase.Value
+	do
+		local on = abuseActive()
+		if on and not lastAbuse then
+			notifyAbuse()
+		end
+		lastAbuse = on
+	end
 	if os.clock() - lastGuiPoll > 30 then
 		lastGuiPoll = os.clock()
 		local s = readGuiStock()
