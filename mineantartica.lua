@@ -49,6 +49,7 @@ local SG = workspace:WaitForChild("SpawnedGems")
 local DG = workspace:WaitForChild("DroppedGems")
 local BD = workspace:WaitForChild("Boulders")
 local PR = workspace:FindFirstChild("PlotRunes") -- cache ulang di refresh (folder rilis belakangan)
+local DR = workspace:FindFirstChild("DroppedRunes")
 
 local RARITY_LIST = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }
 local RARITY_RANK = { Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Exotic = 7, Zenith = 8 }
@@ -275,16 +276,18 @@ local function espClear()
     end
 end
 local function espRefresh()
-    if not Cfg.esp then
+    if not Cfg.esp and not Cfg.espBoulder then
         espClear()
         return
     end
     local want = {}
-    for _, r in ipairs(Cfg.espRar) do
-        want[r] = true
+    if Cfg.esp then
+        for _, r in ipairs(Cfg.espRar) do
+            want[r] = true
+        end
     end
     for m, e in pairs(espMarks) do
-        if not m.Parent or (not e.b and not want[m:GetAttribute("Rarity")]) or (e.b and not Cfg.espBoulder) then
+        if not m.Parent or (not e.b and (not Cfg.esp or not want[m:GetAttribute("Rarity")])) or (e.b and not Cfg.espBoulder) then
             pcall(function() e.hl:Destroy() end)
             pcall(function() e.gui:Destroy() end)
             espMarks[m] = nil
@@ -295,7 +298,7 @@ local function espRefresh()
     local cand = {}
     local function scan(folder)
         for _, m in ipairs(folder:GetChildren()) do
-            if want[m:GetAttribute("Rarity")] and not espMarks[m] then
+            if Cfg.esp and want[m:GetAttribute("Rarity")] and not espMarks[m] then
                 local mesh = m:FindFirstChild("Mesh_0", true)
                 if mesh then
                     table.insert(cand, { m = m, mesh = mesh, d = (mesh.Position - myPos).Magnitude })
@@ -303,8 +306,10 @@ local function espRefresh()
             end
         end
     end
-    scan(SG)
-    scan(DG)
+    if Cfg.esp then
+        scan(SG)
+        scan(DG)
+    end
     -- boulder: toggle sendiri (tak punya rarity), label mutasi
     if Cfg.espBoulder then
         for _, m in ipairs(BD:GetChildren()) do
@@ -326,39 +331,52 @@ local function espRefresh()
         if marked >= TUNE.espCap then
             break
         end
+        local isBoulder = c.bid ~= nil
         local col = RARITY_C3[c.m:GetAttribute("Rarity")] or Color3.new(1, 1, 1)
-        if c.bid then
-            col = Color3.fromRGB(255, 200, 100) -- boulder: oranye
+        if isBoulder then
+            col = Color3.fromRGB(255, 80, 0) -- boulder: oranye neon mencolok
         end
         local hl = Instance.new("Highlight")
         hl.Name = "ANT_ESP"
         hl.Adornee = c.m
         hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         hl.FillColor = col
-        hl.OutlineColor = col
-        hl.FillTransparency = 0.5
+        hl.OutlineColor = isBoulder and Color3.fromRGB(255, 255, 255) or col
+        hl.FillTransparency = isBoulder and 0.25 or 0.5
         hl.OutlineTransparency = 0
         hl.Parent = c.m
         local bb = Instance.new("BillboardGui")
         bb.Name = "ANT_ESPGUI"
         bb.Adornee = c.mesh
         bb.AlwaysOnTop = true
-        bb.Size = UDim2.fromOffset(200, 40)
-        bb.StudsOffsetWorldSpace = Vector3.new(0, 3, 0)
-        bb.MaxDistance = 1500
+        bb.Size = isBoulder and UDim2.fromOffset(260, 56) or UDim2.fromOffset(200, 40)
+        bb.StudsOffsetWorldSpace = isBoulder and Vector3.new(0, 4.5, 0) or Vector3.new(0, 3, 0)
+        bb.MaxDistance = isBoulder and 3000 or 1500
         bb.Parent = c.m
         local lb = Instance.new("TextLabel")
-        lb.BackgroundTransparency = 1
+        lb.BackgroundTransparency = isBoulder and 0.35 or 1
+        lb.BackgroundColor3 = isBoulder and Color3.fromRGB(30, 15, 0) or Color3.new(0,0,0)
+        -- boulder kasih corner biar lebih kotak mencolok
+        if isBoulder then
+            local cr = Instance.new("UICorner")
+            cr.CornerRadius = UDim.new(0, 6)
+            cr.Parent = lb
+            local stroke = Instance.new("UIStroke")
+            stroke.Color = Color3.fromRGB(255, 180, 60)
+            stroke.Thickness = 1.5
+            stroke.Parent = lb
+        end
         lb.Size = UDim2.fromScale(1, 1)
         lb.Font = Enum.Font.GothamBlack
-        lb.TextSize = 14
-        lb.TextStrokeTransparency = 0.3
+        lb.TextSize = isBoulder and 16 or 14
+        lb.TextStrokeTransparency = isBoulder and 0.15 or 0.3
+        lb.TextStrokeColor3 = Color3.new(0,0,0)
         lb.TextColor3 = Color3.new(1, 1, 1)
         lb.RichText = true
         lb.TextYAlignment = Enum.TextYAlignment.Center
         local rar = c.m:GetAttribute("Rarity") or "Common"
         local luck = tonumber(c.m:GetAttribute("Luck")) or 0
-        if c.bid then
+        if isBoulder then
             lb.Text = string.format('[B] %s\n%.0fm', tostring(c.bid), c.d)
         else
             lb.Text = string.format('<font color="%s">[%s]</font> %s\n%s  +%.1f%%',
@@ -367,7 +385,7 @@ local function espRefresh()
                 fmtMoney(tonumber(c.m:GetAttribute("Value")) or 0), luck)
         end
         lb.Parent = bb
-        espMarks[c.m] = { hl = hl, gui = bb, b = c.bid ~= nil }
+        espMarks[c.m] = { hl = hl, gui = bb, b = isBoulder }
         marked += 1
     end
 end
@@ -1225,11 +1243,28 @@ Toggles.Teleport:OnChanged(function(v) Cfg.teleport = v end)
 Toggles.Esp:OnChanged(function(v)
     Cfg.esp = v
     if not v then
-        espClear()
+        -- hapus crystal marks saja, boulder biarin kalau toggle boulder masih on
+        for m,e in pairs(espMarks) do
+            if not e.b then
+                pcall(function() e.hl:Destroy() end)
+                pcall(function() e.gui:Destroy() end)
+                espMarks[m]=nil
+            end
+        end
+        if not Cfg.espBoulder then espClear() end
     end
 end)
 Toggles.EspBoulder:OnChanged(function(v)
     Cfg.espBoulder = v
+    if not v then
+        for m,e in pairs(espMarks) do
+            if e.b then
+                pcall(function() e.hl:Destroy() end)
+                pcall(function() e.gui:Destroy() end)
+                espMarks[m]=nil
+            end
+        end
+    end
 end)
 Toggles.AutoBoulder:OnChanged(function(v)
     Cfg.autoBoulder = v
@@ -1566,11 +1601,15 @@ local function refreshRuneMonitor()
     if not PR or not PR.Parent then
         PR = workspace:FindFirstChild("PlotRunes")
     end
+    if not DR or not DR.Parent then
+        DR = workspace:FindFirstChild("DroppedRunes")
+    end
     local h = getHRP()
     local myPos = h and h.Position or Vector3.zero
     local rows = {}
-    if PR then
-        for _, m in ipairs(PR:GetDescendants()) do
+    local function scanRunes(root)
+        if not root then return end
+        for _, m in ipairs(root:GetDescendants()) do
             if m:IsA("Model") then
                 local rid = m:GetAttribute("RuneId")
                 if rid then
@@ -1587,6 +1626,8 @@ local function refreshRuneMonitor()
             end
         end
     end
+    scanRunes(PR)
+    scanRunes(DR)
     table.sort(rows, function(a, b) return a.d < b.d end)
     fillSlots(RuneSlots, rows, function(i, r)
         return string.format("%d. [R] %s %.0fm", i, r.name, r.d)
@@ -1923,7 +1964,7 @@ task.spawn(function()
     end
 end)
 
--- auto pickup rune: prompt RunePickup milik sendiri di PlotRunes
+-- auto pickup rune: DroppedRunes (bebas) + PlotRunes (milik sendiri)
 task.spawn(function()
     while alive and (RL_STATE == nil or RL_STATE.alive()) do
         local ok, err = pcall(function()
@@ -1933,8 +1974,8 @@ task.spawn(function()
             if not PR or not PR.Parent then
                 PR = workspace:FindFirstChild("PlotRunes")
             end
-            if not PR then
-                return
+            if not DR or not DR.Parent then
+                DR = workspace:FindFirstChild("DroppedRunes")
             end
             local h = getHRP()
             if not h then
@@ -1942,20 +1983,29 @@ task.spawn(function()
             end
             local myPos = h.Position
             local best, bestD, bestP = nil, math.huge, nil
-            for _, m in ipairs(PR:GetDescendants()) do
-                if m:IsA("Model") and m:GetAttribute("RuneId") ~= nil and m:GetAttribute("OwnerId") == LP.UserId then
-                    local pr = promptOf(m)
-                    if pr then
-                        local pos = runePos(m)
-                        if pos then
-                            local d = (pos - myPos).Magnitude
-                            if d < bestD then
-                                best, bestD, bestP = m, d, pr
+            local function considerRunes(root, needOwner)
+                if not root then return end
+                for _, m in ipairs(root:GetDescendants()) do
+                    if m:IsA("Model") and m:GetAttribute("RuneId") ~= nil then
+                        if needOwner and m:GetAttribute("OwnerId") ~= LP.UserId then
+                            -- PlotRunes: hanya milik sendiri
+                        else
+                            local pr = promptOf(m)
+                            if pr and pr.Enabled then
+                                local pos = runePos(m)
+                                if pos then
+                                    local d = (pos - myPos).Magnitude
+                                    if d < bestD then
+                                        best, bestD, bestP = m, d, pr
+                                    end
+                                end
                             end
                         end
                     end
                 end
             end
+            considerRunes(DR, false)
+            considerRunes(PR, true)
             if not best then
                 return
             end
