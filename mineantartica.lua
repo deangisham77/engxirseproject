@@ -60,6 +60,25 @@ local RARITY_C3 = {
     Legendary = Color3.fromRGB(255, 170, 45), Mythic = Color3.fromRGB(255, 70, 70),
     Exotic = Color3.fromRGB(255, 216, 74), Zenith = Color3.fromRGB(110, 235, 255),
 }
+-- mult luck per mutasi (WeatherData.List id + BoulderMutations id; nama mutasi cuaca sbg fallback)
+-- rumus resmi: totalLuckPercent = Luck attr x Π mult (WeatherLuckService)
+local MUT_LUCK_MULT = {
+    Rain = 2, Blizzard = 4, AcidRain = 3, Thunder = 5, Starfall = 6, Lucky = 5, Molten = 7, Aurora = 8,
+    Mossy = 2, Charged = 3, Gilded = 4, Rimed = 5, Nocturnal = 6,
+    Drenched = 2, Frozen = 4, Poisoned = 3, Thundered = 5, Starstruck = 6,
+}
+local function effLuck(m)
+    local base = tonumber(m:GetAttribute("Luck")) or 0
+    local muts = m:GetAttribute("Mutations")
+    if type(muts) ~= "string" or muts == "" then
+        return base
+    end
+    local mult = 1
+    for id in string.gmatch(muts, "[^,]+") do
+        mult *= (MUT_LUCK_MULT[id] or 1)
+    end
+    return base * mult
+end
 local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9, antiAfk = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }, espBoulder = true, antiLag = false, noRender = false, dig = false, digRadius = 8, autoBoulder = false, autoRune = false }
 local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
@@ -375,7 +394,7 @@ local function espRefresh()
         lb.RichText = true
         lb.TextYAlignment = Enum.TextYAlignment.Center
         local rar = c.m:GetAttribute("Rarity") or "Common"
-        local luck = tonumber(c.m:GetAttribute("Luck")) or 0
+        local luck = effLuck(c.m)
         if isBoulder then
             lb.Text = string.format('[B] %s\n%.0fm', tostring(c.bid), c.d)
         else
@@ -1557,7 +1576,7 @@ task.spawn(function()
     end
 end)
 
-getgenv()._ANT_HUB = { cfg = Cfg, stat = Stat, tune = TUNE }
+getgenv()._ANT_HUB = { cfg = Cfg, stat = Stat, tune = TUNE, effLuck = effLuck }
 getgenv()._ANT_HUB_DBG = function()
     return string.format("vacuum=%s teleport=%s autoSell=%s dig=%s r=%d minRar=%d monRar=%s monSort=%s tick=%ds lalu target=%s",
         tostring(Cfg.vacuum), tostring(Cfg.teleport), tostring(Cfg.autoSell),
@@ -1626,7 +1645,6 @@ local function refreshRuneMonitor()
             end
         end
     end
-    scanRunes(PR)
     scanRunes(DR)
     table.sort(rows, function(a, b) return a.d < b.d end)
     fillSlots(RuneSlots, rows, function(i, r)
@@ -1653,7 +1671,7 @@ local function refreshMonitor()
                         d = (pos - myPos).Magnitude,
                         pos = pos,
                         value = tonumber(m:GetAttribute("Value")) or 0,
-                        luck = tonumber(m:GetAttribute("Luck")) or 0,
+                        luck = effLuck(m),
                         kg = tonumber(m:GetAttribute("Kg")) or 0,
                     })
                 end
