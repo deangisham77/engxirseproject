@@ -79,7 +79,7 @@ local function effLuck(m)
     end
     return base * mult
 end
-local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9, antiAfk = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }, espBoulder = true, antiLag = false, noRender = false, dig = false, digRadius = 8, autoBoulder = false, autoRune = false }
+local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9, antiAfk = false, antiRagdoll = false, drill = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }, espBoulder = true, antiLag = false, noRender = false, dig = false, digRadius = 8, autoBoulder = false, autoRune = false }
 local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
 -- angka tuning satu tempat (jarak server: prompt ~15-17, dig <12)
@@ -760,6 +760,17 @@ local RL_STATE = rawget(getgenv(), "STATE")
 if typeof(RL_STATE) ~= "table" then
     RL_STATE = nil
 end
+local function setRagdoll(on)
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        pcall(function()
+            hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, on)
+            hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, on)
+            hum:SetStateEnabled(Enum.HumanoidStateType.Physics, on)
+        end)
+    end
+end
 getgenv()._ANT_HUB_UNLOAD = function()
     alive = false
     Cfg.vacuum = false
@@ -774,12 +785,15 @@ getgenv()._ANT_HUB_UNLOAD = function()
     Cfg.noclip = false
     Cfg.speed = false
     Cfg.antiAfk = false
+    Cfg.antiRagdoll = false
     Cfg.esp = false
     Cfg.antiLag = false
     Cfg.noRender = false
     Cfg.dig = false
+    Cfg.drill = false
     pcall(stopFly)
     pcall(restoreCollide)
+    pcall(setRagdoll, true)
     pcall(setAfk, false)
     pcall(setAntiLag, false)
     pcall(setNoRender, false)
@@ -805,10 +819,13 @@ if RL_STATE then
         Cfg.autoBoulder = false
         Cfg.autoRune = false
         Cfg.dig = false
+        Cfg.drill = false
         Cfg.fly = false
         Cfg.noclip = false
+        Cfg.antiRagdoll = false
         pcall(stopFly)
         pcall(restoreCollide)
+        pcall(setRagdoll, true)
         pcall(function() Library:Unload() end)
     end)
 end
@@ -953,6 +970,20 @@ task.spawn(function()
                 hum.WalkSpeed = Cfg.speedVal
             end
         end
+        -- anti ragdoll (reapply tiap tick biar tahan respawn/reset server)
+        if Cfg.antiRagdoll then
+            setRagdoll(false)
+            local char = LP.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                local st = hum:GetState()
+                if st == Enum.HumanoidStateType.Ragdoll
+                    or st == Enum.HumanoidStateType.FallingDown
+                    or st == Enum.HumanoidStateType.Physics then
+                    pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+                end
+            end
+        end
         setAfk(Cfg.antiAfk)
         if Cfg.antiAfk then
             afkNudge()
@@ -1006,6 +1037,7 @@ FarmBox:AddDropdown("MinRarity", { Text = "Min rarity", Values = RARITY_LIST, De
 
 local DigBox = MainTab:AddGroupbox({ Side = "Left", Name = "Auto Dig 360°" })
 DigBox:AddToggle("AutoDig", { Text = "Auto dig sekeliling (glacier saja)", Default = false })
+DigBox:AddToggle("AutoDrill", { Text = "Auto drill sekeliling (matikan dig)", Default = false })
 DigBox:AddSlider("DigRadius", { Text = "Radius dig", Default = 8, Min = 6, Max = 20, Rounding = 0, Suffix = "st" })
 
 local SellBox = MainTab:AddGroupbox({ Side = "Left", Name = "Auto Sell" })
@@ -1222,6 +1254,7 @@ MoveBox:AddToggle("Fly", { Text = "Fly (joystick/analog + ▲▼)", Default = fa
 MoveBox:AddSlider("FlySpeed", { Text = "Fly speed", Default = 50, Min = 10, Max = 150, Rounding = 0 })
 MoveBox:AddToggle("Noclip", { Text = "NoClip", Default = false })
 MoveBox:AddToggle("AntiAfk", { Text = "Anti-AFK", Default = false })
+MoveBox:AddToggle("AntiRagdoll", { Text = "Anti ragdoll", Default = false })
 MoveBox:AddToggle("Speed", { Text = "Speed booster", Default = false })
 MoveBox:AddSlider("SpeedVal", { Text = "Speed (risiko kick!)", Default = 32, Min = 16, Max = 120, Rounding = 0 })
 
@@ -1251,11 +1284,21 @@ Toggles.Vacuum:OnChanged(function(v) Cfg.vacuum = v end)
 Toggles.AutoDig:OnChanged(function(v)
     Cfg.dig = v
     if v then
+        if Cfg.drill and Toggles.AutoDrill then
+            Toggles.AutoDrill:SetValue(false)
+        end
         Stat.digNoPick = false
         print("[hub] autodig ON r=" .. tostring(Cfg.digRadius))
     else
         print("[hub] autodig OFF")
     end
+end)
+Toggles.AutoDrill:OnChanged(function(v)
+    Cfg.drill = v
+    if v and Cfg.dig and Toggles.AutoDig then
+        Toggles.AutoDig:SetValue(false) -- drill ganti peran dig, jangan dobel fire
+    end
+    print("[hub] autodrill " .. (v and "ON" or "OFF"))
 end)
 Options.DigRadius:OnChanged(function(v) Cfg.digRadius = math.clamp(math.floor(v), 6, 20) end)
 Toggles.Teleport:OnChanged(function(v) Cfg.teleport = v end)
@@ -1364,6 +1407,12 @@ Toggles.Noclip:OnChanged(function(v)
     end
 end)
 Toggles.AntiAfk:OnChanged(function(v) Cfg.antiAfk = v end)
+Toggles.AntiRagdoll:OnChanged(function(v)
+    Cfg.antiRagdoll = v
+    if not v then
+        setRagdoll(true)
+    end
+end)
 Toggles.AntiLag:OnChanged(function(v)
     Cfg.antiLag = v
     setAntiLag(v)
@@ -1874,6 +1923,120 @@ local function ensurePickaxe()
     return false
 end
 
+-- auto drill 360°: radial sama kayak dig, tapi minta Drill + DrillEvent tip/dir.
+-- terukur: DigRequest-only (drill pegang) 8.76m vs pair+DrillEvent 9.59m -> event opsional, bonus ~10%.
+local function equippedDrill()
+    local c = LP.Character
+    if c then
+        for _, t in ipairs(c:GetChildren()) do
+            if t:IsA("Tool") and t:FindFirstChild("DrillEvent") then
+                return t
+            end
+        end
+    end
+    return nil
+end
+
+-- speed factor gabungan: Haste x potion x gamepass (semua terbaca di DrillClient strings)
+local function digSpeedDiv()
+    local div = math.max(tonumber(LP:GetAttribute("RuneHaste")) or 1, 1)
+    if (tonumber(LP:GetAttribute("PotionMining")) or 0) > 0 then
+        div *= 2
+    elseif (tonumber(LP:GetAttribute("MiningPotionUntil")) or 0) > os.clock() then
+        div *= 2
+    end
+    if LP:GetAttribute("Pass_FastDig2x") == true then
+        div *= 2
+    end
+    return div
+end
+
+local function ensureDrill()
+    if equippedDrill() then
+        return true
+    end
+    local bp = LP:FindFirstChild("Backpack")
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if bp and hum then
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") and t:FindFirstChild("DrillEvent") then
+                pcall(function() hum:EquipTool(t) end)
+                task.wait(0.3)
+                if equippedDrill() ~= nil then
+                    return true
+                end
+                return false
+            end
+        end
+    end
+    return false
+end
+
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if not Cfg.drill or Stat.selling or Stat.sellNow then
+                return
+            end
+            if LP:GetAttribute("BagFull") == true then
+                return
+            end
+            if LP:GetAttribute("IsMiningGem") then
+                return
+            end
+            local h = getHRP()
+            if not h then
+                return
+            end
+            if not ensureDrill() then
+                if not Stat.drillNoTool then
+                    Stat.drillNoTool = true
+                    notify("Drill", "Equip Plasma Drill dulu.")
+                end
+                return
+            end
+            Stat.drillNoTool = false
+            Stat.digStep = ((Stat.digStep or 0) + 1) % TUNE.digDirs
+            local a = math.rad(Stat.digStep * (360 / TUNE.digDirs))
+            local center = h.Position
+            local target = center + Vector3.new(math.cos(a), 0, math.sin(a)) * Cfg.digRadius
+            local hit = workspace:Raycast(target + Vector3.new(0, 30, 0), Vector3.new(0, -120, 0), digRay)
+            if hit then
+                if (hit.Position - center).Magnitude > Cfg.digRadius + 4 then
+                    return -- jurang/lereng curam: server pasti "Too far", hemat request
+                end
+                -- DrillEvent opsional (tip/dir), DigRequest wajib
+                local dr = equippedDrill()
+                local dev = dr and dr:FindFirstChild("DrillEvent")
+                local tip = dr and dr:FindFirstChild("Tip", true)
+                if dev and tip and tip:IsA("BasePart") then
+                    local tp = tip.Position
+                    pcall(function()
+                        dev:FireServer("dig", tp, (hit.Position - tp).Unit)
+                    end)
+                end
+                pcall(function() DigRequest:FireServer(hit.Position) end)
+                Stat.lastDig = { step = Stat.digStep, pos = hit.Position }
+                if os.clock() - (Stat.lastDigBeat or 0) > 30 then
+                    Stat.lastDigBeat = os.clock()
+                    print("[hub] drill 360° r=" .. Cfg.digRadius)
+                end
+            end
+        end)
+        if not ok then
+            warn("[hub] drill " .. tostring(err))
+        end
+        -- tick ngikutin DigCooldown drill (0.22) / speed factor (Haste x potion x pass)
+        local cd = 0.22
+        local dr = equippedDrill()
+        if dr then
+            cd = (tonumber(dr:GetAttribute("DigCooldown")) or 0.22) / digSpeedDiv()
+        end
+        task.wait(math.max(cd + 0.02, 0.08))
+    end
+end)
+
 task.spawn(function()
     while alive and (RL_STATE == nil or RL_STATE.alive()) do
         local ok, err = pcall(function()
@@ -1921,7 +2084,13 @@ task.spawn(function()
         if not ok then
             warn("[hub] dig " .. tostring(err))
         end
-        task.wait(TUNE.digTick)
+        -- tick ngikutin cooldown efektif: cd pickaxe / speed factor (spam > cd di-ignore server)
+        local cd = 0.45
+        local pk = equippedPickaxe()
+        if pk then
+            cd = (tonumber(pk:GetAttribute("Cooldown")) or 0.45) / digSpeedDiv()
+        end
+        task.wait(math.max(cd + 0.02, 0.08))
     end
 end)
 
