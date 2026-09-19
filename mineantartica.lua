@@ -39,12 +39,14 @@ local UpgradeState = RS:WaitForChild("UpgradeRemotes"):WaitForChild("UpgradeStat
 local BuyPickaxe = RS:WaitForChild("ShopRemotes"):WaitForChild("BuyPickaxe")
 local EquipPickaxe = RS:WaitForChild("ShopRemotes"):WaitForChild("EquipPickaxe")
 local BuyBomb = RS:WaitForChild("BombRemotes"):WaitForChild("BuyBomb")
+local BuyRadar = RS:WaitForChild("RadarRemotes"):WaitForChild("BuyRadar")
 local DigRequest = RS:WaitForChild("DigRemotes"):WaitForChild("DigRequest")
 local MeteorActive = RS:WaitForChild("MeteorRemotes"):WaitForChild("Active")
 local MeteorImpact = RS:WaitForChild("MeteorRemotes"):WaitForChild("ImpactPos")
 local MeteorPhase = RS:WaitForChild("MeteorRemotes"):WaitForChild("Phase")
 local PickaxeData = require(RS:WaitForChild("PickaxeData"))
 local BombData = require(RS:WaitForChild("BombData"))
+local RadarData = require(RS:WaitForChild("RadarData"))
 local SG = workspace:WaitForChild("SpawnedGems")
 local DG = workspace:WaitForChild("DroppedGems")
 local BD = workspace:WaitForChild("Boulders")
@@ -79,7 +81,7 @@ local function effLuck(m)
     end
     return base * mult
 end
-local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, pickSel = 9, antiAfk = false, antiRagdoll = false, drill = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }, espBoulder = true, antiLag = false, noRender = false, dig = false, digRadius = 8, autoBoulder = false, autoRune = false }
+local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, radarSel = { "BoulderRadar" }, autoRadar = false, pickSel = 9, antiAfk = false, antiRagdoll = false, drill = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }, espBoulder = true, antiLag = false, noRender = false, dig = false, digRadius = 8, autoBoulder = false, autoRune = false }
 local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
 -- angka tuning satu tempat (jarak server: prompt ~15-17, dig <12)
@@ -639,6 +641,37 @@ local function buyBombs()
     return false
 end
 
+local function radarPrice(id)
+    local b = RadarData.ById and RadarData.ById[id]
+    return b and tonumber(b.price) or nil
+end
+
+local function buyRadars()
+    -- mirror buyBombs: termurah dulu, verifikasi coins berkurang
+    local sel = {}
+    for _, id in ipairs(Cfg.radarSel) do
+        local price = radarPrice(id)
+        if price then
+            table.insert(sel, { id = id, price = price })
+        end
+    end
+    table.sort(sel, function(a, b) return a.price < b.price end)
+    for _, b in ipairs(sel) do
+        local coins = LP.leaderstats.Coins.Value
+        if coins - b.price >= Cfg.reserve then
+            BuyRadar:FireServer(b.id) -- radar: 1 arg (bomb: 2 arg + "cash")
+            task.wait(2)
+            if LP.leaderstats.Coins.Value < coins then
+                notify("Radar", "Beli: " .. b.id)
+                print("[hub] beli radar " .. b.id)
+                return true
+            end
+            -- gagal: lanjut id berikut, tick berikut coba lagi
+        end
+    end
+    return false
+end
+
 local flyConn, flyGui
 local flyUp, flyDn = false, false
 -- grafik hemat (simpan setting asli buat restore)
@@ -779,6 +812,7 @@ getgenv()._ANT_HUB_UNLOAD = function()
     Cfg.upWarmth = false
     Cfg.upCarry = false
     Cfg.autoBomb = false
+    Cfg.autoRadar = false
     Cfg.autoBoulder = false
     Cfg.autoRune = false
     Cfg.fly = false
@@ -816,6 +850,7 @@ if RL_STATE then
         Cfg.upWarmth = false
         Cfg.upCarry = false
         Cfg.autoBomb = false
+        Cfg.autoRadar = false
         Cfg.autoBoulder = false
         Cfg.autoRune = false
         Cfg.dig = false
@@ -1147,6 +1182,22 @@ BombBox:AddButton({ Text = "Buy Now", Func = function()
     buyBombs()
 end })
 
+local RadarBox = ShopTab:AddGroupbox({ Side = "Left", Name = "Radar" })
+local radarIds = {}
+local radarFirst = nil
+for _, v in ipairs(RadarData.List) do
+    local label = string.format("%s (%s)", v.id, fmtMoney(v.price))
+    table.insert(radarIds, label)
+    if not radarFirst then
+        radarFirst = label
+    end
+end
+RadarBox:AddDropdown("RadarSel", { Text = "Radar", Values = radarIds, Multi = true, Default = { radarFirst } })
+RadarBox:AddToggle("AutoRadar", { Text = "Auto buy", Default = false })
+RadarBox:AddButton({ Text = "Buy Now", Func = function()
+    buyRadars()
+end })
+
 local MenuBox = SettingsTab:AddGroupbox({ Side = "Left", Name = "Menu" })
 MenuBox:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", { Default = "RightShift", NoUI = true, Text = "Menu keybind" })
 MenuBox:AddButton({ Text = "Unload", Func = function()
@@ -1362,6 +1413,26 @@ Toggles.Fly:OnChanged(function(v) Cfg.fly = v end)
 Toggles.UpWarmth:OnChanged(function(v) Cfg.upWarmth = v end)
 Toggles.UpCarry:OnChanged(function(v) Cfg.upCarry = v end)
 Toggles.AutoBomb:OnChanged(function(v) Cfg.autoBomb = v end)
+Toggles.AutoRadar:OnChanged(function(v) Cfg.autoRadar = v end)
+Options.RadarSel:OnChanged(function(v)
+    local list = {}
+    local function put(s)
+        local id = tostring(s):match("^(%S+)")
+        if id then
+            table.insert(list, id)
+        end
+    end
+    if type(v) == "table" then
+        for k, on in pairs(v) do
+            if on then
+                put(type(k) == "number" and v[k] or k)
+            end
+        end
+    elseif type(v) == "string" then
+        put(v)
+    end
+    Cfg.radarSel = list
+end)
 Options.PickList:OnChanged(function(v)
     if type(v) == "number" then
         Cfg.pickSel = math.clamp(math.floor(v), 1, #PickaxeData)
@@ -1620,6 +1691,21 @@ task.spawn(function()
         end)
         if not ok then
             warn("[hub] bomb " .. tostring(err))
+        end
+        task.wait(TUNE.bombTick)
+    end
+end)
+
+-- auto buy radar: mirror bomb (beli 1 per tick, termurah dulu)
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if Cfg.autoRadar and not Stat.selling then
+                buyRadars()
+            end
+        end)
+        if not ok then
+            warn("[hub] radar " .. tostring(err))
         end
         task.wait(TUNE.bombTick)
     end
