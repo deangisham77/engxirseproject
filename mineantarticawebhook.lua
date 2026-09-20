@@ -48,8 +48,6 @@ local ShopState = BombRemotes:WaitForChild("ShopState")
 local AbuseRemotes = ReplicatedStorage:WaitForChild("AdminAbuseRemotes")
 local AbuseStarted = AbuseRemotes:WaitForChild("Started")
 local AbuseAllEnd = AbuseRemotes:WaitForChild("AllEnd")
-local GlobalAnnounce = ReplicatedStorage:WaitForChild("GlobalAnnouncementEvent")
-local GlobalFeed = ReplicatedStorage:WaitForChild("GlobalFindFeed")
 local MountainRemotes = ReplicatedStorage:WaitForChild("MountainRemotes")
 local MtState = MountainRemotes:WaitForChild("State")
 local MtRotationEnd = MountainRemotes:WaitForChild("RotationEnd")
@@ -350,33 +348,6 @@ local function notifyAbuse()
 	send("🔥 ADMIN ABUSE!", "Event admin aktif. Gas farm!", 16724582, extra)
 end
 
-local function payloadText(...)
-	local parts = {}
-	for i = 1, select("#", ...) do
-		local v = select(i, ...)
-		local t = typeof(v)
-		if t == "string" or t == "number" or t == "boolean" then
-			table.insert(parts, tostring(v))
-		else
-			local ok, js = pcall(function()
-				return HttpService:JSONEncode(v)
-			end)
-			table.insert(parts, ok and js or tostring(v))
-		end
-	end
-	return table.concat(parts, " | ")
-end
-
-local function notifyAnnounce(title, text)
-	if text == "" then
-		return
-	end
-	if not once("ga:" .. string.sub(text, 1, 80), 600) then
-		return
-	end
-	send(title, text:sub(1, 900), 16766720, nil, true)
-end
-
 local function notifyRestock(stock, refreshIn)
 	if not once("r:" .. stockSig(stock), 900) then
 		return
@@ -598,14 +569,6 @@ end)
 STATE.connect(AbuseStarted.OnClientEvent, function()
 	lastAbuse = true
 	notifyAbuse()
-end)
-
--- Event: pengumuman global admin + feed temuan global
-STATE.connect(GlobalAnnounce.OnClientEvent, function(...)
-	notifyAnnounce("📢 Pengumuman admin", payloadText(...))
-end)
-STATE.connect(GlobalFeed.OnClientEvent, function(...)
-	notifyAnnounce("🌍 Temuan global", payloadText(...))
 end)
 
 -- Event: bom ShopState broadcast (stock + refreshIn)
