@@ -42,6 +42,9 @@ local BuyBomb = RS:WaitForChild("BombRemotes"):WaitForChild("BuyBomb")
 local BuyRadar = RS:WaitForChild("RadarRemotes"):WaitForChild("BuyRadar")
 local DigRequest = RS:WaitForChild("DigRemotes"):WaitForChild("DigRequest")
 local MeteorActive = RS:WaitForChild("MeteorRemotes"):WaitForChild("Active")
+local WeatherState = RS:WaitForChild("WeatherRemotes"):WaitForChild("State")
+local PlaceRune = RS:WaitForChild("RuneRemotes"):WaitForChild("PlaceRune")
+local TeleportPlot = RS:WaitForChild("BackpackRemotes"):WaitForChild("TeleportPlot")
 local MeteorImpact = RS:WaitForChild("MeteorRemotes"):WaitForChild("ImpactPos")
 local MeteorPhase = RS:WaitForChild("MeteorRemotes"):WaitForChild("Phase")
 local PickaxeData = require(RS:WaitForChild("PickaxeData"))
@@ -81,7 +84,7 @@ local function effLuck(m)
     end
     return base * mult
 end
-local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, radarSel = { "BoulderRadar" }, autoRadar = false, pickSel = 9, antiAfk = false, antiRagdoll = false, drill = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }, espBoulder = true, antiLag = false, noRender = false, dig = false, digRadius = 8, autoBoulder = false, autoRune = false }
+local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, radarSel = { "BoulderRadar" }, autoRadar = false, pickSel = 9, antiAfk = false, antiRagdoll = false, drill = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }, espBoulder = true, antiLag = false, noRender = false, dig = false, digRadius = 8, autoBoulder = false, autoRune = false, autoStorm = false }
 local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
 -- angka tuning satu tempat (jarak server: prompt ~15-17, dig <12)
@@ -95,7 +98,7 @@ local TUNE = {
     monEveryS = 5, monTickS = 1, -- refresh monitor (detik)
     tpStep = 25, tpInstant = 60, tpStepWait = 0.1, -- teleport stepped (stud, stud, detik). KECIL = aman kick
     promptRange = 1000, promptRestore = 0.3, -- fire prompt (stud, detik)
-    digTick = 0.45, digDirs = 8, -- auto dig 360° (detik per tembakan, jumlah arah)
+    digDirs = 8, -- auto dig 360° (jumlah arah; tick adaptif cd/div di loop)
     bombTick = 3, -- interval coba auto buy bomb (detik)
     boulderTick = 0.6, runeTick = 1, -- loop auto boulder/rune (detik)
     targetSlack = 15, -- toleransi ukur jarak client vs server (stud)
@@ -804,27 +807,17 @@ local function setRagdoll(on)
         end)
     end
 end
-getgenv()._ANT_HUB_UNLOAD = function()
+-- reset semua toggle boolean (satu sumber: tambah toggle baru cukup di sini)
+local function resetCfg()
     alive = false
-    Cfg.vacuum = false
-    Cfg.teleport = false
-    Cfg.autoSell = false
-    Cfg.upWarmth = false
-    Cfg.upCarry = false
-    Cfg.autoBomb = false
-    Cfg.autoRadar = false
-    Cfg.autoBoulder = false
-    Cfg.autoRune = false
-    Cfg.fly = false
-    Cfg.noclip = false
-    Cfg.speed = false
-    Cfg.antiAfk = false
-    Cfg.antiRagdoll = false
-    Cfg.esp = false
-    Cfg.antiLag = false
-    Cfg.noRender = false
-    Cfg.dig = false
-    Cfg.drill = false
+    for k, v in pairs(Cfg) do
+        if type(v) == "boolean" then
+            Cfg[k] = false
+        end
+    end
+end
+getgenv()._ANT_HUB_UNLOAD = function()
+    resetCfg()
     pcall(stopFly)
     pcall(restoreCollide)
     pcall(setRagdoll, true)
@@ -844,23 +837,14 @@ getgenv()._ANT_HUB_UNLOAD = function()
 end
 if RL_STATE then
     RL_STATE.onCleanup(function()
-        alive = false
-        Cfg.vacuum = false
-        Cfg.autoSell = false
-        Cfg.upWarmth = false
-        Cfg.upCarry = false
-        Cfg.autoBomb = false
-        Cfg.autoRadar = false
-        Cfg.autoBoulder = false
-        Cfg.autoRune = false
-        Cfg.dig = false
-        Cfg.drill = false
-        Cfg.fly = false
-        Cfg.noclip = false
-        Cfg.antiRagdoll = false
+        resetCfg()
         pcall(stopFly)
         pcall(restoreCollide)
         pcall(setRagdoll, true)
+        pcall(setAfk, false)
+        pcall(setAntiLag, false)
+        pcall(setNoRender, false)
+        pcall(espClear)
         pcall(function() Library:Unload() end)
     end)
 end
@@ -1144,6 +1128,8 @@ RuneBox:AddButton({ Text = "Refresh", Func = function()
     Stat.monRefresh = true
 end })
 RuneBox:AddToggle("AutoRune", { Text = "Auto pickup rune", Default = false })
+RuneBox:AddToggle("AutoStorm", { Text = "Auto storm (cuaca event)", Default = false })
+local StormLabel = RuneBox:AddLabel("Storm: -", true)
 local RuneSlots = brSlots(RuneBox, TUNE.monSlots, "B&R")
 
 local ShopBox = ShopTab:AddGroupbox({ Side = "Left", Name = "Auto Upgrade" })
@@ -1390,6 +1376,10 @@ Toggles.AutoRune:OnChanged(function(v)
     if v then
         print("[hub] auto rune ON")
     end
+end)
+Toggles.AutoStorm:OnChanged(function(v)
+    Cfg.autoStorm = v
+    print("[hub] auto storm " .. (v and "ON" or "OFF"))
 end)
 Options.EspRar:OnChanged(function(v)
     local list = {}
@@ -2278,7 +2268,7 @@ task.spawn(function()
                 end
             end
             considerRunes(DR, false)
-            considerRunes(PR, true)
+            -- PlotRunes dikecualikan: rune garden milik autoStorm, jangan auto-ambil (conflict)
             if not best then
                 return
             end
@@ -2308,6 +2298,130 @@ task.spawn(function()
             warn("[hub] rune " .. tostring(err))
         end
         task.wait(TUNE.runeTick)
+    end
+end)
+
+-- auto storm: place Storm saat cuaca event, ambil kembali saat Normal.
+-- wajib di plot (TeleportPlot); balik ke posisi semula sesudahnya.
+local function stormPlaced()
+    if not PR or not PR.Parent then
+        PR = workspace:FindFirstChild("PlotRunes")
+    end
+    if not PR then
+        return false
+    end
+    for _, m in ipairs(PR:GetDescendants()) do
+        if m:IsA("Model") and m:GetAttribute("RuneId") == "Storm" and m:GetAttribute("OwnerId") == LP.UserId then
+            return true, m
+        end
+    end
+    return false
+end
+
+local function stormTool()
+    local bp = LP:FindFirstChild("Backpack")
+    if bp then
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") and t.Name:lower():find("storm") then
+                return t
+            end
+        end
+    end
+    local c = LP.Character
+    if c then
+        for _, t in ipairs(c:GetChildren()) do
+            if t:IsA("Tool") and t.Name:lower():find("storm") then
+                return t
+            end
+        end
+    end
+    return nil
+end
+
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if not Cfg.autoStorm or Stat.selling then
+                return
+            end
+            local w = nil
+            pcall(function() w = WeatherState.Value end)
+            w = tostring(w or "?")
+            local isEvent = w ~= "NormalWeather" and w ~= "?" and w ~= ""
+            local placed, model = stormPlaced()
+            local txt = w .. (placed and " | Storm ON" or " | -")
+            pcall(function() StormLabel:SetText("Storm: " .. txt:sub(1, 80)) end)
+            local h = getHRP()
+            if not h then
+                return
+            end
+            if isEvent and not placed then
+                -- butuh tool Storm di tas; equip dulu (syarat place server-side)
+                local st = stormTool()
+                if not st then
+                    return
+                end
+                Stat.stormBack = h.CFrame
+                pcall(function() TeleportPlot:FireServer() end)
+                task.wait(2)
+                local char = LP.Character
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    local cur = char:FindFirstChildOfClass("Tool")
+                    if not cur or not cur.Name:lower():find("storm") then
+                        pcall(function() hum:EquipTool(st) end)
+                        task.wait(0.8)
+                    end
+                end
+                local idx = LP:GetAttribute("PlotIndex") or 0
+                local pp = idx ~= 0 and workspace:FindFirstChild("PlotPlacePart" .. idx)
+                local base = pp and pp.Position or h.Position
+                local gy = base.Y
+                pcall(function()
+                    local rp = RaycastParams.new()
+                    rp.FilterType = Enum.RaycastFilterType.Include
+                    rp.FilterDescendantsInstances = { workspace.Terrain }
+                    local hit = workspace:Raycast(Vector3.new(base.X, base.Y + 100, base.Z), Vector3.new(0, -500, 0), rp)
+                    if hit then
+                        gy = hit.Position.Y
+                    end
+                end)
+                pcall(function() PlaceRune:FireServer("Storm", Vector3.new(base.X, gy, base.Z)) end)
+                task.wait(2)
+                local okPlace = stormPlaced()
+                if Stat.stormBack then
+                    tpTo(h, Stat.stormBack)
+                    Stat.stormBack = nil
+                end
+                if okPlace then
+                    print("[hub] storm placed (" .. w .. ")")
+                end
+            elseif not isEvent and placed and model then
+                -- Normal: ambil kembali via prompt RunePickup
+                Stat.stormBack = Stat.stormBack or h.CFrame
+                local pr = promptOf(model)
+                if pr then
+                    local pos = runePos(model)
+                    if pos then
+                        tpTo(h, CFrame.new(pos + Vector3.new(0, TUNE.tpLift, 0)))
+                        task.wait(TUNE.settleWait)
+                        if model.Parent ~= nil then
+                            firePrompt(pr)
+                            task.wait(1)
+                        end
+                    end
+                end
+                if Stat.stormBack then
+                    tpTo(h, Stat.stormBack)
+                    Stat.stormBack = nil
+                end
+                print("[hub] storm diambil (Normal)")
+            end
+        end)
+        if not ok then
+            warn("[hub] storm " .. tostring(err))
+        end
+        task.wait(5)
     end
 end)
 
