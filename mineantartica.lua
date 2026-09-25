@@ -33,6 +33,7 @@ local HttpS = game:GetService("HttpService")
 local LP = Players.LocalPlayer
 
 local RequestSell = RS:WaitForChild("GemRemotes"):WaitForChild("RequestSell")
+local ToggleFavorite = RS:WaitForChild("GemRemotes"):WaitForChild("ToggleFavorite")
 local TeleportSell = RS:WaitForChild("BackpackRemotes"):WaitForChild("TeleportSell")
 local BuyUpgrade = RS:WaitForChild("UpgradeRemotes"):WaitForChild("BuyUpgrade")
 local UpgradeState = RS:WaitForChild("UpgradeRemotes"):WaitForChild("UpgradeState")
@@ -50,6 +51,7 @@ local MeteorPhase = RS:WaitForChild("MeteorRemotes"):WaitForChild("Phase")
 local PickaxeData = require(RS:WaitForChild("PickaxeData"))
 local BombData = require(RS:WaitForChild("BombData"))
 local RadarData = require(RS:WaitForChild("RadarData"))
+local GemData = require(RS:WaitForChild("GemData"))
 local SG = workspace:WaitForChild("SpawnedGems")
 local DG = workspace:WaitForChild("DroppedGems")
 local BD = workspace:WaitForChild("Boulders")
@@ -57,6 +59,7 @@ local PR = workspace:FindFirstChild("PlotRunes") -- cache ulang di refresh (fold
 local DR = workspace:FindFirstChild("DroppedRunes")
 
 local RARITY_LIST = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }
+local RUNE_LIST = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" }
 local RARITY_RANK = { Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Exotic = 7, Zenith = 8 }
 local RARITY_HEX = { Common = "#CD945C", Uncommon = "#5FDC69", Rare = "#469BFF", Epic = "#B45FFF", Legendary = "#FFAA2D", Mythic = "#FF4646", Exotic = "#FFD84A", Zenith = "#6EEBFF" }
 local RARITY_C3 = {
@@ -73,18 +76,28 @@ local MUT_LUCK_MULT = {
     Drenched = 2, Frozen = 4, Poisoned = 3, Thundered = 5, Starstruck = 6,
 }
 local function effLuck(m)
-    local base = tonumber(m:GetAttribute("Luck")) or 0
-    local muts = m:GetAttribute("Mutations")
-    if type(muts) ~= "string" or muts == "" then
-        return base
+    -- model world: attr Luck langsung; tool tas: hitung via GemData (tak ada attr Luck)
+    local base = tonumber(m:GetAttribute("Luck"))
+    if base ~= nil then
+        local muts = m:GetAttribute("Mutations")
+        if type(muts) ~= "string" or muts == "" then
+            return base
+        end
+        local mult = 1
+        for id in string.gmatch(muts, "[^,]+") do
+            mult *= (MUT_LUCK_MULT[id] or 1)
+        end
+        return base * mult
     end
-    local mult = 1
-    for id in string.gmatch(muts, "[^,]+") do
-        mult *= (MUT_LUCK_MULT[id] or 1)
+    local ok, v = pcall(function()
+        return GemData.effectiveLuck(m:GetAttribute("Rarity") or "Common", tonumber(m:GetAttribute("Kg")) or 0, m:GetAttribute("Mutations"))
+    end)
+    if ok and type(v) == "number" then
+        return v
     end
-    return base * mult
+    return 0
 end
-local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, radarSel = { "BoulderRadar" }, autoRadar = false, pickSel = 9, antiAfk = false, antiRagdoll = false, drill = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }, espBoulder = true, antiLag = false, noRender = false, dig = false, digRadius = 8, autoBoulder = false, autoRune = false, autoStorm = false }
+local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, radarSel = { "BoulderRadar" }, autoRadar = false, pickSel = 9, antiAfk = false, antiRagdoll = false, drill = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }, espBoulder = true, antiLag = false, noRender = false, dig = false, digRadius = 8, autoBoulder = false, autoRune = false, runeSel = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" }, autoFav = false, favMinLuck = 150, autoStorm = false }
 local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
 -- angka tuning satu tempat (jarak server: prompt ~15-17, dig <12)
@@ -1046,11 +1059,13 @@ local MainTab = Window:AddTab({ Name = "Main", Icon = "gem", Description = "Vacu
 local ShopTab = Window:AddTab({ Name = "Shop", Icon = "shopping-cart", Description = "Auto upgrade", SingleColumn = true })
 local MiscTab = Window:AddTab({ Name = "Misc", Icon = "rocket", Description = "Movement", SingleColumn = true })
 local BRTab = Window:AddTab({ Name = "B&R", Icon = "mountain", Description = "Boulder + rune" })
+local FavTab = Window:AddTab({ Name = "Favorite", Icon = "star", Description = "Auto favorite", SingleColumn = true })
 local ServerTab = Window:AddTab({ Name = "Server", Icon = "server", Description = "Players + hop" })
 local SettingsTab = Window:AddTab({ Name = "Setting", Icon = "settings", Description = "UI" })
 
 local FarmBox = MainTab:AddGroupbox({ Side = "Left", Name = "Vacuum" })
 FarmBox:AddToggle("Vacuum", { Text = "Auto vacuum (no dig)", Default = false })
+    :AddKeyPicker("VacuumKey", { Default = "P", NoUI = false, Text = "Vacuum key" })
 FarmBox:AddToggle("Teleport", { Text = "Teleport ke freed (radius maksimal)", Default = false })
 FarmBox:AddDropdown("MinRarity", { Text = "Min rarity", Values = RARITY_LIST, Default = 1 })
 
@@ -1128,9 +1143,21 @@ RuneBox:AddButton({ Text = "Refresh", Func = function()
     Stat.monRefresh = true
 end })
 RuneBox:AddToggle("AutoRune", { Text = "Auto pickup rune", Default = false })
+RuneBox:AddDropdown("RuneSel", { Text = "Rune filter", Values = RUNE_LIST, Multi = true, Default = RUNE_LIST })
 RuneBox:AddToggle("AutoStorm", { Text = "Auto storm (cuaca event)", Default = false })
 local StormLabel = RuneBox:AddLabel("Storm: -", true)
 local RuneSlots = brSlots(RuneBox, TUNE.monSlots, "B&R")
+
+local FavBox = FavTab:AddGroupbox({ Side = "Left", Name = "Favorite" })
+FavBox:AddToggle("AutoFav", { Text = "Auto favorite (min luck)", Default = false })
+FavBox:AddSlider("FavMinLuck", { Text = "Min luck %", Default = 150, Min = 0, Max = 100000, Rounding = 0, Suffix = "%" })
+local FavLabel = FavBox:AddLabel("Fav: -", true)
+FavBox:AddButton({ Text = "Favorite All", Func = function()
+    Stat.favBulk = "fav"
+end })
+FavBox:AddButton({ Text = "Unfavorite All", Func = function()
+    Stat.favBulk = "unfav"
+end })
 
 local ShopBox = ShopTab:AddGroupbox({ Side = "Left", Name = "Auto Upgrade" })
 ShopBox:AddToggle("UpWarmth", { Text = "Warmth", Default = false })
@@ -1257,6 +1284,7 @@ SrvAct:AddButton({ Text = "Refresh (posisi balik)", Func = function()
     local ok, err = Server.refresh()
     notify("Refresh", ok and "Respawn..." or tostring(err))
 end })
+SrvAct:AddLabel("Refresh key"):AddKeyPicker("RefreshKey", { Default = "R", NoUI = false, Text = "Refresh key" })
 
 local SrvMet = ServerTab:AddGroupbox({ Side = "Left", Name = "Meteor" })
 local MeteorLabel = SrvMet:AddLabel("meteor: - (tak ada event)", true)
@@ -1305,7 +1333,7 @@ pcall(function()
     ThemeManager:ApplyToTab(SettingsTab)
     SaveManager:SetLibrary(Library)
     SaveManager:SetFolder("AntarcticaHub")
-    SaveManager:SetIgnoreIndexes({ "MenuKeybind", "WindowLayout" })
+    SaveManager:SetIgnoreIndexes({ "MenuKeybind", "VacuumKey", "RefreshKey", "WindowLayout" })
     SaveManager:BuildConfigSection(SettingsTab)
     SaveManager:LoadAutoloadConfig()
     -- selalu tengah: abaikan posisi window tersimpan di autoload config
@@ -1317,7 +1345,23 @@ pcall(function()
     end)
 end)
 
-Toggles.Vacuum:OnChanged(function(v) Cfg.vacuum = v end)
+Toggles.Vacuum:OnChanged(function(v)
+    Cfg.vacuum = v
+    print("[hub] vacuum " .. (v and "ON" or "OFF"))
+end)
+pcall(function()
+    Options.VacuumKey:OnClick(function()
+        if Toggles.Vacuum then
+            Toggles.Vacuum:SetValue(not Toggles.Vacuum.Value)
+        end
+    end)
+end)
+pcall(function()
+    Options.RefreshKey:OnClick(function()
+        local ok, err = Server.refresh()
+        notify("Refresh", ok and "Respawn..." or tostring(err))
+    end)
+end)
 Toggles.AutoDig:OnChanged(function(v)
     Cfg.dig = v
     if v then
@@ -1376,6 +1420,25 @@ Toggles.AutoRune:OnChanged(function(v)
     if v then
         print("[hub] auto rune ON")
     end
+end)
+Toggles.AutoFav:OnChanged(function(v)
+    Cfg.autoFav = v
+    print("[hub] auto fav " .. (v and "ON" or "OFF"))
+end)
+Options.FavMinLuck:OnChanged(function(v) Cfg.favMinLuck = math.max(math.floor(v), 0) end)
+Options.RuneSel:OnChanged(function(v)
+    local list = {}
+    if type(v) == "table" then
+        for k, on in pairs(v) do
+            if on then
+                local name = type(k) == "number" and v[k] or k
+                table.insert(list, name)
+            end
+        end
+    elseif type(v) == "string" then
+        list = { v }
+    end
+    Cfg.runeSel = list
 end)
 Toggles.AutoStorm:OnChanged(function(v)
     Cfg.autoStorm = v
@@ -2246,11 +2309,17 @@ task.spawn(function()
             end
             local myPos = h.Position
             local best, bestD, bestP = nil, math.huge, nil
+            local want = {}
+            for _, r in ipairs(Cfg.runeSel) do
+                want[r] = true
+            end
             local function considerRunes(root, needOwner)
                 if not root then return end
                 for _, m in ipairs(root:GetDescendants()) do
                     if m:IsA("Model") and m:GetAttribute("RuneId") ~= nil then
-                        if needOwner and m:GetAttribute("OwnerId") ~= LP.UserId then
+                        if not want[m:GetAttribute("RuneId")] then
+                            -- filter dropdown: skip
+                        elseif needOwner and m:GetAttribute("OwnerId") ~= LP.UserId then
                             -- PlotRunes: hanya milik sendiri
                         else
                             local pr = promptOf(m)
@@ -2422,6 +2491,84 @@ task.spawn(function()
             warn("[hub] storm " .. tostring(err))
         end
         task.wait(5)
+    end
+end)
+
+-- auto fav: murni gate min luck (effLuck). Mutasi tak peduli: full 8+1 ikut fav bila luck lolos.
+local function favLuckOk(t)
+    return effLuck(t) >= (Cfg.favMinLuck or 0)
+end
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            -- bulk: fav = semua yg luck lolos; unfav = semua yg fav. Sekali jalan.
+            local bulk = Stat.favBulk
+            if bulk then
+                Stat.favBulk = nil
+                local n = 0
+                local function scanB(container)
+                    if not container then
+                        return
+                    end
+                    for _, t in ipairs(container:GetChildren()) do
+                        if n >= 30 then
+                            break
+                        end
+                        if t:IsA("Tool") and t:GetAttribute("BagId") ~= nil then
+                            local fav = t:GetAttribute("Favorited")
+                            if (bulk == "fav" and not fav and favLuckOk(t)) or (bulk == "unfav" and fav) then
+                                pcall(function() ToggleFavorite:FireServer(t:GetAttribute("BagId")) end)
+                                n += 1
+                                task.wait(0.3)
+                            end
+                        end
+                    end
+                end
+                scanB(LP:FindFirstChild("Backpack"))
+                scanB(LP.Character)
+                print("[hub] bulk " .. bulk .. " +" .. n)
+                pcall(function() FavLabel:SetText("Fav: bulk " .. bulk .. " " .. n) end)
+                return
+            end
+            if not Cfg.autoFav or Stat.selling then
+                return
+            end
+            local n, skipLuck = 0, 0
+            local function scan(container)
+                if not container or n >= 5 then
+                    return
+                end
+                for _, t in ipairs(container:GetChildren()) do
+                    if n >= 5 then
+                        break
+                    end
+                    if t:IsA("Tool") and t:GetAttribute("BagId") ~= nil then
+                        local fav = t:GetAttribute("Favorited")
+                        if effLuck(t) < (Cfg.favMinLuck or 0) then
+                            if fav then
+                                pcall(function() ToggleFavorite:FireServer(t:GetAttribute("BagId")) end)
+                                n += 1
+                            else
+                                skipLuck += 1
+                            end
+                        elseif not fav then
+                            pcall(function() ToggleFavorite:FireServer(t:GetAttribute("BagId")) end)
+                            n += 1
+                        end
+                    end
+                end
+            end
+            scan(LP:FindFirstChild("Backpack"))
+            scan(LP.Character)
+            if n > 0 then
+                print("[hub] fav +" .. n)
+            end
+            pcall(function() FavLabel:SetText(string.format("Fav: +%d skipLuck %d", n, skipLuck)) end)
+        end)
+        if not ok then
+            warn("[hub] fav " .. tostring(err))
+        end
+        task.wait(3)
     end
 end)
 
