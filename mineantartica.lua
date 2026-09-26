@@ -1145,6 +1145,12 @@ end })
 RuneBox:AddToggle("AutoRune", { Text = "Auto pickup rune", Default = false })
 RuneBox:AddDropdown("RuneSel", { Text = "Rune filter", Values = RUNE_LIST, Multi = true, Default = RUNE_LIST })
 RuneBox:AddToggle("AutoStorm", { Text = "Auto storm (cuaca event)", Default = false })
+RuneBox:AddButton({ Text = "Place Storm", Func = function()
+    Stat.stormManual = "place"
+end })
+RuneBox:AddButton({ Text = "Pickup Storm", Func = function()
+    Stat.stormManual = "take"
+end })
 local StormLabel = RuneBox:AddLabel("Storm: -", true)
 local RuneSlots = brSlots(RuneBox, TUNE.monSlots, "B&R")
 
@@ -2407,9 +2413,97 @@ local function stormTool()
     return nil
 end
 
+-- manual place/take Storm sekali jalan (tombol Place/Pickup Storm).
+local function stormPlaceOnce()
+    local h = getHRP()
+    if not h then
+        return false, "no hrp"
+    end
+    local st = stormTool()
+    if not st then
+        return false, "tak ada Storm tool"
+    end
+    Stat.stormBack = h.CFrame
+    pcall(function() TeleportPlot:FireServer() end)
+    task.wait(2)
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        local cur = char:FindFirstChildOfClass("Tool")
+        if not cur or not cur.Name:lower():find("storm") then
+            pcall(function() hum:EquipTool(st) end)
+            task.wait(0.8)
+        end
+    end
+    local idx = LP:GetAttribute("PlotIndex") or 0
+    local pp = idx ~= 0 and workspace:FindFirstChild("PlotPlacePart" .. idx)
+    local base = pp and pp.Position or h.Position
+    local gy = base.Y
+    pcall(function()
+        local rp = RaycastParams.new()
+        rp.FilterType = Enum.RaycastFilterType.Include
+        rp.FilterDescendantsInstances = { workspace.Terrain }
+        local hit = workspace:Raycast(Vector3.new(base.X, base.Y + 100, base.Z), Vector3.new(0, -500, 0), rp)
+        if hit then
+            gy = hit.Position.Y
+        end
+    end)
+    pcall(function() PlaceRune:FireServer("Storm", Vector3.new(base.X, gy, base.Z)) end)
+    task.wait(2)
+    local okPlace = stormPlaced()
+    if Stat.stormBack then
+        tpTo(h, Stat.stormBack)
+        Stat.stormBack = nil
+    end
+    return okPlace, okPlace and "placed" or "gagal"
+end
+
+local function stormTakeOnce()
+    local placed, model = stormPlaced()
+    if not placed or not model then
+        return false, "tak ada Storm terpasang"
+    end
+    local h = getHRP()
+    if not h then
+        return false, "no hrp"
+    end
+    Stat.stormBack = Stat.stormBack or h.CFrame
+    local pr = promptOf(model)
+    if pr then
+        local pos = runePos(model)
+        if pos then
+            tpTo(h, CFrame.new(pos + Vector3.new(0, TUNE.tpLift, 0)))
+            task.wait(TUNE.settleWait)
+            if model.Parent ~= nil then
+                firePrompt(pr)
+                task.wait(1)
+            end
+        end
+    end
+    if Stat.stormBack then
+        tpTo(h, Stat.stormBack)
+        Stat.stormBack = nil
+    end
+    return true, "diambil"
+end
+
 task.spawn(function()
     while alive and (RL_STATE == nil or RL_STATE.alive()) do
         local ok, err = pcall(function()
+            -- manual override tombol (di luar autoStorm)
+            local man = Stat.stormManual
+            if man then
+                Stat.stormManual = nil
+                local done, msg
+                if man == "place" then
+                    done, msg = stormPlaceOnce()
+                else
+                    done, msg = stormTakeOnce()
+                end
+                notify("Storm", tostring(msg))
+                print("[hub] storm manual " .. man .. ": " .. tostring(msg))
+                return
+            end
             if not Cfg.autoStorm or Stat.selling then
                 return
             end
@@ -2425,65 +2519,12 @@ task.spawn(function()
                 return
             end
             if isEvent and not placed then
-                -- butuh tool Storm di tas; equip dulu (syarat place server-side)
-                local st = stormTool()
-                if not st then
-                    return
-                end
-                Stat.stormBack = h.CFrame
-                pcall(function() TeleportPlot:FireServer() end)
-                task.wait(2)
-                local char = LP.Character
-                local hum = char and char:FindFirstChildOfClass("Humanoid")
-                if hum then
-                    local cur = char:FindFirstChildOfClass("Tool")
-                    if not cur or not cur.Name:lower():find("storm") then
-                        pcall(function() hum:EquipTool(st) end)
-                        task.wait(0.8)
-                    end
-                end
-                local idx = LP:GetAttribute("PlotIndex") or 0
-                local pp = idx ~= 0 and workspace:FindFirstChild("PlotPlacePart" .. idx)
-                local base = pp and pp.Position or h.Position
-                local gy = base.Y
-                pcall(function()
-                    local rp = RaycastParams.new()
-                    rp.FilterType = Enum.RaycastFilterType.Include
-                    rp.FilterDescendantsInstances = { workspace.Terrain }
-                    local hit = workspace:Raycast(Vector3.new(base.X, base.Y + 100, base.Z), Vector3.new(0, -500, 0), rp)
-                    if hit then
-                        gy = hit.Position.Y
-                    end
-                end)
-                pcall(function() PlaceRune:FireServer("Storm", Vector3.new(base.X, gy, base.Z)) end)
-                task.wait(2)
-                local okPlace = stormPlaced()
-                if Stat.stormBack then
-                    tpTo(h, Stat.stormBack)
-                    Stat.stormBack = nil
-                end
-                if okPlace then
+                local done, msg = stormPlaceOnce()
+                if done then
                     print("[hub] storm placed (" .. w .. ")")
                 end
             elseif not isEvent and placed and model then
-                -- Normal: ambil kembali via prompt RunePickup
-                Stat.stormBack = Stat.stormBack or h.CFrame
-                local pr = promptOf(model)
-                if pr then
-                    local pos = runePos(model)
-                    if pos then
-                        tpTo(h, CFrame.new(pos + Vector3.new(0, TUNE.tpLift, 0)))
-                        task.wait(TUNE.settleWait)
-                        if model.Parent ~= nil then
-                            firePrompt(pr)
-                            task.wait(1)
-                        end
-                    end
-                end
-                if Stat.stormBack then
-                    tpTo(h, Stat.stormBack)
-                    Stat.stormBack = nil
-                end
+                stormTakeOnce()
                 print("[hub] storm diambil (Normal)")
             end
         end)
