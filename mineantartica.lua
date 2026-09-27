@@ -97,7 +97,7 @@ local function effLuck(m)
     end
     return 0
 end
-local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, radarSel = { "BoulderRadar" }, autoRadar = false, pickSel = 9, antiAfk = false, antiRagdoll = false, drill = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }, espBoulder = true, antiLag = false, noRender = false, dig = false, digRadius = 8, autoBoulder = false, autoRune = false, runeSel = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" }, autoFav = false, favMinLuck = 150, autoStorm = false }
+local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, radarSel = { "BoulderRadar" }, autoRadar = false, pickSel = 9, antiAfk = false, antiRagdoll = false, drill = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }, espBoulder = true, espGeode = false, antiLag = false, noRender = false, dig = false, digRadius = 8, autoBoulder = false, autoRune = false, runeSel = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" }, runeMonSel = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" }, autoFav = false, favMinLuck = 150, autoStorm = false }
 local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
 -- angka tuning satu tempat (jarak server: prompt ~15-17, dig <12)
@@ -312,8 +312,13 @@ local function espClear()
         espMarks[m] = nil
     end
 end
+-- geode core: match nama (tak ada atribut Core di model)
+local function isGeode(m)
+    local nm = tostring(m:GetAttribute("GemName") or m.Name or ""):lower()
+    return nm:find("geode") ~= nil or nm:find("core") ~= nil
+end
 local function espRefresh()
-    if not Cfg.esp and not Cfg.espBoulder then
+    if not Cfg.esp and not Cfg.espBoulder and not Cfg.espGeode then
         espClear()
         return
     end
@@ -324,7 +329,7 @@ local function espRefresh()
         end
     end
     for m, e in pairs(espMarks) do
-        if not m.Parent or (not e.b and (not Cfg.esp or not want[m:GetAttribute("Rarity")])) or (e.b and not Cfg.espBoulder) then
+        if not m.Parent or (not e.b and not e.g and (not Cfg.esp or not want[m:GetAttribute("Rarity")])) or (e.b and not Cfg.espBoulder) or (e.g and not Cfg.espGeode) then
             pcall(function() e.hl:Destroy() end)
             pcall(function() e.gui:Destroy() end)
             espMarks[m] = nil
@@ -347,17 +352,32 @@ local function espRefresh()
         scan(SG)
         scan(DG)
     end
-    -- boulder: toggle sendiri (tak punya rarity), label mutasi
+    -- boulder: toggle sendiri (tak punya rarity); label = DisplayName (mis. Legendary Geode) else BoulderId
     if Cfg.espBoulder then
         for _, m in ipairs(BD:GetChildren()) do
             if not espMarks[m] then
                 local mesh = m:FindFirstChild("Mesh_0", true) or m:FindFirstChildWhichIsA("BasePart", true)
                 if mesh then
                     table.insert(cand, { m = m, mesh = mesh, d = (mesh.Position - myPos).Magnitude,
-                        bid = m:GetAttribute("BoulderId") or m.Name })
+                        bid = m:GetAttribute("DisplayName") or m:GetAttribute("BoulderId") or m.Name })
                 end
             end
         end
+    end
+    -- geode: match nama (Geode/Core), xray magenta-kuning, toggle sendiri
+    if Cfg.espGeode then
+        local function scanGeode(folder)
+            for _, m in ipairs(folder:GetChildren()) do
+                if not espMarks[m] and isGeode(m) then
+                    local mesh = m:FindFirstChild("Mesh_0", true) or m:FindFirstChildWhichIsA("BasePart", true)
+                    if mesh then
+                        table.insert(cand, { m = m, mesh = mesh, d = (mesh.Position - myPos).Magnitude, geo = true })
+                    end
+                end
+            end
+        end
+        scanGeode(SG)
+        scanGeode(DG)
     end
     table.sort(cand, function(a, b) return a.d < b.d end)
     local marked = 0
@@ -369,17 +389,20 @@ local function espRefresh()
             break
         end
         local isBoulder = c.bid ~= nil
+        local isGeode = c.geo == true
         local col = RARITY_C3[c.m:GetAttribute("Rarity")] or Color3.new(1, 1, 1)
         if isBoulder then
             col = Color3.fromRGB(255, 80, 0) -- boulder: oranye neon mencolok
+        elseif isGeode then
+            col = Color3.fromRGB(255, 0, 255) -- geode: magenta xray
         end
         local hl = Instance.new("Highlight")
         hl.Name = "ANT_ESP"
         hl.Adornee = c.m
         hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         hl.FillColor = col
-        hl.OutlineColor = isBoulder and Color3.fromRGB(255, 255, 255) or col
-        hl.FillTransparency = isBoulder and 0.25 or 0.5
+        hl.OutlineColor = isGeode and Color3.fromRGB(255, 255, 0) or (isBoulder and Color3.fromRGB(255, 255, 255) or col)
+        hl.FillTransparency = (isBoulder or isGeode) and 0.25 or 0.5
         hl.OutlineTransparency = 0
         hl.Parent = c.m
         local bb = Instance.new("BillboardGui")
@@ -415,6 +438,10 @@ local function espRefresh()
         local luck = effLuck(c.m)
         if isBoulder then
             lb.Text = string.format('[B] %s\n%.0fm', tostring(c.bid), c.d)
+        elseif isGeode then
+            lb.Text = string.format('[G] %s\n%s  +%.1f%%\n%.0fm',
+                c.m:GetAttribute("GemName") or c.m.Name,
+                fmtMoney(tonumber(c.m:GetAttribute("Value")) or 0), luck, c.d)
         else
             lb.Text = string.format('<font color="%s">[%s]</font> %s\n%s  +%.1f%%',
                 RARITY_HEX[rar] or "#FFFFFF", rar:sub(1, 1),
@@ -422,7 +449,7 @@ local function espRefresh()
                 fmtMoney(tonumber(c.m:GetAttribute("Value")) or 0), luck)
         end
         lb.Parent = bb
-        espMarks[c.m] = { hl = hl, gui = bb, b = isBoulder }
+        espMarks[c.m] = { hl = hl, gui = bb, b = isBoulder, g = isGeode }
         marked += 1
     end
 end
@@ -865,42 +892,21 @@ end
 -- movement (fly + noclip), pola cake file
 local noclipConn
 local afkConn
-local afkLast = 0
-local function afkNudge()
-    -- gerak mikro tiap 60 detik biar tak pernah idle (lebih agresif dari event Idled saja)
-    if os.clock() - afkLast < 60 then
-        return
-    end
-    afkLast = os.clock()
-    pcall(function()
-        local vim = game:GetService("VirtualInputManager")
-        vim:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-        task.wait(0.1)
-        vim:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
-    end)
-end
 local function setAfk(on)
+    -- game rejoin via AntiIdleClient (pantau UserInputService asli 19 mnt -> FireServer AntiIdleRejoin).
+    -- input sintetis (VIM/VirtualUser/mouse native) tak terdeteksi game. Solusi: bunuh script pengirim.
     if on and not afkConn then
-        -- ala IY: bungkam dulu listener Idled milik game (fungsi kick-nya sendiri)
         pcall(function()
-            local gc = getconnections
-            if typeof(gc) == "function" then
-                for _, c in ipairs(gc(LP.Idled)) do
-                    pcall(function() c:Disable() end)
-                    pcall(function() c:Disconnect() end)
-                end
+            local ps = LP:FindFirstChild("PlayerScripts")
+            local s = ps and ps:FindFirstChild("AntiIdleClient")
+            if s then
+                s.Disabled = true
+                pcall(function() s:Destroy() end)
             end
         end)
-        afkConn = LP.Idled:Connect(function()
-            pcall(function()
-                local vim = game:GetService("VirtualInputManager")
-                vim:SendKeyEvent(true, Enum.KeyCode.W, false, game)
-                task.wait(0.1)
-                vim:SendKeyEvent(false, Enum.KeyCode.W, false, game)
-            end)
-        end)
+        afkConn = true
+        print("[hub] AntiIdleClient diblokir")
     elseif not on and afkConn then
-        pcall(function() afkConn:Disconnect() end)
         afkConn = nil
     end
 end
@@ -1017,9 +1023,6 @@ task.spawn(function()
             end
         end
         setAfk(Cfg.antiAfk)
-        if Cfg.antiAfk then
-            afkNudge()
-        end
     end
     stopFly()
     if noclipConn then
@@ -1084,6 +1087,7 @@ end })
 local EspBox = MainTab:AddGroupbox({ Side = "Left", Name = "ESP", Collapsed = true })
 EspBox:AddToggle("Esp", { Text = "ESP crystal", Default = false })
 EspBox:AddToggle("EspBoulder", { Text = "ESP boulder", Default = true })
+EspBox:AddToggle("EspGeode", { Text = "ESP geode core", Default = false })
 EspBox:AddDropdown("EspRar", { Text = "Rarity", Values = RARITY_LIST, Multi = true, Default = RARITY_LIST })
 
 -- slot teleport generik (dipakai Monitor + tab B&R)
@@ -1143,7 +1147,8 @@ RuneBox:AddButton({ Text = "Refresh", Func = function()
     Stat.monRefresh = true
 end })
 RuneBox:AddToggle("AutoRune", { Text = "Auto pickup rune", Default = false })
-RuneBox:AddDropdown("RuneSel", { Text = "Rune filter", Values = RUNE_LIST, Multi = true, Default = RUNE_LIST })
+RuneBox:AddDropdown("RuneSel", { Text = "Pickup filter", Values = RUNE_LIST, Multi = true, Default = RUNE_LIST })
+RuneBox:AddDropdown("RuneMonSel", { Text = "Monitor filter", Values = RUNE_LIST, Multi = true, Default = RUNE_LIST })
 RuneBox:AddToggle("AutoStorm", { Text = "Auto storm (cuaca event)", Default = false })
 RuneBox:AddButton({ Text = "Place Storm", Func = function()
     Stat.stormManual = "place"
@@ -1392,15 +1397,15 @@ Toggles.Teleport:OnChanged(function(v) Cfg.teleport = v end)
 Toggles.Esp:OnChanged(function(v)
     Cfg.esp = v
     if not v then
-        -- hapus crystal marks saja, boulder biarin kalau toggle boulder masih on
+        -- hapus crystal marks saja, boulder/geode biarin kalau togglenya masih on
         for m,e in pairs(espMarks) do
-            if not e.b then
+            if not e.b and not e.g then
                 pcall(function() e.hl:Destroy() end)
                 pcall(function() e.gui:Destroy() end)
                 espMarks[m]=nil
             end
         end
-        if not Cfg.espBoulder then espClear() end
+        if not Cfg.espBoulder and not Cfg.espGeode then espClear() end
     end
 end)
 Toggles.EspBoulder:OnChanged(function(v)
@@ -1408,6 +1413,18 @@ Toggles.EspBoulder:OnChanged(function(v)
     if not v then
         for m,e in pairs(espMarks) do
             if e.b then
+                pcall(function() e.hl:Destroy() end)
+                pcall(function() e.gui:Destroy() end)
+                espMarks[m]=nil
+            end
+        end
+    end
+end)
+Toggles.EspGeode:OnChanged(function(v)
+    Cfg.espGeode = v
+    if not v then
+        for m,e in pairs(espMarks) do
+            if e.g then
                 pcall(function() e.hl:Destroy() end)
                 pcall(function() e.gui:Destroy() end)
                 espMarks[m]=nil
@@ -1445,6 +1462,21 @@ Options.RuneSel:OnChanged(function(v)
         list = { v }
     end
     Cfg.runeSel = list
+end)
+Options.RuneMonSel:OnChanged(function(v)
+    local list = {}
+    if type(v) == "table" then
+        for k, on in pairs(v) do
+            if on then
+                local name = type(k) == "number" and v[k] or k
+                table.insert(list, name)
+            end
+        end
+    elseif type(v) == "string" then
+        list = { v }
+    end
+    Cfg.runeMonSel = list
+    Stat.monRefresh = true
 end)
 Toggles.AutoStorm:OnChanged(function(v)
     Cfg.autoStorm = v
@@ -1797,7 +1829,7 @@ local function refreshBoulderMonitor()
             if mesh then
                 table.insert(rows, {
                     m = m,
-                    name = tostring(m:GetAttribute("BoulderId") or m.Name),
+                    name = tostring(m:GetAttribute("DisplayName") or m:GetAttribute("BoulderId") or m.Name),
                     d = (mesh.Position - myPos).Magnitude,
                     pos = mesh.Position,
                 })
@@ -1820,12 +1852,16 @@ local function refreshRuneMonitor()
     local h = getHRP()
     local myPos = h and h.Position or Vector3.zero
     local rows = {}
+    local want = {}
+    for _, r in ipairs(Cfg.runeMonSel) do
+        want[r] = true
+    end
     local function scanRunes(root)
         if not root then return end
         for _, m in ipairs(root:GetDescendants()) do
             if m:IsA("Model") then
                 local rid = m:GetAttribute("RuneId")
-                if rid then
+                if rid and want[rid] then
                     local pos = runePos(m)
                     if pos then
                         table.insert(rows, {
