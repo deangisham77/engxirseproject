@@ -32,26 +32,31 @@ local TeleportS = game:GetService("TeleportService")
 local HttpS = game:GetService("HttpService")
 local LP = Players.LocalPlayer
 
-local RequestSell = RS:WaitForChild("GemRemotes"):WaitForChild("RequestSell")
-local ToggleFavorite = RS:WaitForChild("GemRemotes"):WaitForChild("ToggleFavorite")
-local TeleportSell = RS:WaitForChild("BackpackRemotes"):WaitForChild("TeleportSell")
-local BuyUpgrade = RS:WaitForChild("UpgradeRemotes"):WaitForChild("BuyUpgrade")
-local UpgradeState = RS:WaitForChild("UpgradeRemotes"):WaitForChild("UpgradeState")
-local BuyPickaxe = RS:WaitForChild("ShopRemotes"):WaitForChild("BuyPickaxe")
-local EquipPickaxe = RS:WaitForChild("ShopRemotes"):WaitForChild("EquipPickaxe")
-local BuyBomb = RS:WaitForChild("BombRemotes"):WaitForChild("BuyBomb")
-local BuyRadar = RS:WaitForChild("RadarRemotes"):WaitForChild("BuyRadar")
-local DigRequest = RS:WaitForChild("DigRemotes"):WaitForChild("DigRequest")
-local MeteorActive = RS:WaitForChild("MeteorRemotes"):WaitForChild("Active")
-local WeatherState = RS:WaitForChild("WeatherRemotes"):WaitForChild("State")
-local PlaceRune = RS:WaitForChild("RuneRemotes"):WaitForChild("PlaceRune")
-local TeleportPlot = RS:WaitForChild("BackpackRemotes"):WaitForChild("TeleportPlot")
-local MeteorImpact = RS:WaitForChild("MeteorRemotes"):WaitForChild("ImpactPos")
-local MeteorPhase = RS:WaitForChild("MeteorRemotes"):WaitForChild("Phase")
-local PickaxeData = require(RS:WaitForChild("PickaxeData"))
-local BombData = require(RS:WaitForChild("BombData"))
-local RadarData = require(RS:WaitForChild("RadarData"))
-local GemData = require(RS:WaitForChild("GemData"))
+-- ==================== REMOTES & DATA (lazy) ====================
+-- Satu remote hilang saat update game tak lagi matikan seluruh script.
+-- Pola: R("Folder","Name") -> RemoteEvent/nil; D("Name") -> ModuleScript table/nil.
+local _rcache, _dcache = {}, {}
+local function R(folder, name)
+    local k = folder .. "/" .. name
+    if _rcache[k] == nil then
+        local ok, v = pcall(function()
+            local f = RS:FindFirstChild(folder)
+            return f and f:FindFirstChild(name)
+        end)
+        _rcache[k] = (ok and v) or false
+    end
+    return _rcache[k] or nil
+end
+local function D(name)
+    if _dcache[name] == nil then
+        local ok, v = pcall(function()
+            local m = RS:FindFirstChild(name)
+            return m and require(m)
+        end)
+        _dcache[name] = (ok and v) or false
+    end
+    return _dcache[name] or nil
+end
 local SG = workspace:WaitForChild("SpawnedGems")
 local DG = workspace:WaitForChild("DroppedGems")
 local BD = workspace:WaitForChild("Boulders")
@@ -90,14 +95,39 @@ local function effLuck(m)
         return base * mult
     end
     local ok, v = pcall(function()
-        return GemData.effectiveLuck(m:GetAttribute("Rarity") or "Common", tonumber(m:GetAttribute("Kg")) or 0, m:GetAttribute("Mutations"))
+        local _gd = D("GemData")
+        if not _gd then error("no GemData") end
+        return _gd.effectiveLuck(m:GetAttribute("Rarity") or "Common", tonumber(m:GetAttribute("Kg")) or 0, m:GetAttribute("Mutations"))
     end)
     if ok and type(v) == "number" then
         return v
     end
     return 0
 end
-local Cfg = { vacuum = false, teleport = false, autoSell = false, sellPct = 100, minRarity = 1, monRar = { "Mythic" }, monSort = "Value", fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32, upWarmth = false, upCarry = false, reserve = 0, bombSel = { "ClassicBomb" }, autoBomb = false, radarSel = { "BoulderRadar" }, autoRadar = false, pickSel = 9, antiAfk = false, antiRagdoll = false, drill = false, esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }, espBoulder = true, espGeode = false, antiLag = false, noRender = false, dig = false, digRadius = 8, autoBoulder = false, autoRune = false, runeSel = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" }, runeMonSel = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" }, autoFav = false, favMinLuck = 150, autoStorm = false }
+local Cfg = {
+    -- farm
+    vacuum = false, teleport = false, autoSell = false, sellPct = 100,
+    minRarity = 1, monRar = { "Mythic" }, monSort = "Value",
+    dig = false, digRadius = 8, drill = false, slam = false,
+    -- shop
+    upWarmth = false, upCarry = false, reserve = 0,
+    bombSel = { "ClassicBomb" }, autoBomb = false,
+    radarSel = { "BoulderRadar" }, autoRadar = false,
+    pickSel = 9,
+    -- movement + gfx
+    fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32,
+    antiAfk = false, antiRagdoll = false, antiLag = false, noRender = false,
+    -- esp
+    esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" },
+    espBoulder = true, espGeode = false,
+    -- boulder + rune
+    autoBoulder = false, autoRune = false,
+    runeSel = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" },
+    runeMonSel = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" },
+    autoStorm = false,
+    -- favorite
+    autoFav = false, favMinLuck = 150,
+}
 local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
 -- angka tuning satu tempat (jarak server: prompt ~15-17, dig <12)
@@ -119,6 +149,7 @@ local TUNE = {
     pruneEveryS = 600, -- bersih Stat.tryAt (detik)
 }
 
+-- ==================== HELPERS ====================
 -- helper di atas UI: callback tombol capture local ini (qentury/cake taruh helper duluan juga)
 local function getHRP()
     local c = LP.Character
@@ -455,6 +486,7 @@ local function espRefresh()
 end
 
 -- server actions (adaptasi tab Server qentury)
+-- ==================== SERVER ACTIONS ====================
 local Server = {}
 function Server.playerNames()
     local names = {}
@@ -627,7 +659,8 @@ end
 Stat.skipPick = Stat.skipPick or {}
 
 local function buyPickaxe(idx, manual)
-    local info = PickaxeData[idx]
+    local _pd = D("PickaxeData")
+    local info = _pd and _pd[idx]
     if not info then
         return false
     end
@@ -638,10 +671,12 @@ local function buyPickaxe(idx, manual)
     if coins - tonumber(info.price or 0) < Cfg.reserve then
         return false
     end
-    BuyPickaxe:FireServer(idx, "cash")
+    local _bb = R("ShopRemotes","BuyPickaxe")
+    if not _bb then return false end
+    _bb:FireServer(idx, "cash")
     task.wait(2)
     if LP.leaderstats.Coins.Value < coins then
-        pcall(function() EquipPickaxe:FireServer(idx) end)
+        pcall(function() R("ShopRemotes","EquipPickaxe"):FireServer(idx) end)
         Stat.skipPick[idx] = nil
         notify("Pickaxe", "Beli + equip: " .. info.name)
         print("[hub] beli pickaxe " .. info.name)
@@ -654,7 +689,8 @@ local function buyPickaxe(idx, manual)
 end
 
 local function bombPrice(id)
-    local b = BombData.ById and BombData.ById[id]
+    local _bd = D("BombData")
+    local b = _bd and _bd.ById and _bd.ById[id]
     return b and tonumber(b.price) or nil
 end
 
@@ -671,7 +707,9 @@ local function buyBombs()
     for _, b in ipairs(sel) do
         local coins = LP.leaderstats.Coins.Value
         if coins - b.price >= Cfg.reserve then
-            BuyBomb:FireServer(b.id, "cash")
+            local _bb = R("BombRemotes","BuyBomb")
+            if not _bb then return false end
+            _bb:FireServer(b.id, "cash")
             task.wait(2)
             if LP.leaderstats.Coins.Value < coins then
                 notify("Bomb", "Beli: " .. b.id)
@@ -685,7 +723,8 @@ local function buyBombs()
 end
 
 local function radarPrice(id)
-    local b = RadarData.ById and RadarData.ById[id]
+    local _rd = D("RadarData")
+    local b = _rd and _rd.ById and _rd.ById[id]
     return b and tonumber(b.price) or nil
 end
 
@@ -702,7 +741,9 @@ local function buyRadars()
     for _, b in ipairs(sel) do
         local coins = LP.leaderstats.Coins.Value
         if coins - b.price >= Cfg.reserve then
-            BuyRadar:FireServer(b.id) -- radar: 1 arg (bomb: 2 arg + "cash")
+            local _rb = R("RadarRemotes","BuyRadar")
+            if not _rb then return false end
+            _rb:FireServer(b.id) -- radar: 1 arg (bomb: 2 arg + "cash")
             task.wait(2)
             if LP.leaderstats.Coins.Value < coins then
                 notify("Radar", "Beli: " .. b.id)
@@ -1058,6 +1099,7 @@ local Window = Library:CreateWindow({
 local Toggles = Library.Toggles
 local Options = Library.Options
 
+-- ==================== UI ====================
 local MainTab = Window:AddTab({ Name = "Main", Icon = "gem", Description = "Vacuum + sell", SingleColumn = true })
 local ShopTab = Window:AddTab({ Name = "Shop", Icon = "shopping-cart", Description = "Auto upgrade", SingleColumn = true })
 local MiscTab = Window:AddTab({ Name = "Misc", Icon = "rocket", Description = "Movement", SingleColumn = true })
@@ -1075,6 +1117,7 @@ FarmBox:AddDropdown("MinRarity", { Text = "Min rarity", Values = RARITY_LIST, De
 local DigBox = MainTab:AddGroupbox({ Side = "Left", Name = "Auto Dig 360°" })
 DigBox:AddToggle("AutoDig", { Text = "Auto dig sekeliling (glacier saja)", Default = false })
 DigBox:AddToggle("AutoDrill", { Text = "Auto drill sekeliling (matikan dig)", Default = false })
+DigBox:AddToggle("AutoSlam", { Text = "Auto void slam (tiap ready)", Default = false })
 DigBox:AddSlider("DigRadius", { Text = "Radius dig", Default = 8, Min = 6, Max = 20, Rounding = 0, Suffix = "st" })
 
 local SellBox = MainTab:AddGroupbox({ Side = "Left", Name = "Auto Sell" })
@@ -1178,26 +1221,32 @@ local UpgLabel = ShopBox:AddLabel("upgrade: -", true)
 
 local PickBox = ShopTab:AddGroupbox({ Side = "Left", Name = "Pickaxe" })
 local pickNames = {}
-for i, v in ipairs(PickaxeData) do
-    pickNames[i] = string.format("%d. %s (%s)", i, v.name, fmtMoney(v.price))
+local _pdl = D("PickaxeData")
+if _pdl then
+    for i, v in ipairs(_pdl) do
+        pickNames[i] = string.format("%d. %s (%s)", i, v.name, fmtMoney(v.price))
+    end
 end
 PickBox:AddDropdown("PickList", { Text = "Pickaxe", Values = pickNames, Default = 9 })
 PickBox:AddButton({ Text = "Buy", Func = function()
     buyPickaxe(Cfg.pickSel, true)
 end })
 PickBox:AddButton({ Text = "Equip", Func = function()
-    pcall(function() EquipPickaxe:FireServer(Cfg.pickSel) end)
+    pcall(function() R("ShopRemotes","EquipPickaxe"):FireServer(Cfg.pickSel) end)
     print("[hub] equip pickaxe " .. Cfg.pickSel)
 end })
 
 local BombBox = ShopTab:AddGroupbox({ Side = "Left", Name = "Bomb" })
 local bombIds = {}
 local bombFirst = nil
-for _, v in ipairs(BombData.List) do
-    local label = string.format("%s (%s)", v.id, fmtMoney(v.price))
-    table.insert(bombIds, label)
-    if not bombFirst then
-        bombFirst = label
+local _bdl = D("BombData")
+if _bdl and _bdl.List then
+    for _, v in ipairs(_bdl.List) do
+        local label = string.format("%s (%s)", v.id, fmtMoney(v.price))
+        table.insert(bombIds, label)
+        if not bombFirst then
+            bombFirst = label
+        end
     end
 end
 BombBox:AddDropdown("BombSel", { Text = "Bomb", Values = bombIds, Multi = true, Default = { bombFirst } })
@@ -1209,11 +1258,14 @@ end })
 local RadarBox = ShopTab:AddGroupbox({ Side = "Left", Name = "Radar" })
 local radarIds = {}
 local radarFirst = nil
-for _, v in ipairs(RadarData.List) do
-    local label = string.format("%s (%s)", v.id, fmtMoney(v.price))
-    table.insert(radarIds, label)
-    if not radarFirst then
-        radarFirst = label
+local _rdl = D("RadarData")
+if _rdl and _rdl.List then
+    for _, v in ipairs(_rdl.List) do
+        local label = string.format("%s (%s)", v.id, fmtMoney(v.price))
+        table.insert(radarIds, label)
+        if not radarFirst then
+            radarFirst = label
+        end
     end
 end
 RadarBox:AddDropdown("RadarSel", { Text = "Radar", Values = radarIds, Multi = true, Default = { radarFirst } })
@@ -1305,8 +1357,8 @@ SrvMet:AddButton({ Text = "Teleport to Impact", Func = function()
         notify("Meteor", "No HRP.")
         return
     end
-    local okA, active = pcall(function() return MeteorActive.Value end)
-    local okP, pos = pcall(function() return MeteorImpact.Value end)
+    local okA, active = pcall(function() return R("MeteorRemotes","Active").Value end)
+    local okP, pos = pcall(function() return R("MeteorRemotes","ImpactPos").Value end)
     if not okA or not active then
         notify("Meteor", "Tak ada event aktif.")
         return
@@ -1393,6 +1445,10 @@ Toggles.AutoDrill:OnChanged(function(v)
     print("[hub] autodrill " .. (v and "ON" or "OFF"))
 end)
 Options.DigRadius:OnChanged(function(v) Cfg.digRadius = math.clamp(math.floor(v), 6, 20) end)
+Toggles.AutoSlam:OnChanged(function(v)
+    Cfg.slam = v
+    print("[hub] autoslam " .. (v and "ON" or "OFF"))
+end)
 Toggles.Teleport:OnChanged(function(v) Cfg.teleport = v end)
 Toggles.Esp:OnChanged(function(v)
     Cfg.esp = v
@@ -1525,10 +1581,12 @@ Options.RadarSel:OnChanged(function(v)
     Cfg.radarSel = list
 end)
 Options.PickList:OnChanged(function(v)
+    local _pd = D("PickaxeData")
+    local n = (_pd and #_pd) or 21
     if type(v) == "number" then
-        Cfg.pickSel = math.clamp(math.floor(v), 1, #PickaxeData)
+        Cfg.pickSel = math.clamp(math.floor(v), 1, n)
     elseif type(v) == "string" then
-        Cfg.pickSel = math.clamp(tonumber(v:match("^(%d+)")) or 9, 1, #PickaxeData)
+        Cfg.pickSel = math.clamp(tonumber(v:match("^(%d+)")) or 9, 1, n)
     end
 end)
 Options.BombSel:OnChanged(function(v)
@@ -1622,6 +1680,7 @@ Options.MonSort:OnChanged(function(v)
     end
 end)
 
+-- ==================== LOOPS ====================
 local function doSell()
     local h = getHRP()
     if not h then
@@ -1633,9 +1692,9 @@ local function doSell()
     end
     Stat.selling = true
     local back = h.CFrame
-    pcall(function() TeleportSell:FireServer() end)
+    pcall(function() R("BackpackRemotes","TeleportSell"):FireServer() end)
     task.wait(TUNE.sellTpWait)
-    pcall(function() RequestSell:FireServer("All") end)
+    pcall(function() R("GemRemotes","RequestSell"):FireServer("All") end)
     task.wait(TUNE.sellWait)
     tpTo(h, back)
     Stat.sellNow = false
@@ -1647,33 +1706,37 @@ end
 
 -- cache UpgradeState server (level + harga). koneksi ikut teardown reload.
 local Upg = {}
+local _upgEv = R("UpgradeRemotes","UpgradeState")
 local function hookUpgrade()
-    UpgradeState.OnClientEvent:Connect(function(p)
+    if not _upgEv then return end
+    _upgEv.OnClientEvent:Connect(function(p)
         if type(p) == "table" then
             Upg = p
         end
     end)
 end
 if RL_STATE then
-    RL_STATE.connect(UpgradeState.OnClientEvent, function(p)
-        if type(p) == "table" then
-            Upg = p
-        end
-    end)
+    if _upgEv then
+        RL_STATE.connect(_upgEv.OnClientEvent, function(p)
+            if type(p) == "table" then
+                Upg = p
+            end
+        end)
+    end
 else
     hookUpgrade()
 end
 
 -- meteor: label jarak live + notif saat event mulai. koneksi ikut teardown reload.
 local function meteorText()
-    local okA, active = pcall(function() return MeteorActive.Value end)
+    local okA, active = pcall(function() return R("MeteorRemotes","Active").Value end)
     if not okA or not active then
         return "meteor: - (tak ada event)"
     end
-    local okP, pos = pcall(function() return MeteorImpact.Value end)
+    local okP, pos = pcall(function() return R("MeteorRemotes","ImpactPos").Value end)
     local okH, h = pcall(getHRP)
     local ph = ""
-    pcall(function() ph = tostring(MeteorPhase.Value) end)
+    pcall(function() ph = tostring(R("MeteorRemotes","Phase").Value) end)
     if okP and pos and okH and h then
         local d = math.floor((h.Position - pos).Magnitude)
         if d < 12 then
@@ -1684,8 +1747,10 @@ local function meteorText()
     return "meteor: [" .. tostring(ph) .. "] aktif"
 end
 
+local _metEv = R("MeteorRemotes","Active")
 local function hookMeteor()
-    MeteorActive.Changed:Connect(function(v)
+    if not _metEv then return end
+    _metEv.Changed:Connect(function(v)
         if v then
             notify("Meteor", "Incoming! TP dari tab Server.")
             print("[hub] meteor incoming")
@@ -1695,14 +1760,16 @@ local function hookMeteor()
     end)
 end
 if RL_STATE then
-    RL_STATE.connect(MeteorActive.Changed, function(v)
-        if v then
-            notify("Meteor", "Incoming! TP dari tab Server.")
-            print("[hub] meteor incoming")
-        else
-            print("[hub] meteor end")
-        end
-    end)
+    if _metEv then
+        RL_STATE.connect(_metEv.Changed, function(v)
+            if v then
+                notify("Meteor", "Incoming! TP dari tab Server.")
+                print("[hub] meteor incoming")
+            else
+                print("[hub] meteor end")
+            end
+        end)
+    end
 else
     hookMeteor()
 end
@@ -1738,7 +1805,8 @@ local function doUpgrade()
                 local steps = kind == "warmth" and WARM_STEPS or CARRY_STEPS
                 local idx = biggestStep(prices, steps, budget)
                 if idx then
-                    BuyUpgrade:FireServer(kind, steps[idx])
+                    local _bu = R("UpgradeRemotes","BuyUpgrade")
+                    if _bu then _bu:FireServer(kind, steps[idx]) end
                     print("[hub] buy " .. kind .. " +" .. steps[idx])
                     return
                 end
@@ -1752,7 +1820,8 @@ local function upgradeLabel()
     local w = Upg.warmth and ("W" .. Upg.warmth) or "W?"
     local c = Upg.carry and ("C" .. Upg.carry) or "C?"
     local eq = tonumber(LP:GetAttribute("EquippedPickaxe")) or 0
-    local pn = PickaxeData[eq] and PickaxeData[eq].name or "?"
+    local _pd = D("PickaxeData")
+    local pn = (_pd and _pd[eq] and _pd[eq].name) or "?"
     local txt = string.format("upgrade: %s %s | %s", w, c, pn)
     pcall(function() UpgLabel:SetText(txt) end)
 end
@@ -2197,7 +2266,7 @@ task.spawn(function()
                         dev:FireServer("dig", tp, (hit.Position - tp).Unit)
                     end)
                 end
-                pcall(function() DigRequest:FireServer(hit.Position) end)
+                pcall(function() R("DigRemotes","DigRequest"):FireServer(hit.Position) end)
                 Stat.lastDig = { step = Stat.digStep, pos = hit.Position }
                 if os.clock() - (Stat.lastDigBeat or 0) > 30 then
                     Stat.lastDigBeat = os.clock()
@@ -2254,7 +2323,7 @@ task.spawn(function()
                 if (hit.Position - center).Magnitude > Cfg.digRadius + 4 then
                     return -- jurang/lereng curam: server pasti "Too far", hemat request
                 end
-                pcall(function() DigRequest:FireServer(hit.Position) end)
+                pcall(function() R("DigRemotes","DigRequest"):FireServer(hit.Position) end)
                 Stat.lastDig = { step = Stat.digStep, pos = hit.Position }
                 if os.clock() - (Stat.lastDigBeat or 0) > 30 then
                     Stat.lastDigBeat = os.clock()
@@ -2272,6 +2341,43 @@ task.spawn(function()
             cd = (tonumber(pk:GetAttribute("Cooldown")) or 0.45) / digSpeedDiv()
         end
         task.wait(math.max(cd + 0.02, 0.08))
+    end
+end)
+
+-- auto void slam: fire Shatter + LookVector kamera tiap ScytheReadyAt lewat (butuh Void Hammer equipped)
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if not Cfg.slam or Stat.selling or Stat.sellNow then
+                return
+            end
+            local ch = LP.Character
+            local tool = ch and ch:FindFirstChildOfClass("Tool")
+            if not tool or not tool:FindFirstChild("ScytheEvent") then
+                if not Stat.slamNoTool then
+                    Stat.slamNoTool = true
+                    notify("Slam", "Equip Void Hammer dulu.")
+                end
+                return
+            end
+            Stat.slamNoTool = false
+            local rt = tonumber(LP:GetAttribute("ScytheReadyAt")) or 0
+            if workspace:GetServerTimeNow() < rt then
+                return
+            end
+            local cam = workspace.CurrentCamera
+            local lv = (cam and cam.CFrame.LookVector) or Vector3.new(0, 0, -1)
+            local sh = R("ScytheRemotes","Shatter")
+            if not sh then
+                return
+            end
+            sh:FireServer(lv)
+            print("[hub] void slam fired")
+        end)
+        if not ok then
+            warn("[hub] slam " .. tostring(err))
+        end
+        task.wait(2)
     end
 end)
 
@@ -2460,7 +2566,7 @@ local function stormPlaceOnce()
         return false, "tak ada Storm tool"
     end
     Stat.stormBack = h.CFrame
-    pcall(function() TeleportPlot:FireServer() end)
+    pcall(function() R("BackpackRemotes","TeleportPlot"):FireServer() end)
     task.wait(2)
     local char = LP.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -2484,7 +2590,7 @@ local function stormPlaceOnce()
             gy = hit.Position.Y
         end
     end)
-    pcall(function() PlaceRune:FireServer("Storm", Vector3.new(base.X, gy, base.Z)) end)
+    pcall(function() R("RuneRemotes","PlaceRune"):FireServer("Storm", Vector3.new(base.X, gy, base.Z)) end)
     task.wait(2)
     local okPlace = stormPlaced()
     if Stat.stormBack then
@@ -2544,7 +2650,7 @@ task.spawn(function()
                 return
             end
             local w = nil
-            pcall(function() w = WeatherState.Value end)
+            pcall(function() w = R("WeatherRemotes","State").Value end)
             w = tostring(w or "?")
             local isEvent = w ~= "NormalWeather" and w ~= "?" and w ~= ""
             local placed, model = stormPlaced()
@@ -2594,7 +2700,7 @@ task.spawn(function()
                         if t:IsA("Tool") and t:GetAttribute("BagId") ~= nil then
                             local fav = t:GetAttribute("Favorited")
                             if (bulk == "fav" and not fav and favLuckOk(t)) or (bulk == "unfav" and fav) then
-                                pcall(function() ToggleFavorite:FireServer(t:GetAttribute("BagId")) end)
+                                pcall(function() R("GemRemotes","ToggleFavorite"):FireServer(t:GetAttribute("BagId")) end)
                                 n += 1
                                 task.wait(0.3)
                             end
@@ -2623,13 +2729,13 @@ task.spawn(function()
                         local fav = t:GetAttribute("Favorited")
                         if effLuck(t) < (Cfg.favMinLuck or 0) then
                             if fav then
-                                pcall(function() ToggleFavorite:FireServer(t:GetAttribute("BagId")) end)
+                                pcall(function() R("GemRemotes","ToggleFavorite"):FireServer(t:GetAttribute("BagId")) end)
                                 n += 1
                             else
                                 skipLuck += 1
                             end
                         elseif not fav then
-                            pcall(function() ToggleFavorite:FireServer(t:GetAttribute("BagId")) end)
+                            pcall(function() R("GemRemotes","ToggleFavorite"):FireServer(t:GetAttribute("BagId")) end)
                             n += 1
                         end
                     end
