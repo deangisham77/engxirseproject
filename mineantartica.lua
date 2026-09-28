@@ -1626,7 +1626,7 @@ Toggles.Noclip:OnChanged(function(v)
         restoreCollide()
     end
 end)
-Toggles.AntiAfk:OnChanged(function(v) Cfg.antiAfk = v end)
+Toggles.AntiAfk:OnChanged(function(v) Cfg.antiAfk = v setAfk(v) end)
 Toggles.AntiRagdoll:OnChanged(function(v)
     Cfg.antiRagdoll = v
     if not v then
@@ -2754,5 +2754,10 @@ task.spawn(function()
         task.wait(3)
     end
 end)
+
+-- anti-afk default nyala: bunuh AntiIdleClient langsung saat script start (tak nunggu toggle)
+Cfg.antiAfk = true
+setAfk(true)
+pcall(function() Toggles.AntiAfk:SetValue(true) end)
 
 print("[hub] loaded (vacuum-only + drop orang)")
