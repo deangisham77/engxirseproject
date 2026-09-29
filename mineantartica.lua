@@ -933,22 +933,59 @@ end
 -- movement (fly + noclip), pola cake file
 local noclipConn
 local afkConn
+local afkIdleHook
+local function killAntiIdle()
+    pcall(function()
+        local ps = LP:FindFirstChild("PlayerScripts")
+        local s = ps and ps:FindFirstChild("AntiIdleClient")
+        if s then
+            s.Disabled = true
+            pcall(function() s:Destroy() end)
+            print("[hub] AntiIdleClient dibunuh")
+        end
+    end)
+end
+local function afkPulse(why)
+    pcall(function()
+        local vu = game:GetService("VirtualUser")
+        vu:CaptureController()
+        vu:ClickButton2(Vector2.new())
+    end)
+    -- gerak mikro farm-aman: lompat di tempat (XZ tetap), skip saat fly
+    pcall(function()
+        if Cfg.fly then
+            return
+        end
+        local char = LP.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health > 0 then
+            hum.Jump = true
+        end
+    end)
+    Stat.afkMoveAt = os.clock()
+    print("[hub] anti-afk pulse (" .. tostring(why or "?") .. ")")
+end
 local function setAfk(on)
-    -- game rejoin via AntiIdleClient (pantau UserInputService asli 19 mnt -> FireServer AntiIdleRejoin).
-    -- input sintetis (VIM/VirtualUser/mouse native) tak terdeteksi game. Solusi: bunuh script pengirim.
+    -- lapis 1 (game): AntiIdleClient dibunuh saat script start (bukan saat toggle).
+    -- lapis 2 (engine): toggle ON -> Idled hook VU + pulse berkala VU+jump mikro.
     if on and not afkConn then
+        killAntiIdle()
         pcall(function()
-            local ps = LP:FindFirstChild("PlayerScripts")
-            local s = ps and ps:FindFirstChild("AntiIdleClient")
-            if s then
-                s.Disabled = true
-                pcall(function() s:Destroy() end)
+            if not afkIdleHook then
+                afkIdleHook = true
+                LP.Idled:Connect(function()
+                    if not Cfg.antiAfk then
+                        return
+                    end
+                    afkPulse("idled")
+                end)
             end
         end)
         afkConn = true
-        print("[hub] AntiIdleClient diblokir")
+        print("[hub] anti-afk ON (VU + jump mikro)")
     elseif not on and afkConn then
         afkConn = nil
+        print("[hub] anti-afk OFF")
     end
 end
 task.spawn(function()
@@ -1064,6 +1101,17 @@ task.spawn(function()
             end
         end
         setAfk(Cfg.antiAfk)
+        -- pulse berkala tiap 14 mnt (Idled engine ~20 mnt) + bunuh ulang AntiIdleClient bila respawn
+        if Cfg.antiAfk and os.clock() - (Stat.afkMoveAt or 0) > 840 then
+            afkPulse("14min")
+        end
+        if os.clock() - (Stat.afkKillAt or 0) > 5 then
+            Stat.afkKillAt = os.clock()
+            local ps = LP:FindFirstChild("PlayerScripts")
+            if ps and ps:FindFirstChild("AntiIdleClient") then
+                killAntiIdle()
+            end
+        end
     end
     stopFly()
     if noclipConn then
@@ -2755,9 +2803,18 @@ task.spawn(function()
     end
 end)
 
--- anti-afk default nyala: bunuh AntiIdleClient langsung saat script start (tak nunggu toggle)
-Cfg.antiAfk = true
-setAfk(true)
-pcall(function() Toggles.AntiAfk:SetValue(true) end)
+-- anti-afk: AntiIdleClient bunuh langsung saat start; toggle hanya kontrol VU+jump mikro
+killAntiIdle()
+pcall(function()
+    local ps = LP:FindFirstChild("PlayerScripts")
+    if ps then
+        ps.ChildAdded:Connect(function(c)
+            if c.Name == "AntiIdleClient" then
+                task.wait(0.5)
+                killAntiIdle()
+            end
+        end)
+    end
+end)
 
 print("[hub] loaded (vacuum-only + drop orang)")
