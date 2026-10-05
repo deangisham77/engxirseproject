@@ -76,7 +76,8 @@ local RARITY_C3 = {
 -- mult luck per mutasi (WeatherData.List id + BoulderMutations id; nama mutasi cuaca sbg fallback)
 -- rumus resmi: totalLuckPercent = Luck attr x Π mult (WeatherLuckService)
 local MUT_LUCK_MULT = {
-    Rain = 2, Blizzard = 4, AcidRain = 3, Thunder = 5, Starfall = 6, Lucky = 5, Molten = 7, Aurora = 8,
+    Rain = 2, Blizzard = 4, AcidRain = 3, Thunder = 5, Starfall = 6, Lucky = 5, Molten = 7, Aurora = 8, Bloodborne = 2,
+    -- Blood (mutasi Bloodborne) mult luck x1 -> tak perlu entry (default 1)
     Mossy = 2, Charged = 3, Gilded = 4, Rimed = 5, Nocturnal = 6,
     Drenched = 2, Frozen = 4, Poisoned = 3, Thundered = 5, Starstruck = 6,
 }
@@ -1726,6 +1727,33 @@ Options.MonSort:OnChanged(function(v)
     elseif type(v) == "number" then
         Cfg.monSort = ({ "Value", "Luck" })[math.clamp(math.floor(v), 1, 2)]
     end
+end)
+
+-- autoload fix: config di-restore SEBELUM OnChanged terdaftar -> UI tampil ON tapi Cfg tetap default.
+-- Fire ulang semua toggle/option biar Cfg + efek samping sinkron dengan tampilan.
+pcall(function()
+    for _, name in ipairs({ "Vacuum", "Teleport", "AutoDig", "AutoDrill", "AutoSlam",
+        "AutoSell", "Esp", "EspBoulder", "EspGeode", "AutoBoulder", "AutoRune",
+        "AutoStorm", "AutoFav", "UpWarmth", "UpCarry", "AutoBomb", "AutoRadar",
+        "Fly", "Noclip", "AntiAfk", "AntiRagdoll", "Speed", "AntiLag", "NoRender" }) do
+        local t = Toggles[name]
+        if t and t.SetValue then
+            t:SetValue(t.Value and true or false)
+        end
+    end
+    for _, name in ipairs({ "MinRarity", "MonRarity", "MonSort", "DigRadius", "SellPct",
+        "EspRar", "RuneSel", "RuneMonSel", "FavMinLuck", "PickList", "BombSel",
+        "RadarSel", "Reserve", "SpeedVal", "FlySpeed", "DPI" }) do
+        local o = Options[name]
+        if o and o.SetValue then
+            o:SetValue(o.Value)
+        end
+    end
+    -- sabuk pengaman bila SetValue tak fire callback: paksa efek sekali jalan
+    setAfk(Cfg.antiAfk)
+    setAntiLag(Cfg.antiLag)
+    setNoRender(Cfg.noRender)
+    if Cfg.antiRagdoll then setRagdoll(false) else setRagdoll(true) end
 end)
 
 -- ==================== LOOPS ====================
