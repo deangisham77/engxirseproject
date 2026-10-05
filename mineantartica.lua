@@ -126,8 +126,6 @@ local Cfg = {
     runeSel = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" },
     runeMonSel = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" },
     autoStorm = false,
-    -- favorite
-    autoFav = false, favMinLuck = 150,
 }
 local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
@@ -1153,7 +1151,6 @@ local MainTab = Window:AddTab({ Name = "Main", Icon = "gem", Description = "Vacu
 local ShopTab = Window:AddTab({ Name = "Shop", Icon = "shopping-cart", Description = "Auto upgrade", SingleColumn = true })
 local MiscTab = Window:AddTab({ Name = "Misc", Icon = "rocket", Description = "Movement", SingleColumn = true })
 local BRTab = Window:AddTab({ Name = "B&R", Icon = "mountain", Description = "Boulder + rune" })
-local FavTab = Window:AddTab({ Name = "Favorite", Icon = "star", Description = "Auto favorite", SingleColumn = true })
 local ServerTab = Window:AddTab({ Name = "Server", Icon = "server", Description = "Players + hop" })
 local SettingsTab = Window:AddTab({ Name = "Setting", Icon = "settings", Description = "UI" })
 
@@ -1250,17 +1247,6 @@ RuneBox:AddButton({ Text = "Pickup Storm", Func = function()
 end })
 local StormLabel = RuneBox:AddLabel("Storm: -", true)
 local RuneSlots = brSlots(RuneBox, TUNE.monSlots, "B&R")
-
-local FavBox = FavTab:AddGroupbox({ Side = "Left", Name = "Favorite" })
-FavBox:AddToggle("AutoFav", { Text = "Auto favorite (min luck)", Default = false })
-FavBox:AddSlider("FavMinLuck", { Text = "Min luck %", Default = 150, Min = 0, Max = 100000, Rounding = 0, Suffix = "%" })
-local FavLabel = FavBox:AddLabel("Fav: -", true)
-FavBox:AddButton({ Text = "Favorite All", Func = function()
-    Stat.favBulk = "fav"
-end })
-FavBox:AddButton({ Text = "Unfavorite All", Func = function()
-    Stat.favBulk = "unfav"
-end })
 
 local ShopBox = ShopTab:AddGroupbox({ Side = "Left", Name = "Auto Upgrade" })
 ShopBox:AddToggle("UpWarmth", { Text = "Warmth", Default = false })
@@ -1549,11 +1535,6 @@ Toggles.AutoRune:OnChanged(function(v)
         print("[hub] auto rune ON")
     end
 end)
-Toggles.AutoFav:OnChanged(function(v)
-    Cfg.autoFav = v
-    print("[hub] auto fav " .. (v and "ON" or "OFF"))
-end)
-Options.FavMinLuck:OnChanged(function(v) Cfg.favMinLuck = math.max(math.floor(v), 0) end)
 Options.RuneSel:OnChanged(function(v)
     local list = {}
     if type(v) == "table" then
@@ -1734,7 +1715,7 @@ end)
 pcall(function()
     for _, name in ipairs({ "Vacuum", "Teleport", "AutoDig", "AutoDrill", "AutoSlam",
         "AutoSell", "Esp", "EspBoulder", "EspGeode", "AutoBoulder", "AutoRune",
-        "AutoStorm", "AutoFav", "UpWarmth", "UpCarry", "AutoBomb", "AutoRadar",
+        "AutoStorm", "UpWarmth", "UpCarry", "AutoBomb", "AutoRadar",
         "Fly", "Noclip", "AntiAfk", "AntiRagdoll", "Speed", "AntiLag", "NoRender" }) do
         local t = Toggles[name]
         if t and t.SetValue then
@@ -1742,7 +1723,7 @@ pcall(function()
         end
     end
     for _, name in ipairs({ "MinRarity", "MonRarity", "MonSort", "DigRadius", "SellPct",
-        "EspRar", "RuneSel", "RuneMonSel", "FavMinLuck", "PickList", "BombSel",
+        "EspRar", "RuneSel", "RuneMonSel", "PickList", "BombSel",
         "RadarSel", "Reserve", "SpeedVal", "FlySpeed", "DPI" }) do
         local o = Options[name]
         if o and o.SetValue then
@@ -2750,84 +2731,6 @@ task.spawn(function()
             warn("[hub] storm " .. tostring(err))
         end
         task.wait(5)
-    end
-end)
-
--- auto fav: murni gate min luck (effLuck). Mutasi tak peduli: full 8+1 ikut fav bila luck lolos.
-local function favLuckOk(t)
-    return effLuck(t) >= (Cfg.favMinLuck or 0)
-end
-task.spawn(function()
-    while alive and (RL_STATE == nil or RL_STATE.alive()) do
-        local ok, err = pcall(function()
-            -- bulk: fav = semua yg luck lolos; unfav = semua yg fav. Sekali jalan.
-            local bulk = Stat.favBulk
-            if bulk then
-                Stat.favBulk = nil
-                local n = 0
-                local function scanB(container)
-                    if not container then
-                        return
-                    end
-                    for _, t in ipairs(container:GetChildren()) do
-                        if n >= 30 then
-                            break
-                        end
-                        if t:IsA("Tool") and t:GetAttribute("BagId") ~= nil then
-                            local fav = t:GetAttribute("Favorited")
-                            if (bulk == "fav" and not fav and favLuckOk(t)) or (bulk == "unfav" and fav) then
-                                pcall(function() R("GemRemotes","ToggleFavorite"):FireServer(t:GetAttribute("BagId")) end)
-                                n += 1
-                                task.wait(0.3)
-                            end
-                        end
-                    end
-                end
-                scanB(LP:FindFirstChild("Backpack"))
-                scanB(LP.Character)
-                print("[hub] bulk " .. bulk .. " +" .. n)
-                pcall(function() FavLabel:SetText("Fav: bulk " .. bulk .. " " .. n) end)
-                return
-            end
-            if not Cfg.autoFav or Stat.selling then
-                return
-            end
-            local n, skipLuck = 0, 0
-            local function scan(container)
-                if not container or n >= 5 then
-                    return
-                end
-                for _, t in ipairs(container:GetChildren()) do
-                    if n >= 5 then
-                        break
-                    end
-                    if t:IsA("Tool") and t:GetAttribute("BagId") ~= nil then
-                        local fav = t:GetAttribute("Favorited")
-                        if effLuck(t) < (Cfg.favMinLuck or 0) then
-                            if fav then
-                                pcall(function() R("GemRemotes","ToggleFavorite"):FireServer(t:GetAttribute("BagId")) end)
-                                n += 1
-                            else
-                                skipLuck += 1
-                            end
-                        elseif not fav then
-                            pcall(function() R("GemRemotes","ToggleFavorite"):FireServer(t:GetAttribute("BagId")) end)
-                            n += 1
-                        end
-                    end
-                end
-            end
-            scan(LP:FindFirstChild("Backpack"))
-            scan(LP.Character)
-            if n > 0 then
-                print("[hub] fav +" .. n)
-            end
-            pcall(function() FavLabel:SetText(string.format("Fav: +%d skipLuck %d", n, skipLuck)) end)
-        end)
-        if not ok then
-            warn("[hub] fav " .. tostring(err))
-        end
-        task.wait(3)
     end
 end)
 
