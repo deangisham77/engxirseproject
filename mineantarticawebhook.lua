@@ -290,19 +290,46 @@ local function mountainName(id)
 	return tostring(id)
 end
 
+local function mountainInfo(id)
+	if type(MountainData) == "table" then
+		if MountainData.byId and MountainData.byId[id] then
+			return MountainData.byId[id]
+		end
+		for _, m in ipairs(MountainData) do
+			if type(m) == "table" and m.id == id then
+				return m
+			end
+		end
+	end
+	return nil
+end
+
 local function notifyMountain(state)
 	if not once("mt:" .. tostring(state), 1200) then
 		return
 	end
 	local rot = asInt(MtRotationEnd.Value)
+	local info = mountainInfo(state)
+	local rarity = info and info.rarity or nil
+	local peak = info and tonumber(info.peakMeters) or nil
 	local extra = {}
+	if rarity ~= nil then
+		table.insert(extra, { name = "Rarity", value = "`" .. tostring(rarity) .. "`", inline = true })
+	end
+	if peak ~= nil then
+		table.insert(extra, { name = "Ketinggian", value = string.format("`%d m`", peak), inline = true })
+	end
 	if rot > os.time() then
 		table.insert(extra, { name = "Rotasi berikut", value = string.format("<t:%d:R>", rot), inline = true })
+	end
+	local desc = "Rotasi tiap jam."
+	if rarity ~= nil or peak ~= nil then
+		desc = string.format("Rarity **%s** • Tinggi **%s m**\nRotasi tiap jam.", tostring(rarity or "?"), tostring(peak or "?"))
 	end
 	local sLower = tostring(state):lower()
 	local nLower = tostring(mountainName(state)):lower()
 	local isDread = sLower:find("dreadspire", 1, true) ~= nil or nLower:find("dreadspire", 1, true) ~= nil
-	send("⛰️ Gunung: " .. mountainName(state), "Rotasi tiap jam.", 10047005, extra, isDread)
+	send("⛰️ Gunung: " .. mountainName(state), desc, 10047005, extra, isDread)
 end
 
 local function stockSig(stock)
