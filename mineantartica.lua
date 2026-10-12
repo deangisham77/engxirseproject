@@ -77,8 +77,7 @@ local RARITY_C3 = {
 -- rumus resmi: totalLuckPercent = Luck attr x Π mult (WeatherLuckService)
 local MUT_LUCK_MULT = {
     Rain = 2, Blizzard = 4, AcidRain = 3, Thunder = 5, Starfall = 6, Lucky = 5, Molten = 7, Aurora = 8, Bloodborne = 2,
-    -- Blood (mutasi Bloodborne) mult luck x1 -> tak perlu entry (default 1)
-    Mossy = 2, Charged = 3, Gilded = 4, Rimed = 5, Nocturnal = 6,
+    Mossy = 2, Charged = 3, Gilded = 4, Rimed = 5, Nocturnal = 6, Hexed = 8,
     Drenched = 2, Frozen = 4, Poisoned = 3, Thundered = 5, Starstruck = 6,
 }
 local function effLuck(m)
