@@ -1,6 +1,6 @@
 -- Antarctica event webhook: weather + meteor + bomb/radar restock + mountain + admin abuse + anti-afk -> Discord
 -- File: event-webhook.luau | live-reload label: event-webhook
--- Sinyal: WeatherRemotes.State / MeteorRemotes.Active / BombRemotes.ShopState / RadarRemotes.ShopState / MountainRemotes.Changed+State / AdminAbuseRemotes.Started+AllEnd
+-- Sinyal: WeatherRemotes.State / MeteorRemotes.Active / BombRemotes.ShopState / RadarRemotes.ShopState / MountainRemotes.Changed+State / AdminAbuseRemotes.Started+AllEnd / Cauldron poll 5dtk (Workspace.CandyCauldron)
 
 local function hx(s) return (s:gsub("..", function(c) return string.char(tonumber(c, 16)) end)) end
 local WEBHOOK_URL = hx("68747470733A2F2F646973636F72642E636F6D2F6170692F776562686F6F6B732F313534393239333936343738323333383034382F3172753575373449756576377037716C366738766439314667786F576D6764443056534C76594B646B5645614A652D5733537A52554A776E414C4663543130374162617A")
@@ -112,6 +112,7 @@ local broadcastSynced = false
 local lastAfkPulse = 0
 local lastAbuse = false
 local lastMountain = MtState.Value
+local lastCauldronHourly = os.clock()
 local lastRadarSig = nil
 local lastRadarTotal = nil
 local lastBoulder = nil
@@ -196,7 +197,7 @@ local function baseFields()
 	return {}
 end
 
--- Ping whitelist: hanya monitor online / admin abuse / tes manual / gunung Dreadspire
+-- Ping whitelist: hanya monitor online / admin abuse / tes manual / gunung Dreadspire / cauldron 95%
 local function send(title, desc, color, extraFields, ping)
 	if ping == nil then
 		ping = false
@@ -330,6 +331,47 @@ local function notifyMountain(state)
 	local nLower = tostring(mountainName(state)):lower()
 	local isDread = sLower:find("dreadspire", 1, true) ~= nil or nLower:find("dreadspire", 1, true) ~= nil
 	send("⛰️ Gunung: " .. mountainName(state), desc, 10047005, extra, isDread)
+end
+
+-- Cauldron server: baca label 3D Workspace.CandyCauldron (format "94,762,663 / 350,000,000")
+local cauldron95Fired = false
+local function comma(n)
+	local s = tostring(math.floor(tonumber(n) or 0))
+	return s:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+end
+local function cauldronPct()
+	local ok, pct, cur, tot = pcall(function()
+		local m = workspace:FindFirstChild("CandyCauldron")
+		local lbl = m and m:FindFirstChild("Amount", true)
+		if not (lbl and lbl:IsA("TextLabel")) then
+			return nil
+		end
+		local clean = tostring(lbl.Text):gsub(",", "")
+		local a, b = clean:match("(%d+)%s*/%s*(%d+)")
+		a, b = tonumber(a), tonumber(b)
+		if not a or not b or b <= 0 then
+			return nil
+		end
+		return a / b, a, b
+	end)
+	if ok then
+		return pct, cur, tot
+	end
+	return nil
+end
+local function notifyCauldron(cur, tot, pct)
+	if not once("cauldron:95", 3600) then
+		return
+	end
+	local desc = string.format(
+		"Terisi **%s / %s** (%.1f%%). Full = Dreadspire 1 jam + Bloodmoon 10 mnt semua server!",
+		comma(cur), comma(tot), (pct or 0) * 100
+	)
+	send("🎃 Cauldron 95%!", desc, 16746496, nil, true)
+end
+local function notifyCauldronStatus(cur, tot, pct)
+	local desc = string.format("Terisi **%s / %s** (%.1f%%).", comma(cur), comma(tot), (pct or 0) * 100)
+	send("🎃 Cauldron update", desc, 5793266, nil, false)
 end
 
 local function stockSig(stock)
@@ -872,6 +914,12 @@ while STATE.alive() do
 	if MtState.Value ~= lastMountain then
 		lastMountain = MtState.Value
 		notifyMountain(lastMountain)
+		do
+			local pct, cur, tot = cauldronPct()
+			if pct then
+				notifyCauldronStatus(cur, tot, pct)
+			end
+		end
 	end
 	do
 		local on = abuseActive()
@@ -879,6 +927,27 @@ while STATE.alive() do
 			notifyAbuse()
 		end
 		lastAbuse = on
+	end
+	do
+		local pct, cur, tot = cauldronPct()
+		if pct then
+			if pct < 0.5 then
+				-- Round baru (cauldron dikosongkan): reset flag biar ronde berikut bisa alert lagi
+				cauldron95Fired = false
+			elseif pct >= 0.95 and not cauldron95Fired then
+				cauldron95Fired = true
+				notifyCauldron(cur, tot, pct)
+			end
+		end
+	end
+	if os.clock() - lastCauldronHourly >= 3600 then
+		lastCauldronHourly = os.clock()
+		do
+			local pct, cur, tot = cauldronPct()
+			if pct then
+				notifyCauldronStatus(cur, tot, pct)
+			end
+		end
 	end
 	if os.clock() - lastGuiPoll > 30 then
 		lastGuiPoll = os.clock()
