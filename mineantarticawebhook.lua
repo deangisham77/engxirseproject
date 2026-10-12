@@ -1,6 +1,6 @@
--- Antarctica event webhook: weather + meteor + bomb restock -> Discord
+-- Antarctica event webhook: weather + meteor + bomb/radar restock + mountain + admin abuse + anti-afk -> Discord
 -- File: event-webhook.luau | live-reload label: event-webhook
--- Sinyal: WeatherRemotes.State / MeteorRemotes.Active / BombRemotes.ShopState
+-- Sinyal: WeatherRemotes.State / MeteorRemotes.Active / BombRemotes.ShopState / RadarRemotes.ShopState / MountainRemotes.Changed+State / AdminAbuseRemotes.Started+AllEnd
 
 local function hx(s) return (s:gsub("..", function(c) return string.char(tonumber(c, 16)) end)) end
 local WEBHOOK_URL = hx("68747470733A2F2F646973636F72642E636F6D2F6170692F776562686F6F6B732F313534393239333936343738323333383034382F3172753575373449756576377037716C366738766439314667786F576D6764443056534C76594B646B5645614A652D5733537A52554A776E414C4663543130374162617A")
@@ -43,7 +43,6 @@ local MActive = MeteorRemotes:WaitForChild("Active")
 local MPhase = MeteorRemotes:WaitForChild("Phase")
 local MImpact = MeteorRemotes:WaitForChild("ImpactPos")
 local MZoneEnd = MeteorRemotes:WaitForChild("ZoneEnd")
-local MEvent = MeteorRemotes:WaitForChild("Event")
 local ShopState = BombRemotes:WaitForChild("ShopState")
 local AbuseRemotes = ReplicatedStorage:WaitForChild("AdminAbuseRemotes")
 local AbuseStarted = AbuseRemotes:WaitForChild("Started")
@@ -89,10 +88,6 @@ local BombData = require(ReplicatedStorage:WaitForChild("BombData"))
 local function asInt(v)
 	return math.floor(tonumber(v) or 0)
 end
-local PLACE_ID = tostring(game.PlaceId)
-local JOB_ID = tostring(game.JobId)
-local GAME_LINK = "https://www.roblox.com/games/" .. PLACE_ID
-
 local COLOR = {
 	NormalWeather = 9807270,
 	Rain = 2550221,
@@ -201,9 +196,10 @@ local function baseFields()
 	return {}
 end
 
+-- Ping whitelist: hanya monitor online / admin abuse / tes manual / gunung Dreadspire
 local function send(title, desc, color, extraFields, ping)
 	if ping == nil then
-		ping = true
+		ping = false
 	end
 	local fields = baseFields()
 	if extraFields then
@@ -303,7 +299,10 @@ local function notifyMountain(state)
 	if rot > os.time() then
 		table.insert(extra, { name = "Rotasi berikut", value = string.format("<t:%d:R>", rot), inline = true })
 	end
-	send("⛰️ Gunung: " .. mountainName(state), "Rotasi tiap jam.", 10047005, extra, false)
+	local sLower = tostring(state):lower()
+	local nLower = tostring(mountainName(state)):lower()
+	local isDread = sLower:find("dreadspire", 1, true) ~= nil or nLower:find("dreadspire", 1, true) ~= nil
+	send("⛰️ Gunung: " .. mountainName(state), "Rotasi tiap jam.", 10047005, extra, isDread)
 end
 
 local function stockSig(stock)
@@ -345,7 +344,7 @@ local function notifyAbuse()
 	if on then
 		table.insert(extra, { name = "Berakhir", value = string.format("<t:%d:R>", ae), inline = true })
 	end
-	send("🔥 ADMIN ABUSE!", "Event admin aktif. Gas farm!", 16724582, extra)
+	send("🔥 ADMIN ABUSE!", "Event admin aktif. Gas farm!", 16724582, extra, true)
 end
 
 local function notifyRestock(stock, refreshIn)
@@ -364,7 +363,7 @@ local function notifyRestock(stock, refreshIn)
 	if refreshIn and refreshIn > 0 then
 		table.insert(extra, 1, { name = "Restock berikut", value = string.format("<t:%d:R>", os.time() + math.floor(refreshIn)), inline = true })
 	end
-	send(title, desc, color, extra, isDivine)
+	send(title, desc, color, extra, false)
 end
 
 local function readGuiStock()
@@ -470,7 +469,7 @@ local function notifyRadar(stock, refreshIn)
 	if refreshIn and refreshIn > 0 then
 		table.insert(extra, 1, { name = "Restock berikut", value = string.format("<t:%d:R>", os.time() + math.floor(refreshIn)), inline = true })
 	end
-	send(title, desc, color, extra, isBoulder)
+	send(title, desc, color, extra, false)
 end
 
 local function handleRadarStock(stock, refreshIn)
@@ -766,7 +765,8 @@ do
 			{
 				{ name = "Cuaca", value = "`" .. tostring(WState.Value) .. "`", inline = true },
 				{ name = "Meteor aktif", value = "`" .. tostring(MActive.Value) .. "`", inline = true },
-			}
+			},
+			true
 		)
 		refreshUI()
 	end)
@@ -823,7 +823,7 @@ do
 		lastBoulder = radarStock["BoulderRadar"] or 0
 		table.insert(extra, { name = "Stok radar (GUI)", value = radarLines(radarStock):sub(1, 900), inline = false })
 	end
-	send("✅ Monitor online", "Webhook jalan. Notifikasi: cuaca, meteor, bom restock, gunung, radar.", 4620980, extra)
+	send("✅ Monitor online", "Webhook jalan. Notifikasi: cuaca, meteor, bom restock, gunung, radar.", 4620980, extra, true)
 	print("[webhook] monitor online, cuaca=" .. tostring(lastWeather) .. " meteor=" .. tostring(lastMActive) .. " gunung=" .. tostring(lastMountain) .. " radar=" .. tostring(lastRadarTotal))
 	refreshUI()
 end
