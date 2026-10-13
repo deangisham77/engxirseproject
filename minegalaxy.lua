@@ -1,7 +1,9 @@
 --!nonstrict
--- GalaxyVacuum_Airflow v8
+-- GalaxyVacuum_Airflow v17
 -- Game: Mine a Galaxy | Loot vacuum via ProximityPrompt hold (HoldLoot + swing loop game yang urus)
--- Fitur: [1] Vacuum jalan [2] Teleport vacuum [3] Monitor Top10 [4] Auto Sell [5] Misc: Infinite Fuel + Noclip
+-- Fitur: Main + Monitor + AutoSell + Misc(InfFuel/Noclip/Server) + Shop
+-- UI: Airflow joustingmatch/-3 (Window > Tab > Groupbox > Toggle) | Live-reload safe
+-- UI: Airflow joustingmatch/-3 (Window > Tab > Groupbox > Toggle) | Live-reload safe
 -- UI: Airflow joustingmatch/-3 (Window > Tab > Groupbox > Toggle) | Live-reload safe
 
 -- =====================================================================
@@ -29,6 +31,8 @@ end)
 -- =====================================================================
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 local Items = ReplicatedStorage:WaitForChild("Items")
@@ -38,14 +42,18 @@ local LootFolder: Folder = workspace:WaitForChild("Loot") :: Folder
 -- =====================================================================
 -- 2. CONSTANTS
 -- =====================================================================
-local VACUUM_RADIUS = 14 -- MaxDist prompt game ~15.45, ambil aman 14
-local TELE_RADIUS = 150 -- jangkauan scan teleport vacuum
+local VACUUM_RADIUS = 14 -- MaxDist prompt game ~15.45, jalan tak bisa lebih (server cek jarak)
+local TELE_RADIUS_DEF = 150
 local TICK_VACUUM = 0.4
 local TICK_TELE = 0.6
+local TICK_VACUUM_FAST = 0.15
+local TICK_TELE_FAST = 0.25
 local HOLD_TIMEOUT = 10 -- stop hold kalau loot alot (detik)
+local HOLD_TIMEOUT_FAST = 7
 local HOVER_UP = 4 -- hover di atas loot saat TP
 local TP_STEP = 55 -- teleport bertahap anti rubber-band
 local RETRY_COOLDOWN = 3 -- jangan sentuh loot gagal sebelum X detik
+local RETRY_COOLDOWN_FAST = 1
 local STARTER_PICKAXE = ItemData.STARTERS.Pickaxe
 local TIER_NAMES = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Empyrean", "Pulsar", "Quasar" }
 -- warna label per rarity (fixed hex, tak ikut tema agar beda tiap tier jelas)
@@ -63,6 +71,12 @@ local Cfg = {
 	sellPct = 90, -- jual saat cargo% >= ini
 	infFuel = false,
 	noclip = false,
+	teleRadius = TELE_RADIUS_DEF,
+	aggro = false,
+	shopBombs = { ["meteor_charge"] = true },
+	shopRadars = { ["pocket_pinger"] = true },
+	autoBomb = false,
+	autoRadar = false,
 }
 local Run = {
 	busy = false, -- ada hold/TP berjalan (hindari double-hold, game disable prompt lain saat hold)
@@ -77,6 +91,20 @@ local Run = {
 -- =====================================================================
 local function setStatus(s: string)
 	Run.status = s
+end
+
+-- nilai efektif tergantung mode agresif
+local function effTickVacuum(): number
+	return Cfg.aggro and TICK_VACUUM_FAST or TICK_VACUUM
+end
+local function effTickTele(): number
+	return Cfg.aggro and TICK_TELE_FAST or TICK_TELE
+end
+local function effHoldTimeout(): number
+	return Cfg.aggro and HOLD_TIMEOUT_FAST or HOLD_TIMEOUT
+end
+local function effRetry(): number
+	return Cfg.aggro and RETRY_COOLDOWN_FAST or RETRY_COOLDOWN
 end
 
 local function getHRP(): BasePart?
@@ -161,7 +189,7 @@ local function isValidTarget(loot: Instance, hrpPos: Vector3, maxDist: number): 
 	if (loot.Position - hrpPos).Magnitude > maxDist then
 		return false, nil
 	end
-	if os.clock() - (Run.tryAt[lootUid(loot)] or 0) < RETRY_COOLDOWN then
+	if os.clock() - (Run.tryAt[lootUid(loot)] or 0) < effRetry() then
 		return false, nil
 	end
 	return true, prompt
@@ -193,6 +221,35 @@ local function findBest(maxDist: number)
 	return best, bestPrompt, bestDist
 end
 
+-- varian agresif: target value tertinggi dalam radius (bukan terdekat)
+local function findRichest(maxDist: number)
+	local hrp = getHRP()
+	if not hrp then
+		return nil, nil, nil
+	end
+	local hrpPos = hrp.Position
+	local best: BasePart? = nil
+	local bestPrompt: ProximityPrompt? = nil
+	local bestValue = -1
+	local bestDist = 0
+	for _, loot in ipairs(LootFolder:GetChildren()) do
+		local ok, prompt = isValidTarget(loot, hrpPos, maxDist)
+		if ok and prompt then
+			local v = tonumber((loot :: BasePart):GetAttribute("Value")) or 0
+			if v > bestValue then
+				bestValue = v
+				best = loot :: BasePart
+				bestPrompt = prompt
+				bestDist = ((loot :: BasePart).Position - hrpPos).Magnitude
+			end
+		end
+	end
+	if not best then
+		return nil, nil, nil
+	end
+	return best, bestPrompt, bestDist
+end
+
 -- =====================================================================
 -- 5. CORE: HOLD (InputHoldBegin/End agar HoldLoot + swing game jalan)
 -- =====================================================================
@@ -203,8 +260,9 @@ local function holdTarget(loot: BasePart, prompt: ProximityPrompt): boolean
 		return false -- TOO HEAVY / NEEDS BETTER lolos filter, jangan hold 600s
 	end
 	local done = false
+	local cap = effHoldTimeout()
 	task.spawn(function()
-		task.wait(HOLD_TIMEOUT)
+		task.wait(cap)
 		if not done and loot.Parent then
 			pcall(function()
 				prompt:InputHoldEnd()
@@ -220,7 +278,7 @@ local function holdTarget(loot: BasePart, prompt: ProximityPrompt): boolean
 	task.wait(holdTime + 0.25)
 	-- beri waktu swing loop game menambang (MiningHits 2-4x ayun)
 	local t0 = os.clock()
-	while loot.Parent and not loot:GetAttribute("Taken") and os.clock() - t0 < HOLD_TIMEOUT do
+	while loot.Parent and not loot:GetAttribute("Taken") and os.clock() - t0 < cap do
 		task.wait(0.2)
 		-- kalau MiningBy direbut orang lain, lepas
 		local by = loot:GetAttribute("MiningBy")
@@ -285,6 +343,152 @@ local function teleportNear(targetPos: Vector3)
 	return true
 end
 
+local function tpToMeteor(): boolean
+	local folder = workspace:FindFirstChild("Meteors")
+	local best: Instance? = nil
+	if folder then
+		for _, c in ipairs(folder:GetChildren()) do
+			best = c
+			break
+		end
+	end
+	if not best then
+		setStatus("meteor: tidak aktif")
+		return false
+	end
+	local ok, piv = pcall(function()
+		return (best :: Model):GetPivot()
+	end)
+	if not ok or not piv then
+		setStatus("meteor: posisi tak terbaca")
+		return false
+	end
+	setStatus("meteor: TP...")
+	teleportNear((piv :: CFrame).Position)
+	setStatus("meteor: sampai")
+	return true
+end
+
+-- =====================================================================
+-- 6b. SERVER (adaptasi tab Server Antarctica: TP player + rejoin/hop/reset/refresh)
+-- =====================================================================
+local function playerNames(): { string }
+	local names: { string } = {}
+	for _, p in ipairs(Players:GetPlayers()) do
+		if p ~= LocalPlayer then
+			table.insert(names, p.Name)
+		end
+	end
+	table.sort(names)
+	if #names == 0 then
+		return { "-" }
+	end
+	return names
+end
+
+local function teleportToPlayer(name: string): (boolean, string)
+	if not name or name == "-" then
+		return false, "pilih player dulu"
+	end
+	local target = Players:FindFirstChild(name)
+	local char = target and (target :: Player).Character
+	local t = char and char:FindFirstChild("HumanoidRootPart")
+	if not t then
+		return false, "player tak ada"
+	end
+	teleportNear((t :: BasePart).Position)
+	return true, "-> " .. name
+end
+
+local function serverRejoin(): (boolean, string)
+	local ok, err = pcall(function()
+		if #Players:GetPlayers() <= 1 then
+			LocalPlayer:Kick("\nRejoining...")
+			task.wait()
+			TeleportService:Teleport(game.PlaceId, LocalPlayer)
+		else
+			TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+		end
+	end)
+	if ok then
+		return true, "rejoin..."
+	end
+	return false, tostring(err)
+end
+
+local function serverHop(): (boolean, string)
+	local ok, err = pcall(function()
+		local body = game:HttpGet(string.format(
+			"https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100", game.PlaceId))
+		local data = HttpService:JSONDecode(body)
+		if not data or not data.data then
+			error("no servers")
+		end
+		local list: { string } = {}
+		for _, s in ipairs(data.data) do
+			if s.playing and s.maxPlayers and s.id and s.playing < s.maxPlayers and s.id ~= game.JobId then
+				table.insert(list, s.id)
+			end
+		end
+		if #list == 0 then
+			error("no free servers")
+		end
+		TeleportService:TeleportToPlaceInstance(game.PlaceId, list[math.random(1, #list)], LocalPlayer)
+	end)
+	if ok then
+		return true, "hopping..."
+	end
+	return false, tostring(err)
+end
+
+local function resetCharacter(): (boolean, string)
+	local ok, err = pcall(function()
+		local char = LocalPlayer.Character
+		local hum = char and char:FindFirstChildWhichIsA("Humanoid")
+		if hum then
+			(hum :: Humanoid):ChangeState(Enum.HumanoidStateType.Dead)
+		elseif char then
+			char:BreakJoints()
+		else
+			error("no character")
+		end
+	end)
+	if ok then
+		return true, "reset..."
+	end
+	return false, tostring(err)
+end
+
+-- refresh ala IY: respawn, posisi + kamera balik
+local function refreshKeepPos(): (boolean, string)
+	local char = LocalPlayer.Character
+	local root = char and char:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return false, "no hrp"
+	end
+	local pos = (root :: BasePart).CFrame
+	local camPos = workspace.CurrentCamera.CFrame
+	local ok, err = resetCharacter()
+	if not ok then
+		return false, err
+	end
+	task.spawn(function()
+		local nc = LocalPlayer.CharacterAdded:Wait()
+		local hum = nc:WaitForChild("Humanoid", 10)
+		if hum then
+			local nhrp = nc:WaitForChild("HumanoidRootPart", 10)
+			if nhrp then
+				task.wait(0.2)
+				pcall(function()
+					(nhrp :: BasePart).CFrame = pos
+					workspace.CurrentCamera.CFrame = camPos
+				end)
+			end
+		end
+	end)
+	return true, "respawn..."
+end
+
 -- =====================================================================
 -- 7. LOOPS (satu target sekali jalan, anti double-hold)
 -- =====================================================================
@@ -307,9 +511,15 @@ local function teleVacuumTick()
 	if Run.busy then
 		return
 	end
-	local loot, prompt, dist = findBest(TELE_RADIUS)
+	local radius = Cfg.teleRadius or TELE_RADIUS_DEF
+	local loot, prompt, dist
+	if Cfg.aggro then
+		loot, prompt, dist = findRichest(radius)
+	else
+		loot, prompt, dist = findBest(radius)
+	end
 	if not loot or not prompt then
-		setStatus("tele: no target <= " .. TELE_RADIUS .. "m")
+		setStatus("tele: no target <= " .. radius .. "m")
 		return
 	end
 	Run.busy = true
@@ -428,6 +638,52 @@ end
 local Remotes = ReplicatedStorage:WaitForChild("Remotes")
 local SellGems = Remotes:WaitForChild("SellGems")
 
+-- =====================================================================
+-- 7e. SHOP (GearBuy:InvokeServer(id), stok rotasi 600s, cek Stock.left + coins)
+-- =====================================================================
+local GearBuy = Remotes:WaitForChild("GearBuy")
+local Stock = require(Items:WaitForChild("Stock"))
+local BOMB_IDS = { "meteor_charge", "solar_wind", "comet_frost", "nova_flare", "ion_storm", "nebula_toxin", "chrono_rift", "supernova" }
+local RADAR_IDS = { "pocket_pinger", "dowsing_dish", "sonar_scope", "quantum_sensor", "star_chart_array", "omniscope" }
+local boughtMark: { [string]: boolean } = {} -- period..id -> sudah beli (anti boros)
+
+local function buyGear(id: string, auto: boolean): (boolean, string)
+	local it = ItemData.get(id)
+	local price = it and it.price or nil
+	if price == nil then
+		return false, "unknown item"
+	end
+	local left: any = nil
+	pcall(function()
+		left = Stock.left(LocalPlayer, id)
+	end)
+	if left ~= nil and left <= 0 then
+		return false, "out of stock"
+	end
+	if auto then
+		local mark = tostring(Stock.period()) .. ":" .. id
+		if boughtMark[mark] then
+			return false, "already bought"
+		end
+	end
+	if (tonumber(LocalPlayer:GetAttribute("Coins")) or 0) < price then
+		return false, "need $" .. tostring(price)
+	end
+	local ok, res = pcall(function()
+		return GearBuy:InvokeServer(id)
+	end)
+	if not ok then
+		return false, "try again"
+	end
+	if res == nil or res == true then
+		if auto then
+			boughtMark[tostring(Stock.period()) .. ":" .. id] = true
+		end
+		return true, "bought " .. id
+	end
+	return false, typeof(res) == "string" and res or "rejected"
+end
+
 local function cargoPct(): number
 	local kg = tonumber(LocalPlayer:GetAttribute("CargoKg")) or 0
 	local max = tonumber(LocalPlayer:GetAttribute("CargoMax")) or 50
@@ -498,10 +754,11 @@ local Window = Airflow:CreateWindow({
 	Backdrop = { Weather = "Sakura", Mode = "UI", Dim = false }, -- preset default: sakura di dalam window, tint mati
 })
 local MainTab = Window:CreateTab({ Name = "Vacuum", Icon = "magnet" })
-local VacBox = MainTab:CreateGroupbox({ Name = "Vacuum", Side = "Left" })
+local VacBox = MainTab:CreateGroupbox({ Name = "Main", Side = "Left" })
 local statusLabel: any = nil
 
-VacBox:CreateToggle({
+local vacWalkT: any = nil
+vacWalkT = VacBox:CreateToggle({
 	Name = "Vacuum jalan",
 	Desc = "Ambil loot <= 14m tanpa teleport",
 	CurrentValue = false,
@@ -513,7 +770,7 @@ VacBox:CreateToggle({
 				if not Cfg.teleVacuum then -- teleport mode prioritas, vacuum pause biar tak double-hold
 					pcall(vacuumTick)
 				end
-				task.wait(TICK_VACUUM)
+				task.wait(effTickVacuum())
 			end
 			if not Cfg.vacuum then
 				setStatus("idle")
@@ -522,9 +779,23 @@ VacBox:CreateToggle({
 	end,
 })
 
-VacBox:CreateToggle({
+VacBox:CreateKeybind({
+	Name = "Key Vacuum",
+	CurrentKeybind = "G",
+	Flag = "GalaxyVacuum_KeyWalk",
+	Callback = function()
+		if vacWalkT then
+			pcall(function()
+				vacWalkT:Set(not vacWalkT:Get())
+			end)
+		end
+	end,
+})
+
+local vacTeleT: any = nil
+vacTeleT = VacBox:CreateToggle({
 	Name = "Teleport vacuum",
-	Desc = "TP ke loot <= 150m lalu hold otomatis",
+	Desc = "TP ke loot lalu hold otomatis",
 	CurrentValue = false,
 	Flag = "GalaxyVacuum_Tele",
 	Callback = function(v: boolean)
@@ -532,11 +803,54 @@ VacBox:CreateToggle({
 		task.spawn(function()
 			while Cfg.teleVacuum and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
 				pcall(teleVacuumTick)
-				task.wait(TICK_TELE)
+				task.wait(effTickTele())
 			end
 			if not Cfg.teleVacuum and not Cfg.vacuum then
 				setStatus("idle")
 			end
+		end)
+	end,
+})
+
+VacBox:CreateKeybind({
+	Name = "Key Tele-Vacuum",
+	CurrentKeybind = "T",
+	Flag = "GalaxyVacuum_KeyTele",
+	Callback = function()
+		if vacTeleT then
+			pcall(function()
+				vacTeleT:Set(not vacTeleT:Get())
+			end)
+		end
+	end,
+})
+
+VacBox:CreateSlider({
+	Name = "Radius tele",
+	Range = { 50, 500 },
+	Increment = 25,
+	Suffix = "m",
+	CurrentValue = TELE_RADIUS_DEF,
+	Flag = "GalaxyVacuum_TeleRadius",
+	Callback = function(v: any)
+		Cfg.teleRadius = math.clamp(math.floor(tonumber(v) or TELE_RADIUS_DEF), 50, 500)
+	end,
+})
+VacBox:CreateToggle({
+	Name = "Agresif",
+	Desc = "Tick cepat + incar value tertinggi",
+	CurrentValue = false,
+	Flag = "GalaxyVacuum_Aggro",
+	Callback = function(v: boolean)
+		Cfg.aggro = v
+	end,
+})
+
+VacBox:CreateButton({
+	Name = "Teleport to Meteor",
+	Callback = function()
+		task.spawn(function()
+			pcall(tpToMeteor)
 		end)
 	end,
 })
@@ -603,27 +917,50 @@ SellBox:CreateButton({
 })
 
 -- Jetpack: drain = 28 * FuelDrainMult (JetpackFlight:638). 0 = infinite. Tutorial overwrite nil -> loop reapply.
-local JetBox = MainTab:CreateGroupbox({ Name = "Jetpack", Side = "Left" })
-JetBox:CreateToggle({
-	Name = "Infinite Fuel",
-	Desc = "Drain 0 (atribut lokal, server cuma terima Thrust)",
-	CurrentValue = false,
-	Flag = "GalaxyVacuum_InfFuel",
-	Callback = function(v: boolean)
-		Cfg.infFuel = v
-		task.spawn(function()
-			while Cfg.infFuel and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
-				pcall(function()
-					LocalPlayer:SetAttribute("FuelDrainMult", 0)
-				end)
-				task.wait(0.5)
-			end
+local function setInfFuel(on: boolean)
+	Cfg.infFuel = on
+	task.spawn(function()
+		while Cfg.infFuel and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
 			pcall(function()
-				LocalPlayer:SetAttribute("FuelDrainMult", nil)
+				LocalPlayer:SetAttribute("FuelDrainMult", 0)
 			end)
+			task.wait(0.5)
+		end
+		pcall(function()
+			LocalPlayer:SetAttribute("FuelDrainMult", nil)
 		end)
-	end,
-})
+	end)
+end
+
+-- Noclip: CanCollide false tiap 0.1s (respawn-safe). Off: balikin true.
+local function setNoclip(on: boolean)
+	Cfg.noclip = on
+	task.spawn(function()
+		while Cfg.noclip and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
+			pcall(function()
+				local char = LocalPlayer.Character
+				if char then
+					for _, d in ipairs(char:GetDescendants()) do
+						if d:IsA("BasePart") then
+							(d :: BasePart).CanCollide = false
+						end
+					end
+				end
+			end)
+			task.wait(0.1)
+		end
+		pcall(function()
+			local char = LocalPlayer.Character
+			if char then
+				for _, d in ipairs(char:GetDescendants()) do
+					if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" then
+						(d :: BasePart).CanCollide = true
+					end
+				end
+			end
+		end)
+	end)
+end
 
 local MonBox = MainTab:CreateGroupbox({ Name = "Monitor Top10", Side = "Right" })
 MonBox:CreateDropdown({
@@ -701,6 +1038,235 @@ task.spawn(function()
 	end
 end)
 
+local ShopTab = Window:CreateTab({ Name = "Shop", Icon = "shopping-cart" })
+local ShopBox = ShopTab:CreateGroupbox({ Name = "Auto Buy", Side = "Left" })
+local shopLabel: any = nil
+shopLabel = ShopBox:CreateLabel({ Text = "stock rotates 10 min" })
+ShopBox:CreateDropdown({
+	Name = "Bomb (multi)",
+	Options = BOMB_IDS,
+	CurrentOption = { "meteor_charge" },
+	MultipleOptions = true,
+	AllowNone = false,
+	Flag = "GalaxyVacuum_ShopBombs",
+	Callback = function(v: any)
+		local sel: { [string]: boolean } = {}
+		if type(v) == "table" then
+			for _, item in ipairs(v) do
+				if table.find(BOMB_IDS, item) then
+					sel[item] = true
+				end
+			end
+		elseif type(v) == "string" and table.find(BOMB_IDS, v) then
+			sel[v] = true
+		end
+		if next(sel) ~= nil then
+			Cfg.shopBombs = sel
+		end
+	end,
+})
+ShopBox:CreateToggle({
+	Name = "Auto Buy Bomb",
+	Desc = "1x per stok per jenis (anti boros)",
+	CurrentValue = false,
+	Flag = "GalaxyVacuum_AutoBomb",
+	Callback = function(v: boolean)
+		Cfg.autoBomb = v
+		task.spawn(function()
+			while Cfg.autoBomb and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
+				pcall(function()
+					for id in pairs(Cfg.shopBombs) do
+						local okB, msg = buyGear(id, true)
+						if shopLabel and (okB or (msg ~= "already bought" and msg ~= "out of stock")) then
+							shopLabel:Set("bomb: " .. msg)
+						end
+						if okB then
+							break -- 1 beli per tick, hemat
+						end
+					end
+				end)
+				task.wait(5)
+			end
+		end)
+	end,
+})
+ShopBox:CreateButton({
+	Name = "Buy Bomb Now",
+	Callback = function()
+		task.spawn(function()
+			pcall(function()
+				local last = ""
+				for id in pairs(Cfg.shopBombs) do
+					local _, msg = buyGear(id, false)
+					last = msg
+				end
+				if shopLabel then
+					shopLabel:Set("bomb: " .. last)
+				end
+			end)
+		end)
+	end,
+})
+ShopBox:CreateDropdown({
+	Name = "Radar (multi)",
+	Options = RADAR_IDS,
+	CurrentOption = { "pocket_pinger" },
+	MultipleOptions = true,
+	AllowNone = false,
+	Flag = "GalaxyVacuum_ShopRadars",
+	Callback = function(v: any)
+		local sel: { [string]: boolean } = {}
+		if type(v) == "table" then
+			for _, item in ipairs(v) do
+				if table.find(RADAR_IDS, item) then
+					sel[item] = true
+				end
+			end
+		elseif type(v) == "string" and table.find(RADAR_IDS, v) then
+			sel[v] = true
+		end
+		if next(sel) ~= nil then
+			Cfg.shopRadars = sel
+		end
+	end,
+})
+ShopBox:CreateToggle({
+	Name = "Auto Buy Radar",
+	Desc = "1x per stok per jenis (anti boros)",
+	CurrentValue = false,
+	Flag = "GalaxyVacuum_AutoRadar",
+	Callback = function(v: boolean)
+		Cfg.autoRadar = v
+		task.spawn(function()
+			while Cfg.autoRadar and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
+				pcall(function()
+					for id in pairs(Cfg.shopRadars) do
+						local okR, msg = buyGear(id, true)
+						if shopLabel and (okR or (msg ~= "already bought" and msg ~= "out of stock")) then
+							shopLabel:Set("radar: " .. msg)
+						end
+						if okR then
+							break
+						end
+					end
+				end)
+				task.wait(5)
+			end
+		end)
+	end,
+})
+ShopBox:CreateButton({
+	Name = "Buy Radar Now",
+	Callback = function()
+		task.spawn(function()
+			pcall(function()
+				local last = ""
+				for id in pairs(Cfg.shopRadars) do
+					local _, msg = buyGear(id, false)
+					last = msg
+				end
+				if shopLabel then
+					shopLabel:Set("radar: " .. last)
+				end
+			end)
+		end)
+	end,
+})
+
+local MiscTab = Window:CreateTab({ Name = "Misc", Icon = "wrench" })
+local MiscBox = MiscTab:CreateGroupbox({ Name = "Movement", Side = "Left" })
+MiscBox:CreateToggle({
+	Name = "Infinite Fuel",
+	Desc = "Drain 0 (atribut lokal, server cuma terima Thrust)",
+	CurrentValue = false,
+	Flag = "GalaxyVacuum_InfFuel",
+	Callback = setInfFuel,
+})
+MiscBox:CreateToggle({
+	Name = "Noclip",
+	Desc = "Tembus terrain/planet",
+	CurrentValue = false,
+	Flag = "GalaxyVacuum_Noclip",
+	Callback = setNoclip,
+})
+
+local SrvPlayers = MiscTab:CreateGroupbox({ Name = "Players", Side = "Right" })
+local srvPlayerDD: any = nil
+srvPlayerDD = SrvPlayers:CreateDropdown({
+	Name = "Player",
+	Options = playerNames(),
+	CurrentOption = 1,
+	Searchable = true,
+	Flag = "GalaxyVacuum_SrvPlayer",
+	Callback = function(_v: any)
+	end,
+})
+SrvPlayers:CreateButton({
+	Name = "Refresh Players",
+	Callback = function()
+		local vals = playerNames()
+		pcall(function()
+			srvPlayerDD:Refresh(vals, true)
+		end)
+		setStatus("server: " .. #vals .. " listed")
+	end,
+})
+SrvPlayers:CreateButton({
+	Name = "Teleport to Player",
+	Callback = function()
+		task.spawn(function()
+			pcall(function()
+				local name: string = "-"
+				pcall(function()
+					name = srvPlayerDD:Get()
+				end)
+				if type(name) == "table" then
+					name = (name :: any)[1] or "-"
+				end
+				if type(name) == "number" then
+					name = playerNames()[name] or "-"
+				end
+				local ok, msg = teleportToPlayer(name)
+				setStatus("tp: " .. msg)
+			end)
+		end)
+	end,
+})
+
+local SrvAct = MiscTab:CreateGroupbox({ Name = "Server Actions", Side = "Right" })
+SrvAct:CreateButton({
+	Name = "Rejoin",
+	Callback = function()
+		local _, msg = serverRejoin()
+		setStatus("server: " .. msg)
+	end,
+})
+SrvAct:CreateButton({
+	Name = "Hop Server",
+	Callback = function()
+		task.spawn(function()
+			local _, msg = serverHop()
+			setStatus("server: " .. msg)
+		end)
+	end,
+})
+SrvAct:CreateButton({
+	Name = "Reset Character",
+	Callback = function()
+		local _, msg = resetCharacter()
+		setStatus("server: " .. msg)
+	end,
+})
+SrvAct:CreateButton({
+	Name = "Refresh (posisi balik)",
+	Callback = function()
+		task.spawn(function()
+			local _, msg = refreshKeepPos()
+			setStatus("server: " .. msg)
+		end)
+	end,
+})
+
 local SettingsTab = Window:CreateTab({ Name = "Settings", Icon = "settings" })
 SettingsTab:CreateConfigManager({ Side = "Left" })
 SettingsTab:CreateThemeManager({ Side = "Right" })
@@ -715,8 +1281,19 @@ local function unload()
 	Cfg.teleVacuum = false
 	Cfg.autoSell = false
 	Cfg.infFuel = false
+	Cfg.noclip = false
 	pcall(function()
 		LocalPlayer:SetAttribute("FuelDrainMult", nil)
+	end)
+	pcall(function()
+		local char = LocalPlayer.Character
+		if char then
+			for _, d in ipairs(char:GetDescendants()) do
+				if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" then
+					(d :: BasePart).CanCollide = true
+				end
+			end
+		end
 	end)
 	pcall(function()
 		Window:Destroy()
@@ -727,4 +1304,4 @@ if typeof(STATE) == "table" and STATE.onCleanup then
 end
 getgenv().__GALAXY_VACUUM_UNLOAD = unload
 
-print("[GalaxyVacuum] v7 loaded (-3 UI). Vacuum + TeleVac + Monitor + AutoSell + InfFuel.")
+print("[GalaxyVacuum] v17 loaded (-3 UI). Aggro + radius tele.")
