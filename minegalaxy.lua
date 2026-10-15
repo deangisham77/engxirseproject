@@ -1,5 +1,5 @@
 --!nonstrict
--- GalaxyVacuum_Airflow v17
+-- GalaxyVacuum_Airflow v20
 -- Game: Mine a Galaxy | Loot vacuum via ProximityPrompt hold (HoldLoot + swing loop game yang urus)
 -- Fitur: Main + Monitor + AutoSell + Misc(InfFuel/Noclip/Server) + Shop
 -- UI: Airflow joustingmatch/-3 (Window > Tab > Groupbox > Toggle) | Live-reload safe
@@ -43,6 +43,7 @@ local LootFolder: Folder = workspace:WaitForChild("Loot") :: Folder
 -- 2. CONSTANTS
 -- =====================================================================
 local VACUUM_RADIUS = 14 -- MaxDist prompt game ~15.45, jalan tak bisa lebih (server cek jarak)
+local WALK_TO_DIST = 6 -- vacuum jalan: dekati sampai segini baru hold
 local TELE_RADIUS_DEF = 150
 local TICK_VACUUM = 0.4
 local TICK_TELE = 0.6
@@ -73,6 +74,7 @@ local Cfg = {
 	noclip = false,
 	teleRadius = TELE_RADIUS_DEF,
 	aggro = false,
+	vacTiers = { [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true, [8] = true, [9] = true },
 	shopBombs = { ["meteor_charge"] = true },
 	shopRadars = { ["pocket_pinger"] = true },
 	autoBomb = false,
@@ -179,7 +181,10 @@ local function isValidTarget(loot: Instance, hrpPos: Vector3, maxDist: number): 
 	if prompt.ActionText == "TOO HEAVY" or prompt.ActionText == "NEEDS BETTER PICKAXE" then
 		return false, nil
 	end
-	local tier = loot:GetAttribute("Tier") or 1
+	local tier = math.clamp(tonumber(loot:GetAttribute("Tier")) or 1, 1, #TIER_NAMES)
+	if not Cfg.vacTiers[tier] then
+		return false, nil -- filter tier vakum
+	end
 	if not ItemData.canBreak(myPickaxe(), tier) then
 		return false, nil
 	end
@@ -370,6 +375,57 @@ local function tpToMeteor(): boolean
 end
 
 -- =====================================================================
+-- 6c. PLANETS (baca live ReplicatedStorage.Planets, TP ke permukaan)
+-- =====================================================================
+local function planetList(): { { key: string, name: string, slot: string, hard: number, center: Vector3, radius: number, bonus: number } }
+	local out: { { key: string, name: string, slot: string, hard: number, center: Vector3, radius: number, bonus: number } } = {}
+	pcall(function()
+		for _, v in ipairs(ReplicatedStorage:WaitForChild("Planets"):GetChildren()) do
+			local c = v:GetAttribute("Center")
+			if typeof(c) == "Vector3" then
+				table.insert(out, {
+					key = v.Name,
+					name = tostring(v:GetAttribute("PlanetName") or v.Name),
+					slot = tostring(v:GetAttribute("Slot") or "?"),
+					hard = tonumber(v:GetAttribute("Hardness")) or 0,
+					center = c :: Vector3,
+					radius = tonumber(v:GetAttribute("Radius")) or 300,
+					bonus = tonumber(v:GetAttribute("ValueBonus")) or 0,
+				})
+			end
+		end
+	end)
+	table.sort(out, function(a, b)
+		return a.hard < b.hard
+	end)
+	return out
+end
+
+local function teleportToPlanet(displayName: string): (boolean, string)
+	local list = planetList()
+	local pick = nil
+	for _, p in ipairs(list) do
+		if p.name == displayName or p.key == displayName then
+			pick = p
+			break
+		end
+	end
+	if not pick then
+		return false, "planet tak ada"
+	end
+	local hrp = getHRP()
+	local from = hrp and hrp.Position or (pick.center + Vector3.new(0, pick.radius + 50, 0))
+	local dir = from - pick.center
+	if dir.Magnitude < 1 then
+		dir = Vector3.yAxis
+	end
+	-- permukaan sisi pemain + hover, biar tak nyangkut di inti
+	local goal = pick.center + dir.Unit * (pick.radius + 12)
+	teleportNear(goal)
+	return true, "-> " .. pick.name
+end
+
+-- =====================================================================
 -- 6b. SERVER (adaptasi tab Server Antarctica: TP player + rejoin/hop/reset/refresh)
 -- =====================================================================
 local function playerNames(): { string }
@@ -492,6 +548,52 @@ end
 -- =====================================================================
 -- 7. LOOPS (satu target sekali jalan, anti double-hold)
 -- =====================================================================
+-- jalan kaki ke loot (Humanoid.MoveTo, anti-stuck). Return true kalau sampai dekat.
+local function walkTo(loot: BasePart): boolean
+	local char = LocalPlayer.Character
+	local hum = char and char:FindFirstChildOfClass("Humanoid")
+	local hrp = getHRP()
+	if not hum or not hrp then
+		return false
+	end
+	(hum :: Humanoid):MoveTo(loot.Position)
+	local t0 = os.clock()
+	local lastD = (loot.Position - hrp.Position).Magnitude
+	local lastT = os.clock()
+	while loot.Parent and isMine() do
+		task.wait(0.2)
+		hrp = getHRP()
+		char = LocalPlayer.Character
+		hum = char and char:FindFirstChildOfClass("Humanoid")
+		if not hum or not hrp then
+			return false
+		end
+		local d = (loot.Position - hrp.Position).Magnitude
+		if d <= WALK_TO_DIST then
+			pcall(function()
+				(hum :: Humanoid):MoveTo(hrp.Position) -- berhenti
+			end)
+			return true
+		end
+		if os.clock() - t0 > 6 then
+			break -- timeout: hold dari sini saja
+		end
+		if d < lastD - 1 then
+			lastD = d
+			lastT = os.clock()
+		elseif os.clock() - lastT > 1.5 then
+			break -- stuck (tebing/lubang): hold dari sini saja
+		end
+		-- jaga MoveTo tetap aktif
+		if (hum :: Humanoid).MoveDirection.Magnitude < 0.05 then
+			pcall(function()
+				(hum :: Humanoid):MoveTo(loot.Position)
+			end)
+		end
+	end
+	return (loot.Parent ~= nil)
+end
+
 local function vacuumTick()
 	if Run.busy then
 		return
@@ -502,7 +604,21 @@ local function vacuumTick()
 		return
 	end
 	Run.busy = true
-	setStatus("vacuum: " .. loot.Name .. " " .. math.floor(dist) .. "m")
+	if dist > WALK_TO_DIST then
+		setStatus("vacuum: jalan -> " .. loot.Name)
+		walkTo(loot)
+		if loot.Parent == nil then
+			Run.busy = false
+			return
+		end
+		-- re-validasi prompt habis jalan (bisa direbut / taken)
+		prompt = getPrompt(loot)
+		if not prompt or not prompt.Enabled then
+			Run.busy = false
+			return
+		end
+	end
+	setStatus("vacuum: " .. loot.Name)
 	holdTarget(loot, prompt)
 	Run.busy = false
 end
@@ -846,6 +962,41 @@ VacBox:CreateToggle({
 	end,
 })
 
+VacBox:CreateDropdown({
+	Name = "Tier vakum (multi)",
+	Desc = "Kosongkan Common biar cuma Legendary+",
+	Options = TIER_NAMES,
+	CurrentOption = TIER_NAMES,
+	MultipleOptions = true,
+	AllowNone = false,
+	Flag = "GalaxyVacuum_VacTiers",
+	Callback = function(v: any)
+		local sel: { [number]: boolean } = {}
+		local function pick(item: any)
+			if type(item) == "number" then
+				sel[math.clamp(math.floor(item), 1, #TIER_NAMES)] = true
+			elseif type(item) == "string" then
+				for i, n in ipairs(TIER_NAMES) do
+					if n == item then
+						sel[i] = true
+						break
+					end
+				end
+			end
+		end
+		if type(v) == "table" then
+			for _, item in ipairs(v) do
+				pick(item)
+			end
+		else
+			pick(v)
+		end
+		if next(sel) ~= nil then
+			Cfg.vacTiers = sel
+		end
+	end,
+})
+
 VacBox:CreateButton({
 	Name = "Teleport to Meteor",
 	Callback = function()
@@ -1037,6 +1188,76 @@ task.spawn(function()
 		task.wait(1)
 	end
 end)
+
+local TeleTab = Window:CreateTab({ Name = "Teleport", Icon = "rocket" })
+local TeleBox = TeleTab:CreateGroupbox({ Name = "Planets", Side = "Left" })
+TeleBox:CreateStatusList({
+	Name = "Aktif",
+	MaxRows = 4,
+	UpdateRate = 5,
+	Update = function()
+		local hrp = getHRP()
+		local myPos = hrp and hrp.Position or Vector3.zero
+		local rows: { any } = {}
+		for _, p in ipairs(planetList()) do
+			local d = math.floor((p.center - myPos).Magnitude)
+			table.insert(rows, {
+				Text = string.format("%s (%s h%d)", p.name, p.slot, p.hard),
+				Value = string.format("+%d%% bonus Â· %dm", math.floor(p.bonus * 100 + 0.5), d),
+			})
+		end
+		return rows
+	end,
+})
+local telePlanetDD: any = nil
+telePlanetDD = TeleBox:CreateDropdown({
+	Name = "Planet",
+	Options = { "Zenith", "Maelstrom", "Tidal", "Cyclone" },
+	CurrentOption = "Zenith",
+	Flag = "GalaxyVacuum_TelePlanet",
+	Callback = function(_v: any)
+	end,
+})
+TeleBox:CreateButton({
+	Name = "Refresh Planets",
+	Callback = function()
+		pcall(function()
+			local names: { string } = {}
+			for _, p in ipairs(planetList()) do
+				table.insert(names, p.name)
+			end
+			if #names > 0 then
+				telePlanetDD:Refresh(names, true)
+			end
+		end)
+		setStatus("planets refreshed")
+	end,
+})
+TeleBox:CreateButton({
+	Name = "Teleport",
+	Callback = function()
+		task.spawn(function()
+			pcall(function()
+				local sel: any = "Zenith"
+				pcall(function()
+					sel = telePlanetDD:Get()
+				end)
+				if type(sel) == "table" then
+					sel = sel[1] or "Zenith"
+				end
+				if type(sel) == "number" then
+					local names: { string } = {}
+					for _, p in ipairs(planetList()) do
+						table.insert(names, p.name)
+					end
+					sel = names[sel] or "Zenith"
+				end
+				local _, msg = teleportToPlanet(tostring(sel))
+				setStatus("tp: " .. msg)
+			end)
+		end)
+	end,
+})
 
 local ShopTab = Window:CreateTab({ Name = "Shop", Icon = "shopping-cart" })
 local ShopBox = ShopTab:CreateGroupbox({ Name = "Auto Buy", Side = "Left" })
@@ -1267,6 +1488,7 @@ SrvAct:CreateButton({
 	end,
 })
 
+
 local SettingsTab = Window:CreateTab({ Name = "Settings", Icon = "settings" })
 SettingsTab:CreateConfigManager({ Side = "Left" })
 SettingsTab:CreateThemeManager({ Side = "Right" })
@@ -1304,4 +1526,4 @@ if typeof(STATE) == "table" and STATE.onCleanup then
 end
 getgenv().__GALAXY_VACUUM_UNLOAD = unload
 
-print("[GalaxyVacuum] v17 loaded (-3 UI). Aggro + radius tele.")
+print("[GalaxyVacuum] v20 loaded (-3 UI). Filter tier vakum.")
