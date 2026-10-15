@@ -82,6 +82,13 @@ local function uiPushLog(s)
 	end
 end
 
+-- Generation guard: copy lama (ghost reload) mati sendiri max 1 tick
+_genv.__gwGen = (_genv.__gwGen or 0) + 1
+local MYGEN = _genv.__gwGen
+local function mine()
+	return _genv.__gwGen == MYGEN
+end
+
 local function srvTime()
 	local t = 0
 	pcall(function()
@@ -531,6 +538,9 @@ end
 
 if RotationNotify then
 	STATE.connect(RotationNotify.OnClientEvent, function()
+		if not mine() then
+			return
+		end
 		task.spawn(function()
 			checkRotation()
 		end)
@@ -542,10 +552,10 @@ task.spawn(function()
 	checkRotation()
 	checkStock(true)
 	checkMutation(true)
-	print("[gwebhook] sync awal done")
-	while STATE.alive() do
+	print("[gwebhook] sync awal done (gen " .. tostring(MYGEN) .. ")")
+	while mine() and STATE.alive() do
 		task.wait(15)
-		if not STATE.alive() then
+		if not mine() or not STATE.alive() then
 			break
 		end
 		local ok, err = pcall(function()
@@ -564,4 +574,4 @@ task.spawn(function()
 	end
 	print("[gwebhook] stop")
 end)
-print("[gwebhook] loaded")
+print("[gwebhook] loaded gen " .. tostring(MYGEN))
