@@ -1,5 +1,5 @@
 --!nonstrict
--- GalaxyVacuum_Airflow v20
+-- GalaxyVacuum_Airflow v22
 -- Game: Mine a Galaxy | Loot vacuum via ProximityPrompt hold (HoldLoot + swing loop game yang urus)
 -- Fitur: Main + Monitor + AutoSell + Misc(InfFuel/Noclip/Server) + Shop
 -- UI: Airflow joustingmatch/-3 (Window > Tab > Groupbox > Toggle) | Live-reload safe
@@ -42,7 +42,7 @@ local LootFolder: Folder = workspace:WaitForChild("Loot") :: Folder
 -- =====================================================================
 -- 2. CONSTANTS
 -- =====================================================================
-local VACUUM_RADIUS = 14 -- MaxDist prompt game ~15.45, jalan tak bisa lebih (server cek jarak)
+local VACUUM_RADIUS = 17 -- terbukti server terima 16.2m; tiap prompt MaxDist beda (15.9-16.6+), di bawah dibatasi per-prompt
 local WALK_TO_DIST = 6 -- vacuum jalan: dekati sampai segini baru hold
 local TELE_RADIUS_DEF = 150
 local TICK_VACUUM = 0.4
@@ -73,7 +73,7 @@ local Cfg = {
 	infFuel = false,
 	noclip = false,
 	teleRadius = TELE_RADIUS_DEF,
-	aggro = false,
+	aggro = true, -- permanen agresif (tanpa toggle): tick cepat + incar value tertinggi
 	vacTiers = { [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true, [8] = true, [9] = true },
 	shopBombs = { ["meteor_charge"] = true },
 	shopRadars = { ["pocket_pinger"] = true },
@@ -157,16 +157,18 @@ local function cargoFits(weight: number): boolean
 	return kg + weight <= max + 1e-6
 end
 
--- Validasi target vakum: mirror syarat isLootPrompt + fitPrompt game
-local function isValidTarget(loot: Instance, hrpPos: Vector3, maxDist: number): (boolean, ProximityPrompt?)
+-- Validasi target vakum: mirror isLootPrompt/isDroppedPrompt + fitPrompt/fitDropped game.
+-- Dropped = pickup instan 0.25s tanpa nambang (batu jatuh/meteor). allowDropped=true untuk vakum.
+local function isValidTarget(loot: Instance, hrpPos: Vector3, maxDist: number, allowDropped: boolean?)
 	if loot.Parent ~= LootFolder then
 		return false, nil
 	end
 	if not loot:IsA("BasePart") then
 		return false, nil
 	end
-	if loot:GetAttribute("Dropped") then
-		return false, nil -- jalur Dropped beda, skip
+	local dropped = loot:GetAttribute("Dropped") == true
+	if dropped and not allowDropped then
+		return false, nil
 	end
 	if loot:GetAttribute("Taken") then
 		return false, nil
@@ -178,15 +180,15 @@ local function isValidTarget(loot: Instance, hrpPos: Vector3, maxDist: number): 
 	if prompt:GetAttribute("TooHard") then
 		return false, nil
 	end
-	if prompt.ActionText == "TOO HEAVY" or prompt.ActionText == "NEEDS BETTER PICKAXE" then
+	if prompt.ActionText == "TOO HEAVY" or prompt.ActionText == "NEEDS BETTER PICKAXE" or prompt.ActionText == "TOO HEAVY TO PICK UP" then
 		return false, nil
 	end
 	local tier = math.clamp(tonumber(loot:GetAttribute("Tier")) or 1, 1, #TIER_NAMES)
 	if not Cfg.vacTiers[tier] then
 		return false, nil -- filter tier vakum
 	end
-	if not ItemData.canBreak(myPickaxe(), tier) then
-		return false, nil
+	if not dropped and not ItemData.canBreak(myPickaxe(), tier) then
+		return false, nil -- dropped tak perlu pickaxe
 	end
 	if not cargoFits(loot:GetAttribute("Weight") or 0) then
 		return false, nil
@@ -200,7 +202,7 @@ local function isValidTarget(loot: Instance, hrpPos: Vector3, maxDist: number): 
 	return true, prompt
 end
 
-local function findBest(maxDist: number)
+local function findBest(maxDist: number, perPrompt: boolean?)
 	local hrp = getHRP()
 	if not hrp then
 		return nil, nil, nil
@@ -210,9 +212,16 @@ local function findBest(maxDist: number)
 	local bestPrompt: ProximityPrompt? = nil
 	local bestDist = math.huge
 	for _, loot in ipairs(LootFolder:GetChildren()) do
-		local ok, prompt = isValidTarget(loot, hrpPos, maxDist)
+		local ok, prompt = isValidTarget(loot, hrpPos, maxDist, true)
 		if ok and prompt then
 			local d = ((loot :: BasePart).Position - hrpPos).Magnitude
+			-- server ikut MaxDist tiap prompt: batasi per-loot (margin 0.3m)
+			if perPrompt then
+				local lim = (tonumber(prompt.MaxActivationDistance) or (maxDist + 0.3)) - 0.3
+				if d > math.min(lim, maxDist) then
+					continue
+				end
+			end
 			if d < bestDist then
 				bestDist = d
 				best = loot :: BasePart
@@ -238,7 +247,7 @@ local function findRichest(maxDist: number)
 	local bestValue = -1
 	local bestDist = 0
 	for _, loot in ipairs(LootFolder:GetChildren()) do
-		local ok, prompt = isValidTarget(loot, hrpPos, maxDist)
+		local ok, prompt = isValidTarget(loot, hrpPos, maxDist, true)
 		if ok and prompt then
 			local v = tonumber((loot :: BasePart):GetAttribute("Value")) or 0
 			if v > bestValue then
@@ -598,9 +607,9 @@ local function vacuumTick()
 	if Run.busy then
 		return
 	end
-	local loot, prompt, dist = findBest(VACUUM_RADIUS)
+	local loot, prompt, dist = findBest(VACUUM_RADIUS, true)
 	if not loot or not prompt then
-		setStatus("vacuum: no target <= " .. VACUUM_RADIUS .. "m")
+		setStatus("vacuum: no target <= ~17m")
 		return
 	end
 	Run.busy = true
@@ -952,16 +961,6 @@ VacBox:CreateSlider({
 		Cfg.teleRadius = math.clamp(math.floor(tonumber(v) or TELE_RADIUS_DEF), 50, 500)
 	end,
 })
-VacBox:CreateToggle({
-	Name = "Agresif",
-	Desc = "Tick cepat + incar value tertinggi",
-	CurrentValue = false,
-	Flag = "GalaxyVacuum_Aggro",
-	Callback = function(v: boolean)
-		Cfg.aggro = v
-	end,
-})
-
 VacBox:CreateDropdown({
 	Name = "Tier vakum (multi)",
 	Desc = "Kosongkan Common biar cuma Legendary+",
@@ -1526,4 +1525,4 @@ if typeof(STATE) == "table" and STATE.onCleanup then
 end
 getgenv().__GALAXY_VACUUM_UNLOAD = unload
 
-print("[GalaxyVacuum] v20 loaded (-3 UI). Filter tier vakum.")
+print("[GalaxyVacuum] v22 loaded (-3 UI). Dropped ikut + aggro permanen.")
