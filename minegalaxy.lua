@@ -1,5 +1,5 @@
 --!nonstrict
--- GalaxyVacuum_Airflow v26.6
+-- GalaxyVacuum_Airflow v26.9
 -- Game: Mine a Galaxy | Loot vacuum via ProximityPrompt hold (HoldLoot + swing loop game yang urus)
 -- Fitur: Main + Monitor + AutoSell + Misc(InfFuel/Noclip/Server) + Shop
 -- UI: Airflow joustingmatch/-3 (Window > Tab > Groupbox > Toggle) | Live-reload safe
@@ -774,7 +774,8 @@ local BOMB_IDS = { "meteor_charge", "solar_wind", "comet_frost", "nova_flare", "
 local RADAR_IDS = { "pocket_pinger", "dowsing_dish", "sonar_scope", "quantum_sensor", "star_chart_array", "omniscope" }
 local boughtMark: { [string]: boolean } = {} -- period..id -> sudah beli (khusus radar, anti spam)
 
-local function buyGear(id: string, auto: boolean): (boolean, string)
+-- Cek syarat beli TANPA tembak remote (murah, boleh tiap tick).
+local function canBuyGear(id: string, auto: boolean): (boolean, string)
 	local it = ItemData.get(id)
 	local price = it and it.price or nil
 	if price == nil then
@@ -787,17 +788,29 @@ local function buyGear(id: string, auto: boolean): (boolean, string)
 	if left ~= nil and left <= 0 then
 		return false, "out of stock"
 	end
-	if auto then
-		if it.category ~= "Bomb" then
-			local mark = tostring(Stock.period()) .. ":" .. id
-			if boughtMark[mark] then
-				return false, "already bought"
-			end
+	if auto and it.category ~= "Bomb" then
+		-- radar sisa >120s tak perlu dobel: lewati, top-up saat sisa <120s
+		local activeT = tonumber(LocalPlayer:GetAttribute("RadarTime_" .. id)) or 0
+		if activeT > 120 then
+			return false, "active"
+		end
+		local mark = tostring(Stock.period()) .. ":" .. id
+		if boughtMark[mark] then
+			return false, "already bought"
 		end
 	end
 	if (tonumber(LocalPlayer:GetAttribute("Coins")) or 0) < price then
 		return false, "need $" .. tostring(price)
 	end
+	return true, "ok"
+end
+
+local function buyGear(id: string, auto: boolean): (boolean, string)
+	local okG, msgG = canBuyGear(id, auto)
+	if not okG then
+		return false, msgG
+	end
+	local it = ItemData.get(id)
 	local ok, res = pcall(function()
 		return GearBuy:InvokeServer(id)
 	end)
@@ -1340,9 +1353,10 @@ local function refreshShopLabels()
 	end)
 end
 
--- Hybrid wait: idle (stok habis / sudah beli) -> tidur sampai
--- restock (+2s), bangun tiap 15s / kalau periode ganti. Coins kurang -> poll pendek.
-local function waitShopIdle(isOn: () -> boolean)
+-- Hybrid wait: idle (stok habis / sudah beli / radar aktif) -> tidur sampai
+-- restock (+2s) atau maxSecs (expired radar), bangun tiap 15s / periode ganti.
+-- Coins kurang -> poll pendek.
+local function waitShopIdle(isOn: () -> boolean, maxSecs: number?)
 	local target: any = nil
 	pcall(function()
 		target = Stock.period()
@@ -1352,6 +1366,9 @@ local function waitShopIdle(isOn: () -> boolean)
 		s = Stock.secondsLeft()
 	end)
 	local total = math.clamp((tonumber(s) or 0) + 2, 1, 602)
+	if maxSecs ~= nil then
+		total = math.clamp(math.min(total, tonumber(maxSecs) or total), 1, 602)
+	end
 	local slept = 0
 	while slept < total and isOn() and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
 		task.wait(math.min(15, total - slept))
@@ -1364,6 +1381,121 @@ local function waitShopIdle(isOn: () -> boolean)
 			break
 		end
 	end
+end
+
+-- Satu pass shop: scan kandidat TANPA gerak; kalau ada yang bisa dibeli,
+-- kunci Run.busy, TP ke stand (server cek jarak GearBuy), borong, balik.
+-- Return: status + extra (detik top-up radar / nil).
+-- useAuto=false untuk tombol Buy Now (paksa, lewati batas 1x-periode).
+local function shopPass(kind: string, useAuto: boolean): (string, number?)
+	local isBomb = kind == "bomb"
+	local sel = isBomb and Cfg.shopBombs or Cfg.shopRadars
+	local label = isBomb and bombLabel or radarLabel
+	local tag = isBomb and "bomb: " or "radar: "
+	local want: { string } = {}
+	local coinBlocked = false
+	local activeMin: number? = nil
+	for id in pairs(sel) do
+		local okC, msgC = canBuyGear(id, useAuto)
+		if okC then
+			table.insert(want, id)
+		elseif string.find(msgC, "need $", 1, true) then
+			coinBlocked = true
+		elseif msgC == "active" then
+			local t = (tonumber(LocalPlayer:GetAttribute("RadarTime_" .. id)) or 0) - 120
+			if activeMin == nil or t < (activeMin :: number) then
+				activeMin = t
+			end
+		end
+	end
+	if #want == 0 then
+		if coinBlocked then
+			return "coins", nil
+		end
+		if activeMin ~= nil then
+			return "active", activeMin
+		end
+		return "idle", nil
+	end
+	-- tunggu hold/TP lain selesai (max 5s), lalu kunci agar vacuum pause
+	local t0 = os.clock()
+	while Run.busy and os.clock() - t0 < 5 and isMine() do
+		task.wait(0.2)
+	end
+	if Run.busy then
+		return "busy", nil
+	end
+	Run.busy = true
+	local back = getHRP() and getHRP().CFrame or nil
+	local status: string = "idle"
+	local ok, res = pcall(function()
+		local resInner: string = "idle"
+		local goal: Vector3? = nil
+		pcall(function()
+			local m = workspace:WaitForChild("Hub"):WaitForChild("Stands")
+				:WaitForChild(isBomb and "BombsStand" or "RadarStand")
+			goal = ((m :: Model):GetPivot()).Position
+		end)
+		if goal then
+			teleportNear(goal)
+			task.wait(0.6)
+		end
+		for _, id in ipairs(want) do
+			if not isMine() then
+				break
+			end
+			if not (((isBomb and Cfg.autoBomb) or ((not isBomb) and Cfg.autoRadar)) or not useAuto) then
+				break
+			end
+			if isBomb and useAuto then
+				-- borong 1 jenis sampai gagal, max 50/pass
+				for _ = 1, 50 do
+					local okB, msgB = buyGear(id, true)
+					if label then
+						label:Set(tag .. msgB)
+					end
+					if not okB then
+						if string.find(msgB, "need $", 1, true) then
+							resInner = "coins"
+						end
+						break
+					end
+					resInner = "bought"
+					task.wait(0.5)
+				end
+			else
+				local okR, msgR = buyGear(id, useAuto)
+				if label then
+					label:Set(tag .. msgR)
+				end
+				if okR then
+					resInner = "bought"
+				elseif string.find(msgR, "need $", 1, true) then
+					resInner = "coins"
+				end
+			end
+		end
+		return resInner
+	end)
+	pcall(refreshShopLabels)
+	if back and getHRP() and LocalPlayer.Character then
+		local hrp2 = getHRP()
+		if hrp2 then
+			pcall(function()
+				hrp2.AssemblyLinearVelocity = Vector3.zero
+				hrp2.AssemblyAngularVelocity = Vector3.zero
+				LocalPlayer.Character:PivotTo(back)
+			end)
+		end
+	end
+	Run.busy = false
+	if not ok then
+		return "idle", nil
+	end
+	if res == "bought" or res == "coins" then
+		return res, nil
+	end
+	return "idle", nil
 end
 refreshShopLabels()
 BombBox:CreateSlider({
@@ -1409,36 +1541,16 @@ BombBox:CreateToggle({
 		Cfg.autoBomb = v
 		task.spawn(function()
 			while Cfg.autoBomb and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
-				local idle = true
-				pcall(function()
-					for id in pairs(Cfg.shopBombs) do
-						-- borong 1 jenis sampai gagal (stok habis / coins habis), max 50/pass
-						for _ = 1, 50 do
-							if not Cfg.autoBomb or not isMine() then
-								break
-							end
-							local okB, msg = buyGear(id, true)
-							if bombLabel then
-								bombLabel:Set("bomb: " .. msg)
-							end
-							if not okB then
-								if string.find(msg, "need $", 1, true) then
-									idle = false -- coins kurang: poll pendek
-								end
-								break
-							end
-							idle = false
-							task.wait(0.5) -- jeda antar beli, hindari throttle server
-						end
-					end
-				end)
+				local st, _ = shopPass("bomb", true)
 				pcall(refreshShopLabels)
-				if idle then
+				if st == "bought" or st == "coins" then
+					task.wait(Cfg.shopTick or 3)
+				elseif st == "busy" then
+					task.wait(1)
+				else
 					waitShopIdle(function()
 						return Cfg.autoBomb
 					end)
-				else
-					task.wait(Cfg.shopTick or 3)
 				end
 			end
 		end)
@@ -1448,16 +1560,7 @@ BombBox:CreateButton({
 	Name = "Buy Bomb Now",
 	Callback = function()
 		task.spawn(function()
-			pcall(function()
-				local last = ""
-				for id in pairs(Cfg.shopBombs) do
-					local _, msg = buyGear(id, false)
-					last = msg
-				end
-				if bombLabel then
-					bombLabel:Set("bomb: " .. last)
-				end
-			end)
+			shopPass("bomb", false)
 			pcall(refreshShopLabels)
 		end)
 	end,
@@ -1494,28 +1597,20 @@ RadarBox:CreateToggle({
 		Cfg.autoRadar = v
 		task.spawn(function()
 			while Cfg.autoRadar and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
-				local idle = true
-				pcall(function()
-					for id in pairs(Cfg.shopRadars) do
-						local okR, msg = buyGear(id, true)
-						if radarLabel then
-							radarLabel:Set("radar: " .. msg)
-						end
-						if okR then
-							idle = false
-							break
-						elseif string.find(msg, "need $", 1, true) then
-							idle = false -- coins kurang: poll pendek
-						end
-					end
-				end)
+				local st, extra = shopPass("radar", true)
 				pcall(refreshShopLabels)
-				if idle then
+				if st == "bought" or st == "coins" then
+					task.wait(Cfg.shopTick or 3)
+				elseif st == "active" then
+					waitShopIdle(function()
+						return Cfg.autoRadar
+					end, (extra or 0) + 2)
+				elseif st == "busy" then
+					task.wait(1)
+				else
 					waitShopIdle(function()
 						return Cfg.autoRadar
 					end)
-				else
-					task.wait(Cfg.shopTick or 3)
 				end
 			end
 		end)
@@ -1525,16 +1620,7 @@ RadarBox:CreateButton({
 	Name = "Buy Radar Now",
 	Callback = function()
 		task.spawn(function()
-			pcall(function()
-				local last = ""
-				for id in pairs(Cfg.shopRadars) do
-					local _, msg = buyGear(id, false)
-					last = msg
-				end
-				if radarLabel then
-					radarLabel:Set("radar: " .. last)
-				end
-			end)
+			shopPass("radar", false)
 			pcall(refreshShopLabels)
 		end)
 	end,
@@ -1688,4 +1774,4 @@ if typeof(STATE) == "table" and STATE.onCleanup then
 end
 getgenv().__GALAXY_VACUUM_UNLOAD = unload
 
-print("[GalaxyVacuum] v26.6 loaded (Airflow UI). Anti-AFK default on.")
+print("[GalaxyVacuum] v26.9 loaded (Airflow UI). Anti-AFK default on.")
