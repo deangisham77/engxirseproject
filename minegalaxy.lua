@@ -1,9 +1,7 @@
 --!nonstrict
--- GalaxyVacuum_Airflow v22
+-- GalaxyVacuum_Airflow v26.5
 -- Game: Mine a Galaxy | Loot vacuum via ProximityPrompt hold (HoldLoot + swing loop game yang urus)
 -- Fitur: Main + Monitor + AutoSell + Misc(InfFuel/Noclip/Server) + Shop
--- UI: Airflow joustingmatch/-3 (Window > Tab > Groupbox > Toggle) | Live-reload safe
--- UI: Airflow joustingmatch/-3 (Window > Tab > Groupbox > Toggle) | Live-reload safe
 -- UI: Airflow joustingmatch/-3 (Window > Tab > Groupbox > Toggle) | Live-reload safe
 
 -- =====================================================================
@@ -43,7 +41,6 @@ local LootFolder: Folder = workspace:WaitForChild("Loot") :: Folder
 -- 2. CONSTANTS
 -- =====================================================================
 local VACUUM_RADIUS = 17 -- terbukti server terima 16.2m; tiap prompt MaxDist beda (15.9-16.6+), di bawah dibatasi per-prompt
-local WALK_TO_DIST = 6 -- vacuum jalan: dekati sampai segini baru hold
 local TELE_RADIUS_DEF = 150
 local TICK_VACUUM = 0.4
 local TICK_TELE = 0.6
@@ -72,11 +69,13 @@ local Cfg = {
 	sellPct = 90, -- jual saat cargo% >= ini
 	infFuel = false,
 	noclip = false,
+	antiAfk = true,
 	teleRadius = TELE_RADIUS_DEF,
 	aggro = true, -- permanen agresif (tanpa toggle): tick cepat + incar value tertinggi
 	vacTiers = { [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true, [8] = true, [9] = true },
 	shopBombs = { ["meteor_charge"] = true },
 	shopRadars = { ["pocket_pinger"] = true },
+	shopTick = 3, -- cek toko tiap N detik
 	autoBomb = false,
 	autoRadar = false,
 }
@@ -142,6 +141,39 @@ local function lootUid(loot: Instance): string
 	return tostring(loot:GetAttribute("Uid") or loot.Name)
 end
 
+-- Cache prompt per loot 2 detik: getPrompt turun ke GetDescendants tiap tick,
+-- padahal prompt jarang berubah. Validasi ringan tiap hit agar rebuild game ketahuan.
+local PromptCache: { [string]: { prompt: ProximityPrompt?, at: number } } = {}
+local PROMPT_CACHE_TTL = 2
+
+local function getCachedPrompt(loot: Instance): ProximityPrompt?
+	local key = lootUid(loot)
+	local hit = PromptCache[key]
+	if hit and os.clock() - hit.at < PROMPT_CACHE_TTL then
+		local p = hit.prompt
+		if p ~= nil then
+			local ok, valid = pcall(function()
+				return (p :: Instance).Parent ~= nil and (p :: Instance):IsDescendantOf(loot)
+			end)
+			if ok and valid then
+				return p
+			end
+		else
+			return nil
+		end
+	end
+	local fresh = getPrompt(loot)
+	local n = 0
+	for _ in pairs(PromptCache) do
+		n += 1
+	end
+	if n > 600 then
+		table.clear(PromptCache)
+	end
+	PromptCache[key] = { prompt = fresh, at = os.clock() }
+	return fresh
+end
+
 local function myPickaxe()
 	local id = LocalPlayer:GetAttribute("Equipped_Pickaxe") or STARTER_PICKAXE
 	local it = ItemData.get(id) or ItemData.get(STARTER_PICKAXE)
@@ -152,7 +184,7 @@ local function cargoFits(weight: number): boolean
 	local kg = LocalPlayer:GetAttribute("CargoKg") or 0
 	local max = LocalPlayer:GetAttribute("CargoMax") or 50
 	if kg <= 1e-6 then
-		return true
+		return (weight or 0) <= max + 1e-6
 	end
 	return kg + weight <= max + 1e-6
 end
@@ -173,7 +205,7 @@ local function isValidTarget(loot: Instance, hrpPos: Vector3, maxDist: number, a
 	if loot:GetAttribute("Taken") then
 		return false, nil
 	end
-	local prompt = getPrompt(loot)
+	local prompt = getCachedPrompt(loot)
 	if not prompt or not prompt.Enabled then
 		return false, nil
 	end
@@ -193,7 +225,9 @@ local function isValidTarget(loot: Instance, hrpPos: Vector3, maxDist: number, a
 	if not cargoFits(loot:GetAttribute("Weight") or 0) then
 		return false, nil
 	end
-	if (loot.Position - hrpPos).Magnitude > maxDist then
+	-- early-out kuadrat: tanpa sqrt per loot, sqrt cuma sekali untuk pemenang
+	local delta = loot.Position - hrpPos
+	if delta:Dot(delta) > maxDist * maxDist then
 		return false, nil
 	end
 	if os.clock() - (Run.tryAt[lootUid(loot)] or 0) < effRetry() then
@@ -210,20 +244,22 @@ local function findBest(maxDist: number, perPrompt: boolean?)
 	local hrpPos = hrp.Position
 	local best: BasePart? = nil
 	local bestPrompt: ProximityPrompt? = nil
-	local bestDist = math.huge
+	local bestDistSq = math.huge
 	for _, loot in ipairs(LootFolder:GetChildren()) do
 		local ok, prompt = isValidTarget(loot, hrpPos, maxDist, true)
 		if ok and prompt then
-			local d = ((loot :: BasePart).Position - hrpPos).Magnitude
+			local delta = ((loot :: BasePart).Position - hrpPos)
+			local dSq = delta:Dot(delta)
 			-- server ikut MaxDist tiap prompt: batasi per-loot (margin 0.3m)
 			if perPrompt then
 				local lim = (tonumber(prompt.MaxActivationDistance) or (maxDist + 0.3)) - 0.3
-				if d > math.min(lim, maxDist) then
+				local cap = math.min(lim, maxDist)
+				if dSq > cap * cap then
 					continue
 				end
 			end
-			if d < bestDist then
-				bestDist = d
+			if dSq < bestDistSq then
+				bestDistSq = dSq
 				best = loot :: BasePart
 				bestPrompt = prompt
 			end
@@ -232,7 +268,7 @@ local function findBest(maxDist: number, perPrompt: boolean?)
 	if not best then
 		return nil, nil, nil
 	end
-	return best, bestPrompt, bestDist
+	return best, bestPrompt, math.sqrt(bestDistSq)
 end
 
 -- varian agresif: target value tertinggi dalam radius (bukan terdekat)
@@ -245,7 +281,6 @@ local function findRichest(maxDist: number)
 	local best: BasePart? = nil
 	local bestPrompt: ProximityPrompt? = nil
 	local bestValue = -1
-	local bestDist = 0
 	for _, loot in ipairs(LootFolder:GetChildren()) do
 		local ok, prompt = isValidTarget(loot, hrpPos, maxDist, true)
 		if ok and prompt then
@@ -254,14 +289,13 @@ local function findRichest(maxDist: number)
 				bestValue = v
 				best = loot :: BasePart
 				bestPrompt = prompt
-				bestDist = ((loot :: BasePart).Position - hrpPos).Magnitude
 			end
 		end
 	end
 	if not best then
 		return nil, nil, nil
 	end
-	return best, bestPrompt, bestDist
+	return best, bestPrompt, ((best :: BasePart).Position - hrpPos).Magnitude
 end
 
 -- =====================================================================
@@ -350,7 +384,8 @@ local function teleportNear(targetPos: Vector3)
 			end
 			hrp.AssemblyLinearVelocity = Vector3.zero
 			hrp.AssemblyAngularVelocity = Vector3.zero
-			char:PivotTo(CFrame.new(start:Lerp(goal, i / steps)))
+			local pos = start:Lerp(goal, i / steps)
+			char:PivotTo(CFrame.lookAt(pos, targetPos, up))
 		end)
 		task.wait(0.05)
 	end
@@ -361,9 +396,21 @@ local function tpToMeteor(): boolean
 	local folder = workspace:FindFirstChild("Meteors")
 	local best: Instance? = nil
 	if folder then
+		local myPos = getHRP() and getHRP().Position or nil
+		local bestDist = math.huge
 		for _, c in ipairs(folder:GetChildren()) do
-			best = c
-			break
+			local okP, pivP = pcall(function()
+				return (c :: Model):GetPivot()
+			end)
+			if okP and pivP then
+				local d = myPos and ((pivP :: CFrame).Position - myPos).Magnitude or 0
+				if d < bestDist then
+					bestDist = d
+					best = c
+				end
+			elseif best == nil then
+				best = c
+			end
 		end
 	end
 	if not best then
@@ -524,7 +571,10 @@ local function resetCharacter(): (boolean, string)
 	return false, tostring(err)
 end
 
--- refresh ala IY: respawn, posisi + kamera balik
+-- refresh ala IY: respawn, posisi + kamera balik.
+-- Game punya RespawnSnap: 1 detik pasca-spawn dia tarik balik ke PlotSpawn
+-- kalau jarak >25 stud. Jadi: titip posisi di RespawnAt (dibaca game duluan),
+-- lalu restore ulang 3x setelah jendela 1 detik itu lewat.
 local function refreshKeepPos(): (boolean, string)
 	local char = LocalPlayer.Character
 	local root = char and char:FindFirstChild("HumanoidRootPart")
@@ -533,6 +583,9 @@ local function refreshKeepPos(): (boolean, string)
 	end
 	local pos = (root :: BasePart).CFrame
 	local camPos = workspace.CurrentCamera.CFrame
+	pcall(function()
+		LocalPlayer:SetAttribute("RespawnAt", pos)
+	end)
 	local ok, err = resetCharacter()
 	if not ok then
 		return false, err
@@ -543,13 +596,22 @@ local function refreshKeepPos(): (boolean, string)
 		if hum then
 			local nhrp = nc:WaitForChild("HumanoidRootPart", 10)
 			if nhrp then
-				task.wait(0.2)
-				pcall(function()
-					(nhrp :: BasePart).CFrame = pos
-					workspace.CurrentCamera.CFrame = camPos
-				end)
+				task.wait(1.5)
+				for _ = 1, 3 do
+					if not isMine() or LocalPlayer.Character ~= nc then
+						break
+					end
+					pcall(function()
+						(nhrp :: BasePart).CFrame = pos
+						workspace.CurrentCamera.CFrame = camPos
+					end)
+					task.wait(0.7)
+				end
 			end
 		end
+		pcall(function()
+			LocalPlayer:SetAttribute("RespawnAt", nil)
+		end)
 	end)
 	return true, "respawn..."
 end
@@ -557,52 +619,6 @@ end
 -- =====================================================================
 -- 7. LOOPS (satu target sekali jalan, anti double-hold)
 -- =====================================================================
--- jalan kaki ke loot (Humanoid.MoveTo, anti-stuck). Return true kalau sampai dekat.
-local function walkTo(loot: BasePart): boolean
-	local char = LocalPlayer.Character
-	local hum = char and char:FindFirstChildOfClass("Humanoid")
-	local hrp = getHRP()
-	if not hum or not hrp then
-		return false
-	end
-	(hum :: Humanoid):MoveTo(loot.Position)
-	local t0 = os.clock()
-	local lastD = (loot.Position - hrp.Position).Magnitude
-	local lastT = os.clock()
-	while loot.Parent and isMine() do
-		task.wait(0.2)
-		hrp = getHRP()
-		char = LocalPlayer.Character
-		hum = char and char:FindFirstChildOfClass("Humanoid")
-		if not hum or not hrp then
-			return false
-		end
-		local d = (loot.Position - hrp.Position).Magnitude
-		if d <= WALK_TO_DIST then
-			pcall(function()
-				(hum :: Humanoid):MoveTo(hrp.Position) -- berhenti
-			end)
-			return true
-		end
-		if os.clock() - t0 > 6 then
-			break -- timeout: hold dari sini saja
-		end
-		if d < lastD - 1 then
-			lastD = d
-			lastT = os.clock()
-		elseif os.clock() - lastT > 1.5 then
-			break -- stuck (tebing/lubang): hold dari sini saja
-		end
-		-- jaga MoveTo tetap aktif
-		if (hum :: Humanoid).MoveDirection.Magnitude < 0.05 then
-			pcall(function()
-				(hum :: Humanoid):MoveTo(loot.Position)
-			end)
-		end
-	end
-	return (loot.Parent ~= nil)
-end
-
 local function vacuumTick()
 	if Run.busy then
 		return
@@ -613,21 +629,7 @@ local function vacuumTick()
 		return
 	end
 	Run.busy = true
-	if dist > WALK_TO_DIST then
-		setStatus("vacuum: jalan -> " .. loot.Name)
-		walkTo(loot)
-		if loot.Parent == nil then
-			Run.busy = false
-			return
-		end
-		-- re-validasi prompt habis jalan (bisa direbut / taken)
-		prompt = getPrompt(loot)
-		if not prompt or not prompt.Enabled then
-			Run.busy = false
-			return
-		end
-	end
-	setStatus("vacuum: " .. loot.Name)
+	setStatus("vacuum: " .. loot.Name .. " " .. math.floor(dist) .. "m")
 	holdTarget(loot, prompt)
 	Run.busy = false
 end
@@ -656,8 +658,8 @@ local function teleVacuumTick()
 			Run.busy = false
 			return
 		end
-		-- re-ambil prompt (game bisa rebuild prompt pas kita TP)
-		prompt = getPrompt(loot) or prompt
+		-- re-ambil prompt (game bisa rebuild prompt pas kita TP; cache validasi otomatis)
+		prompt = getCachedPrompt(loot) or prompt
 	end
 	holdTarget(loot, prompt)
 	Run.busy = false
@@ -770,7 +772,7 @@ local GearBuy = Remotes:WaitForChild("GearBuy")
 local Stock = require(Items:WaitForChild("Stock"))
 local BOMB_IDS = { "meteor_charge", "solar_wind", "comet_frost", "nova_flare", "ion_storm", "nebula_toxin", "chrono_rift", "supernova" }
 local RADAR_IDS = { "pocket_pinger", "dowsing_dish", "sonar_scope", "quantum_sensor", "star_chart_array", "omniscope" }
-local boughtMark: { [string]: boolean } = {} -- period..id -> sudah beli (anti boros)
+local boughtMark: { [string]: boolean } = {} -- period..id -> sudah beli (khusus radar, anti spam)
 
 local function buyGear(id: string, auto: boolean): (boolean, string)
 	local it = ItemData.get(id)
@@ -786,9 +788,11 @@ local function buyGear(id: string, auto: boolean): (boolean, string)
 		return false, "out of stock"
 	end
 	if auto then
-		local mark = tostring(Stock.period()) .. ":" .. id
-		if boughtMark[mark] then
-			return false, "already bought"
+		if it.category ~= "Bomb" then
+			local mark = tostring(Stock.period()) .. ":" .. id
+			if boughtMark[mark] then
+				return false, "already bought"
+			end
 		end
 	end
 	if (tonumber(LocalPlayer:GetAttribute("Coins")) or 0) < price then
@@ -801,7 +805,7 @@ local function buyGear(id: string, auto: boolean): (boolean, string)
 		return false, "try again"
 	end
 	if res == nil or res == true then
-		if auto then
+		if auto and it.category ~= "Bomb" then
 			boughtMark[tostring(Stock.period()) .. ":" .. id] = true
 		end
 		return true, "bought " .. id
@@ -884,8 +888,8 @@ local statusLabel: any = nil
 
 local vacWalkT: any = nil
 vacWalkT = VacBox:CreateToggle({
-	Name = "Vacuum jalan",
-	Desc = "Ambil loot <= 14m tanpa teleport",
+	Name = "Vacuum",
+	Desc = "Langsung hold loot dekat (diam di tempat)",
 	CurrentValue = false,
 	Flag = "GalaxyVacuum_Walk",
 	Callback = function(v: boolean)
@@ -1082,7 +1086,31 @@ local function setInfFuel(on: boolean)
 	end)
 end
 
--- Noclip: CanCollide false tiap 0.1s (respawn-safe). Off: balikin true.
+-- Anti-AFK: klik virtual tiap Idled (default nyala sejak load).
+local IdledConn: RBXScriptConnection? = nil
+local function setAntiAfk(on: boolean)
+	Cfg.antiAfk = on
+	if IdledConn then
+		pcall(function()
+			(IdledConn :: RBXScriptConnection):Disconnect()
+		end)
+		IdledConn = nil
+	end
+	if not on then
+		return
+	end
+	IdledConn = LocalPlayer.Idled:Connect(function()
+		pcall(function()
+			local VU = game:GetService("VirtualUser")
+			VU:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+			task.wait(1)
+			VU:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+		end)
+	end)
+end
+
+-- Noclip: CanCollide false tiap 0.1s (respawn-safe). Off: balikin nilai asli per-part.
+local NoclipCache: { [BasePart]: boolean } = {}
 local function setNoclip(on: boolean)
 	Cfg.noclip = on
 	task.spawn(function()
@@ -1092,7 +1120,11 @@ local function setNoclip(on: boolean)
 				if char then
 					for _, d in ipairs(char:GetDescendants()) do
 						if d:IsA("BasePart") then
-							(d :: BasePart).CanCollide = false
+							local part = d :: BasePart
+							if NoclipCache[part] == nil then
+								NoclipCache[part] = part.CanCollide
+							end
+							part.CanCollide = false
 						end
 					end
 				end
@@ -1100,14 +1132,12 @@ local function setNoclip(on: boolean)
 			task.wait(0.1)
 		end
 		pcall(function()
-			local char = LocalPlayer.Character
-			if char then
-				for _, d in ipairs(char:GetDescendants()) do
-					if d:IsA("BasePart") and d.Name ~= "HumanoidRootPart" then
-						(d :: BasePart).CanCollide = true
-					end
-				end
+			for part, orig in pairs(NoclipCache) do
+				pcall(function()
+					part.CanCollide = orig
+				end)
 			end
+			table.clear(NoclipCache)
 		end)
 	end)
 end
@@ -1259,10 +1289,95 @@ TeleBox:CreateButton({
 })
 
 local ShopTab = Window:CreateTab({ Name = "Shop", Icon = "shopping-cart" })
-local ShopBox = ShopTab:CreateGroupbox({ Name = "Auto Buy", Side = "Left" })
-local shopLabel: any = nil
-shopLabel = ShopBox:CreateLabel({ Text = "stock rotates 10 min" })
-ShopBox:CreateDropdown({
+local BombBox = ShopTab:CreateGroupbox({ Name = "Bomb", Side = "Left" })
+local RadarBox = ShopTab:CreateGroupbox({ Name = "Radar", Side = "Right" })
+local bombLabel: any = nil
+local radarLabel: any = nil
+bombLabel = BombBox:CreateLabel({ Text = "stock: -" })
+radarLabel = RadarBox:CreateLabel({ Text = "stock: -" })
+
+-- Status stok per grup: sisa stok + punya + countdown restock (PERIOD 600s).
+local function fmtClock(s: number): string
+	s = math.max(0, math.floor(tonumber(s) or 0))
+	return string.format("%02d:%02d:%02d", s // 3600, (s % 3600) // 60, s % 60)
+end
+
+local function stockStatus(kind: string): string
+	local ids = kind == "bomb" and Cfg.shopBombs or Cfg.shopRadars
+	local parts: { string } = {}
+	for id in pairs(ids) do
+		local left: any = nil
+		pcall(function()
+			left = Stock.left(LocalPlayer, id)
+		end)
+		local have: string
+		if kind == "bomb" then
+			have = tostring(tonumber(LocalPlayer:GetAttribute("Bomb_" .. id)) or 0)
+		else
+			local t = tonumber(LocalPlayer:GetAttribute("RadarTime_" .. id))
+			have = t and (t > 0 and fmtClock(t) or "0") or "-"
+		end
+		table.insert(parts, string.format("%s stok:%s punya:%s", id, tostring(left), have))
+	end
+	local restock = 0
+	pcall(function()
+		restock = Stock.secondsLeft()
+	end)
+	if #parts == 0 then
+		return "restock " .. fmtClock(restock)
+	end
+	return table.concat(parts, " | ") .. " || restock " .. fmtClock(restock)
+end
+
+local function refreshShopLabels()
+	pcall(function()
+		if bombLabel then
+			bombLabel:Set(stockStatus("bomb"))
+		end
+		if radarLabel then
+			radarLabel:Set(stockStatus("radar"))
+		end
+	end)
+end
+
+-- Hybrid wait: idle (stok habis / sudah beli) -> tidur sampai
+-- restock (+2s), bangun tiap 15s / kalau periode ganti. Coins kurang -> poll pendek.
+local function waitShopIdle(isOn: () -> boolean)
+	local target: any = nil
+	pcall(function()
+		target = Stock.period()
+	end)
+	local s = 0
+	pcall(function()
+		s = Stock.secondsLeft()
+	end)
+	local total = math.clamp((tonumber(s) or 0) + 2, 1, 602)
+	local slept = 0
+	while slept < total and isOn() and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
+		task.wait(math.min(15, total - slept))
+		slept += 15
+		local now: any = nil
+		pcall(function()
+			now = Stock.period()
+		end)
+		if now ~= nil and target ~= nil and now ~= target then
+			break
+		end
+	end
+end
+refreshShopLabels()
+BombBox:CreateSlider({
+	Name = "Cek tiap",
+	Range = { 1, 10 },
+	Increment = 1,
+	Suffix = "s",
+	CurrentValue = 3,
+	Flag = "GalaxyVacuum_ShopTick",
+	Callback = function(v: any)
+		Cfg.shopTick = math.clamp(math.floor(tonumber(v) or 3), 1, 10)
+	end,
+})
+BombBox:CreateDropdown({
 	Name = "Bomb (multi)",
 	Options = BOMB_IDS,
 	CurrentOption = { "meteor_charge" },
@@ -1285,7 +1400,7 @@ ShopBox:CreateDropdown({
 		end
 	end,
 })
-ShopBox:CreateToggle({
+BombBox:CreateToggle({
 	Name = "Auto Buy Bomb",
 	Desc = "1x per stok per jenis (anti boros)",
 	CurrentValue = false,
@@ -1294,23 +1409,34 @@ ShopBox:CreateToggle({
 		Cfg.autoBomb = v
 		task.spawn(function()
 			while Cfg.autoBomb and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
+				local idle = true
 				pcall(function()
 					for id in pairs(Cfg.shopBombs) do
 						local okB, msg = buyGear(id, true)
-						if shopLabel and (okB or (msg ~= "already bought" and msg ~= "out of stock")) then
-							shopLabel:Set("bomb: " .. msg)
+						if bombLabel then
+							bombLabel:Set("bomb: " .. msg)
 						end
 						if okB then
+							idle = false
 							break -- 1 beli per tick, hemat
+						elseif string.find(msg, "need $", 1, true) then
+							idle = false -- coins kurang: poll pendek, income jalan terus
 						end
 					end
 				end)
-				task.wait(5)
+				pcall(refreshShopLabels)
+				if idle then
+					waitShopIdle(function()
+						return Cfg.autoBomb
+					end)
+				else
+					task.wait(Cfg.shopTick or 3)
+				end
 			end
 		end)
 	end,
 })
-ShopBox:CreateButton({
+BombBox:CreateButton({
 	Name = "Buy Bomb Now",
 	Callback = function()
 		task.spawn(function()
@@ -1320,14 +1446,15 @@ ShopBox:CreateButton({
 					local _, msg = buyGear(id, false)
 					last = msg
 				end
-				if shopLabel then
-					shopLabel:Set("bomb: " .. last)
+				if bombLabel then
+					bombLabel:Set("bomb: " .. last)
 				end
 			end)
+			pcall(refreshShopLabels)
 		end)
 	end,
 })
-ShopBox:CreateDropdown({
+RadarBox:CreateDropdown({
 	Name = "Radar (multi)",
 	Options = RADAR_IDS,
 	CurrentOption = { "pocket_pinger" },
@@ -1350,7 +1477,7 @@ ShopBox:CreateDropdown({
 		end
 	end,
 })
-ShopBox:CreateToggle({
+RadarBox:CreateToggle({
 	Name = "Auto Buy Radar",
 	Desc = "1x per stok per jenis (anti boros)",
 	CurrentValue = false,
@@ -1359,23 +1486,34 @@ ShopBox:CreateToggle({
 		Cfg.autoRadar = v
 		task.spawn(function()
 			while Cfg.autoRadar and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
+				local idle = true
 				pcall(function()
 					for id in pairs(Cfg.shopRadars) do
 						local okR, msg = buyGear(id, true)
-						if shopLabel and (okR or (msg ~= "already bought" and msg ~= "out of stock")) then
-							shopLabel:Set("radar: " .. msg)
+						if radarLabel then
+							radarLabel:Set("radar: " .. msg)
 						end
 						if okR then
+							idle = false
 							break
+						elseif string.find(msg, "need $", 1, true) then
+							idle = false -- coins kurang: poll pendek
 						end
 					end
 				end)
-				task.wait(5)
+				pcall(refreshShopLabels)
+				if idle then
+					waitShopIdle(function()
+						return Cfg.autoRadar
+					end)
+				else
+					task.wait(Cfg.shopTick or 3)
+				end
 			end
 		end)
 	end,
 })
-ShopBox:CreateButton({
+RadarBox:CreateButton({
 	Name = "Buy Radar Now",
 	Callback = function()
 		task.spawn(function()
@@ -1385,16 +1523,24 @@ ShopBox:CreateButton({
 					local _, msg = buyGear(id, false)
 					last = msg
 				end
-				if shopLabel then
-					shopLabel:Set("radar: " .. last)
+				if radarLabel then
+					radarLabel:Set("radar: " .. last)
 				end
 			end)
+			pcall(refreshShopLabels)
 		end)
 	end,
 })
 
 local MiscTab = Window:CreateTab({ Name = "Misc", Icon = "wrench" })
 local MiscBox = MiscTab:CreateGroupbox({ Name = "Movement", Side = "Left" })
+MiscBox:CreateToggle({
+	Name = "Anti-AFK",
+	Desc = "Klik virtual tiap idle (default nyala)",
+	CurrentValue = true,
+	Flag = "GalaxyVacuum_AntiAfk",
+	Callback = setAntiAfk,
+})
 MiscBox:CreateToggle({
 	Name = "Infinite Fuel",
 	Desc = "Drain 0 (atribut lokal, server cuma terima Thrust)",
@@ -1501,8 +1647,17 @@ local function unload()
 	Cfg.vacuum = false
 	Cfg.teleVacuum = false
 	Cfg.autoSell = false
+	Cfg.autoBomb = false
+	Cfg.autoRadar = false
 	Cfg.infFuel = false
 	Cfg.noclip = false
+	Cfg.antiAfk = false
+	if IdledConn then
+		pcall(function()
+			(IdledConn :: RBXScriptConnection):Disconnect()
+		end)
+		IdledConn = nil
+	end
 	pcall(function()
 		LocalPlayer:SetAttribute("FuelDrainMult", nil)
 	end)
@@ -1525,4 +1680,4 @@ if typeof(STATE) == "table" and STATE.onCleanup then
 end
 getgenv().__GALAXY_VACUUM_UNLOAD = unload
 
-print("[GalaxyVacuum] v22 loaded (-3 UI). Dropped ikut + aggro permanen.")
+print("[GalaxyVacuum] v26.5 loaded (Airflow UI). Anti-AFK default on.")
