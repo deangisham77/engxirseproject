@@ -1,5 +1,5 @@
 --!nonstrict
--- GalaxyVacuum_Airflow v26.5
+-- GalaxyVacuum_Airflow v26.6
 -- Game: Mine a Galaxy | Loot vacuum via ProximityPrompt hold (HoldLoot + swing loop game yang urus)
 -- Fitur: Main + Monitor + AutoSell + Misc(InfFuel/Noclip/Server) + Shop
 -- UI: Airflow joustingmatch/-3 (Window > Tab > Groupbox > Toggle) | Live-reload safe
@@ -1402,7 +1402,7 @@ BombBox:CreateDropdown({
 })
 BombBox:CreateToggle({
 	Name = "Auto Buy Bomb",
-	Desc = "1x per stok per jenis (anti boros)",
+	Desc = "Borong sampai stok habis, terus tiap restock",
 	CurrentValue = false,
 	Flag = "GalaxyVacuum_AutoBomb",
 	Callback = function(v: boolean)
@@ -1412,15 +1412,23 @@ BombBox:CreateToggle({
 				local idle = true
 				pcall(function()
 					for id in pairs(Cfg.shopBombs) do
-						local okB, msg = buyGear(id, true)
-						if bombLabel then
-							bombLabel:Set("bomb: " .. msg)
-						end
-						if okB then
+						-- borong 1 jenis sampai gagal (stok habis / coins habis), max 50/pass
+						for _ = 1, 50 do
+							if not Cfg.autoBomb or not isMine() then
+								break
+							end
+							local okB, msg = buyGear(id, true)
+							if bombLabel then
+								bombLabel:Set("bomb: " .. msg)
+							end
+							if not okB then
+								if string.find(msg, "need $", 1, true) then
+									idle = false -- coins kurang: poll pendek
+								end
+								break
+							end
 							idle = false
-							break -- 1 beli per tick, hemat
-						elseif string.find(msg, "need $", 1, true) then
-							idle = false -- coins kurang: poll pendek, income jalan terus
+							task.wait(0.5) -- jeda antar beli, hindari throttle server
 						end
 					end
 				end)
@@ -1680,4 +1688,4 @@ if typeof(STATE) == "table" and STATE.onCleanup then
 end
 getgenv().__GALAXY_VACUUM_UNLOAD = unload
 
-print("[GalaxyVacuum] v26.5 loaded (Airflow UI). Anti-AFK default on.")
+print("[GalaxyVacuum] v26.6 loaded (Airflow UI). Anti-AFK default on.")
