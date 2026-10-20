@@ -1,0 +1,192 @@
+{
+  "schema_version": "1.0",
+  "game_id": "break_steal_egg",
+  "name": "Break and Steal an Egg",
+  "last_updated": "2026-10-18",
+  "research_status": "IN_PROGRESS (substantially advanced by live observation SRC-017)",
+  "primary_evidence": "evidence_live_bse_2026-10-18.json (OBSERVED, HIGH) + public sources SRC-001..SRC-014 (SOURCE_DERIVED)",
+
+  "A_identity_onboarding": {
+    "description_and_purpose": {
+      "text": "Break eggs with a pickaxe to hatch animals, evade/outrun the zone guardian, deposit animals at your base for cash, train Speed on treadmills to pass zone gates, and fill a 13-rarity Index.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-001", "SRC-017"]
+    },
+    "universe_id": { "value": "10765288803", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    "tutorial": {
+      "value": "Exists (Shared.TutorialConfig, ReplicatedStorage.TutorialArrowParts, BatConfig.TutorialEndDelay=20) — content NOT yet read",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-017"],
+      "gap": "GAP-014 / OBS-BSE-01"
+    },
+    "new_player_experience": { "value": "NOT OBSERVED (no fresh-account run)", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] },
+    "first_minutes_goals": {
+      "value": "Structural inference: Zone1 gate is only 5 SpeedPower and tier-1 pickaxe is free — the first goals are break Zone1 eggs and unlock the plot treadmill (100 cash).",
+      "evidence_status": "INFERRED",
+      "confidence": "MEDIUM",
+      "source_ids": ["SRC-017"],
+      "caveat": "Not confirmed by playing a new account."
+    },
+    "ui_and_hints": {
+      "value": "How-to list in official description; tutorial arrows; overhead GuardOverhead billboards; TreadmillOverhead GUI; rarity gradients (13 tiers) for item labels.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-001", "SRC-017"]
+    },
+    "early_barriers": {
+      "value": "Pity system (330s → guaranteed Rare–Epic, zones 1–2, 3500–5000 cash) exists specifically to smooth early bad luck.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-017"]
+    },
+    "device_support": { "value": "GamepadConfig + ResponsiveUiConfig present (multi-device UI). Console/mobile support not independently confirmed.", "evidence_status": "OBSERVED", "confidence": "MEDIUM", "source_ids": ["SRC-017"] }
+  },
+
+  "B_core_loop": {
+    "mapped_loop": {
+      "ACTION": "Swing pickaxe at an egg (EggHitRequest/EggHitLanded/EggHitConfirmed) until its HP depletes → animal hatches",
+      "CHALLENGE": "Zone guardian chases and flings (CatchDistance 2, OutrunSpeedFactor 0.85, FlingDistance 12→115); rivals can knock you with bats; satchel capacity limits how many you carry",
+      "REWARD": "Place animal at base (PlaceAnimalRemote → AnimalBankedRemote) for cash; mutation rolls multiply the value up to x25",
+      "PROGRESSION": "Cash → pickaxe tiers (20), plot capacity (9 levels), satchel (6 tiers), treadmill (speed); Speed → zone gates 5 → 100,000,000,000",
+      "NEXT_GOAL": "Next zone's pool (rarity floor rises each zone: Common → Uncommon → Rare → Epic → Legendary → Mythic → Divine → Cosmic → Secret → Divine/Celestial) plus Index completion rewards (CashMult up to 100)"
+    },
+    "evidence_status": "OBSERVED",
+    "confidence": "HIGH",
+    "source_ids": ["SRC-017", "SRC-001"],
+    "caveat": "Remote names and configs confirm each step exists; the exact failure outcome (caught → ?) is still unverified (OBS-BSE-03)."
+  },
+  "repeated_activities": [
+    { "activity": "Swing pickaxe at eggs (SwingCooldown 0.5s)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    { "activity": "Carry hatched animals within satchel capacity (1–6)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    { "activity": "Train speed on plot treadmill (SpeedGainRemote)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    { "activity": "Deposit animals for cash", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    { "activity": "Upgrade pickaxe / plot / satchel / treadmill", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    { "activity": "Knock rivals with zone bat (BatHitRequest)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] }
+  ],
+  "why_loop_connects_to_next_goal": {
+    "statement": "Cash feeds four parallel sinks; only Speed opens new zones, and each new zone raises both the rarity floor and the cash ceiling — a two-currency gate that forces an explicit investment choice.",
+    "evidence_status": "INFERRED",
+    "confidence": "HIGH",
+    "source_ids": ["SRC-017"]
+  },
+
+  "C_mechanics": {
+    "movement_traversal": { "value": "WalkSpeed 18 base, soft cap 100, hard max 240; speed stat = SpeedPower (step cost 1, max 1e9, overdrive at 1e16/1e19); curve exponent 1.59", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    "combat_or_primary_interaction": { "value": "Pickaxe vs egg HP (primary) + bats vs players (knockback 17.5→48, range 15→30, cooldown 0.6/0.7s)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    "egg_pet_collectible": { "value": "458 nests over 10 zones; 86 base pool animals + 22 event extras + 58 legacy; 13 rarities; mutations (5) and size/variant axes (Diamond/Gold)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    "npc_ai": { "value": "10 named guardians; GuardSpeed 30→70; pathfinding recovery params, wind-up, far-boost, catch growth per decade; SizeRequirement affects catch difficulty", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    "stealing_pvp": { "value": "Rival theft of carried/pending animals (guide + video) plus explicit combat via bats; CatchFlingRemote and DropCarriedRemote exist", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-001", "SRC-014", "SRC-017"], "note": "Theft flow itself not yet witnessed live (OBS-BSE-10)." },
+    "inventory_equipment": { "value": "Satchel tiers 1–6 (Bare Hands → Titanic, capacity 1→6); pickaxe tiers 1–20; 11 trails; hotbar/backpack UI configs", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    "upgrade_stat_progression": { "value": "Four sinks: pickaxe (20 tiers), plot (9 levels, capacity 8→16), satchel (6), treadmill (6–9 levels, CONFLICTING tables)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    "zones_unlock": { "value": "10 zones gated by RequiredPower 5 → 1e11 + SafeZone; plot culling starts at zone 7", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    "quests_missions_achievements": { "value": "Index with 13 rarity tiers and claimable rewards; Roblox badges incl. 'Lucky'; polls; no quest system observed", "evidence_status": "OBSERVED", "confidence": "MEDIUM", "source_ids": ["SRC-017"] },
+    "multiplayer": { "value": "Shared servers (5/7 observed); bats, theft, global boosts, announcements, leaderboards, friend NPC boosts", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    "trading_economy_between_players": { "value": "No trading observed; gifting exists only as Robux gifting (RobuxShopGiftIntent/Request)", "evidence_status": "OBSERVED", "confidence": "MEDIUM", "source_ids": ["SRC-017"] },
+    "failure_penalty": { "value": "Guard catch → fling (FlingDistance, LaunchAngle 25, RagdollDuration 3) and guide says animal is dropped; exact loss rules NOT verified", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-002", "SRC-017"], "gap": "OBS-BSE-03" },
+    "events_limited_content": { "value": "Hell event + Hell boss, Demon event (DemonTokens), Celestial/Angel egg sets, Lucky Egg drops, admin-abuse events, global boosts, polls", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    "daily_offline_rewards": { "value": "Offline rewards (60s–5h, rate 0.1, ×2) + group/like/favorite reward (+10,000 Speed) + Discord reward", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    "gamepasses_products": { "value": "3 permanent Robux upgrades (×2 Cash, ×2 Swing, ×2 Growth), 6 speed packs, 5 cash packs, 6 potions, fallen egg/token packs, ~28 timer-skip products, per-tier pickaxe products. Robux prices NOT captured.", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    "timed_systems": { "value": "Merge machine real-time growth (10s base → 7 days max, rarity multipliers ×1→×5), potion durations 900s, pity timers", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    "codes": { "value": "No code-redemption remote observed in the 60+ remote inventory (AntiAfkRejoin/Settings/etc. present). Third-party claim of 'no codes' is consistent but absence not proven.", "evidence_status": "INFERRED", "confidence": "LOW", "source_ids": ["SRC-002", "SRC-017"] }
+  },
+
+  "D_progression_economy": {
+    "evidence_status": "OBSERVED",
+    "confidence": "HIGH",
+    "source_ids": ["SRC-017"],
+    "detail_file": "economy_database.json → break_steal_egg",
+    "currencies": ["Cash (from placed animals)", "SpeedPower (treadmill, gates zones)", "DemonTokens (event)", "Fallen Tokens (Robux/event)"],
+    "prices_captured": "pickaxe 20 tiers, plot 8 costs, satchel 6, treadmill 6+9 (conflicting), zone gates 10",
+    "reward_values_captured": "per-animal cash for 86 base + 22 extras + partial legacy",
+    "ratios_calculated": ["CALC-001 zone gate steps", "CALC-002 endpoint animal cash ×1.08M", "CALC-003 cross-currency comparison flagged invalid"],
+    "still_missing": ["tier-20 pickaxe row", "index reward formula", "egg HP values per zone", "Robux prices"],
+    "anomaly": "Live account holds 5.4e17 cash and 8.9T speed with maxed gear but SatchelTier=1 — likely admin/test account (INFERRED, MEDIUM). Do NOT treat its numbers as typical-player economy."
+  },
+
+  "E_content_inventory": {
+    "evidence_status": "OBSERVED",
+    "confidence": "HIGH",
+    "source_ids": ["SRC-017"],
+    "detail_file": "content_database.json → break_steal_egg",
+    "summary": {
+      "zones": "10 + SafeZone",
+      "nests": 458,
+      "guardians": 10,
+      "animals": "86 base + 22 event extras + 58 legacy (partial capture)",
+      "rarities": 13,
+      "pickaxes": 20,
+      "bats": 10,
+      "trails": 11,
+      "satchels": 6,
+      "machines": ["EggMachine", "MergeMachine", "FuseMachine", "Furnace", "Special Egg Spawn"],
+      "events": ["Hell", "Demon", "Celestial", "Lucky Egg", "Polls", "Admin abuse"],
+      "bosses": ["Hell boss", "RranBoss"],
+      "tutorial": "exists, content unread"
+    },
+    "conflict": { "claim": "30 eggs (SRC-004)", "vs_live": "458 nests / 86+ animals", "status": "CONFLICTING", "resolution_needed": "The guide likely counts distinct egg *types* per biome — unresolved." }
+  },
+
+  "F_multiplayer_social": {
+    "player_influence": {
+      "value": "Three verified channels: steal carried animals (guide/video), knock players with zone bats (knockback/ragdoll), and global boosts/announcements that affect everyone.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-017", "SRC-014"]
+    },
+    "competition_vs_cooperation": {
+      "value": "Competition primary (bats, theft, spawn races for Lucky Eggs). Cooperation only via friend boost / invite structure (FriendNpc, FriendBoostPercent attribute = 0 observed).",
+      "evidence_status": "OBSERVED",
+      "confidence": "MEDIUM",
+      "source_ids": ["SRC-017"]
+    },
+    "risk_strategy": {
+      "value": "Explicit choice: carry more animals (satchel) = more reward at risk vs. bank early; zone guards scale with depth; bats let rivals deny.",
+      "evidence_status": "INFERRED",
+      "confidence": "MEDIUM",
+      "source_ids": ["SRC-017"]
+    },
+    "griefing_risk": {
+      "value": "Real: higher-tier bats (range 30, knockback 48) in deep zones + theft means veterans can prey on newer players. Mitigations observed: SafeZone, plot culling from zone 7, guard as third-party threat. Severity NOT observed.",
+      "evidence_status": "INFERRED",
+      "confidence": "MEDIUM",
+      "source_ids": ["SRC-017"]
+    },
+    "why_play_with_friends": { "value": "Friend NPC/boost structure exists (FriendBoostPercent, InviteFriend model) but effect NOT read.", "evidence_status": "OBSERVED", "confidence": "MEDIUM", "source_ids": ["SRC-017"] },
+    "impact_on_new_vs_veteran": { "value": "NOT OBSERVED", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] }
+  },
+
+  "G_retention_replayability": {
+    "systems_actually_present": [
+      { "system": "Offline reward (60s–5h)", "evidence_status": "OBSERVED", "source_ids": ["SRC-017"] },
+      { "system": "Group + like + favorite reward (+10,000 Speed)", "evidence_status": "OBSERVED", "source_ids": ["SRC-017"] },
+      { "system": "Pity system (zones 1–2, 330s)", "evidence_status": "OBSERVED", "source_ids": ["SRC-017"] },
+      { "system": "Index completion rewards (CashMult ×100, speed)", "evidence_status": "OBSERVED", "source_ids": ["SRC-017"] },
+      { "system": "Real-time merge-machine growth up to 7 days", "evidence_status": "OBSERVED", "source_ids": ["SRC-017"] },
+      { "system": "Timed Lucky Egg drops with announcement", "evidence_status": "OBSERVED", "source_ids": ["SRC-017"] },
+      { "system": "Seasonal/event systems (Hell, Demon, Celestial)", "evidence_status": "OBSERVED", "source_ids": ["SRC-017"] },
+      { "system": "Polls + Discord reward + global boosts", "evidence_status": "OBSERVED", "source_ids": ["SRC-017"] },
+      { "system": "Offline rewards + anti-AFK rejoin remote", "evidence_status": "OBSERVED", "source_ids": ["SRC-017"] }
+    ],
+    "short_term_goals": [{ "goal": "Zone1 break → deposit → unlock treadmill (100) → first upgrades", "tag": "RETENTION_HYPOTHESIS", "evidence_status": "INFERRED", "confidence": "MEDIUM", "source_ids": ["SRC-017"] }],
+    "mid_long_term_goals": [{ "goal": "Zone gates up to 1e11 speed, 20 pickaxes, Index completion, event collections", "tag": "RETENTION_HYPOTHESIS", "evidence_status": "INFERRED", "confidence": "MEDIUM", "source_ids": ["SRC-017"] }],
+    "reward_frequency": { "value": "Every hatch + every deposit + speed per treadmill step (1/s) — frequent by structure; actual rates NOT measured", "evidence_status": "OBSERVED", "confidence": "MEDIUM", "source_ids": ["SRC-017"] },
+    "monotony_risk": [
+      { "point": "The core verb (swing→carry→bank) never changes across 10 zones; variation comes from events, merge machine, bats and collections rather than new verbs.", "tag": "RETENTION_HYPOTHESIS", "evidence_status": "INFERRED", "confidence": "MEDIUM", "source_ids": ["SRC-017"] }
+    ],
+    "likely_frustration": [
+      { "point": "Guard fling in deep zones (FlingDistance 115 in zone 10) after long carry runs", "tag": "RETENTION_HYPOTHESIS", "evidence_status": "INFERRED", "confidence": "LOW", "source_ids": ["SRC-017"] },
+      { "point": "Zone gate curve has steep steps (x15,000 / x16,000 at zones 3→5)", "tag": "RETENTION_HYPOTHESIS", "evidence_status": "INFERRED", "confidence": "LOW", "source_ids": ["SRC-017"] }
+    ],
+    "analytics_available": false
+  },
+
+  "sections_not_yet_checked": [
+    "OBS-BSE-01..11 manual observations (fresh-account flow, exact failure outcome, shop UI)",
+    "Robux price capture (no purchase will be made)",
+    "EggConfig / EggRewards / egg HP per zone",
+    "IndexConfig.Reward() evaluation",
+    "TutorialConfig content"
+  ]
+}

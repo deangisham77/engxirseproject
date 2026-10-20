@@ -1,0 +1,362 @@
+{
+    "schema_version":  "1.0",
+    "last_updated":  "2026-10-18",
+    "access_method_note":  "All web sources below were accessed via web-search result snippets on 2026-10-18. Snippets are PARTIAL: only the text returned by search was read, not necessarily the full page. Claims relying on snippets are SOURCE_DERIVED with at most MEDIUM confidence until the full page is fetched.",
+    "sources":  [
+                    {
+                        "source_id":  "SRC-001",
+                        "name":  "Break and Steal an Egg — official Roblox page",
+                        "url":  "https://www.roblox.com/games/114326934417838/Break-and-Steal-an-Egg",
+                        "type":  "official_game_page",
+                        "game_id":  "break_steal_egg",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "identity",
+                                         "official_description",
+                                         "core_loop_summary"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Description text and title captured via search snippet; full page, stats, store tab not directly fetched."
+                    },
+                    {
+                        "source_id":  "SRC-002",
+                        "name":  "Aprasi guide — Break and Steal an Egg overview",
+                        "url":  "https://www.aprasi.com/blogs/trending-topics/break-and-steal-an-egg-roblox-guide",
+                        "type":  "third_party_guide",
+                        "game_id":  "break_steal_egg",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "core_loop_summary",
+                                         "guard_mechanic",
+                                         "treadmill",
+                                         "pickaxe_upgrades"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Third-party editorial; claims about \u0027no working codes\u0027 and specific values may be stale or wrong."
+                    },
+                    {
+                        "source_id":  "SRC-003",
+                        "name":  "IGN wiki — Break and Steal an Egg: All Eggs",
+                        "url":  "https://www.ign.com/wikis/break-and-steal-an-egg-roblox/All_Eggs",
+                        "type":  "third_party_wiki",
+                        "game_id":  "break_steal_egg",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "egg_inventory",
+                                         "biome_pet_mapping",
+                                         "egg_hp",
+                                         "pickaxe_gating"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Snippet only; actual egg names/odds not captured yet. Data may lag live game updates."
+                    },
+                    {
+                        "source_id":  "SRC-004",
+                        "name":  "Eldorado blog — Eggs in Break and Steal an Egg list",
+                        "url":  "https://www.eldorado.gg/blog/roblox-en/break-and-steal-an-egg-eggs-list",
+                        "type":  "third_party_guide",
+                        "game_id":  "break_steal_egg",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "egg_count_claim_30",
+                                         "egg_hp_ranges",
+                                         "biome_mapping"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Claim of \u0027all 30 eggs\u0027 comes from the search snippet title/summary; individual egg data not yet captured."
+                    },
+                    {
+                        "source_id":  "SRC-005",
+                        "name":  "GameBoost — Zones in Break and Steal an Egg with speed requirements",
+                        "url":  "https://gameboost.com/blog/break-and-steal-an-egg-all-zones",
+                        "type":  "third_party_guide",
+                        "game_id":  "break_steal_egg",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "zone_list",
+                                         "speed_requirements",
+                                         "safe_zone_layout"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Snippet only — actual zone names/numbers not captured."
+                    },
+                    {
+                        "source_id":  "SRC-006",
+                        "name":  "Steal An Egg — official Roblox page",
+                        "url":  "https://www.roblox.com/games/107778070777162/Steal-An-Egg",
+                        "type":  "official_game_page",
+                        "game_id":  "steal_egg",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "identity",
+                                         "official_description",
+                                         "core_loop_summary",
+                                         "device_support"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Snippet only; store/stat tabs not fetched."
+                    },
+                    {
+                        "source_id":  "SRC-007",
+                        "name":  "stealanegg.net — independent reference site",
+                        "url":  "https://stealanegg.net",
+                        "type":  "third_party_reference_site",
+                        "game_id":  "steal_egg",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "identity_corroboration",
+                                         "badge_award_counts"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Fan/independent site, not the developer. Badge counts are snapshot values dated by them, not by us."
+                    },
+                    {
+                        "source_id":  "SRC-008",
+                        "name":  "Roblox Fandom wiki — Steal An Egg / \u0027and Collect Rare Pets\u0027",
+                        "url":  "https://roblox.fandom.com/wiki/And_Collect_Rare_Pets",
+                        "type":  "community_wiki",
+                        "game_id":  "steal_egg",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "creator_group",
+                                         "group_members",
+                                         "game_concept"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Community-edited; owner name spelling conflicts between sections of the same page."
+                    },
+                    {
+                        "source_id":  "SRC-009",
+                        "name":  "Ride A Pet — official Roblox page",
+                        "url":  "https://www.roblox.com/games/124216119978534/Ride-A-Pet",
+                        "type":  "official_game_page",
+                        "game_id":  "ride_a_pet",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "identity",
+                                         "official_description",
+                                         "device_support",
+                                         "event_title"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Snippet only."
+                    },
+                    {
+                        "source_id":  "SRC-010",
+                        "name":  "rideapet.org — independent Ride A Pet wiki",
+                        "url":  "https://rideapet.org",
+                        "type":  "third_party_reference_site",
+                        "game_id":  "ride_a_pet",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "developer_name",
+                                         "release_date_claim",
+                                         "visits_snapshot",
+                                         "vote_snapshot",
+                                         "max_players"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Fan site; explicitly self-describes as non-authoritative. Snapshot numbers not independently confirmed."
+                    },
+                    {
+                        "source_id":  "SRC-011",
+                        "name":  "Ride A Pet Fandom wiki",
+                        "url":  "https://ride-a-pet.fandom.com/wiki/Ride_A_Pet_Wiki",
+                        "type":  "community_wiki",
+                        "game_id":  "ride_a_pet",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "system_existence_claims: pets, eggs, rebirths, locations"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Snippet only; mentions \u0027rebirth costs\u0027, \u0027gems\u0027, \u0027worlds\u0027 as page categories — existence of pages is not proof the systems are as described."
+                    },
+                    {
+                        "source_id":  "SRC-012",
+                        "name":  "IGN wiki — Ride a Pet: All Pets",
+                        "url":  "https://www.ign.com/wikis/ride-a-pet-roblox/All_Pets",
+                        "type":  "third_party_wiki",
+                        "game_id":  "ride_a_pet",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "hatch_rarity_tiers"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Snippet gave a ladder of hatch chances (1 in 2 … 1 in 50,000,000) but NOT which pet each chance belongs to; pet names missing."
+                    },
+                    {
+                        "source_id":  "SRC-013",
+                        "name":  "GameBoost — Ride A Pet codes article",
+                        "url":  "https://gameboost.com/blog/ride-a-pet-codes",
+                        "type":  "third_party_guide",
+                        "game_id":  "ride_a_pet",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "core_loop_phrase: egg timer",
+                                         "codes_existence"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Snippet only. Mentions \u0027egg\u0027s timer runs out\u0027 — an in-game mechanic claim not yet confirmed elsewhere."
+                    },
+                    {
+                        "source_id":  "SRC-014",
+                        "name":  "YouTube — \u0027ROBLOX BREAK AND STEAL AN EGG..\u0027 by Superlex Plays",
+                        "url":  "https://www.youtube.com/watch?v=YkoLSHAt0b0",
+                        "type":  "gameplay_video_transcript",
+                        "game_id":  "break_steal_egg",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "gameplay_observation: egg HP bar, luck multiplier display, speed stat, theft by other players"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Transcript excerpts only; creator video is edited entertainment footage, not systematic observation."
+                    },
+                    {
+                        "source_id":  "SRC-015",
+                        "name":  "YouTube — \u0027How to Play Ride a Pet Roblox Full Guide\u0027",
+                        "url":  "https://www.youtube.com/watch?v=DZp5SuXB4Tk",
+                        "type":  "gameplay_video_transcript",
+                        "game_id":  "ride_a_pet",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "gameplay_observation: riding, egg pickup + hatch, index/claim, gears shop, selling, feeding pets, mutation/reroll"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Transcript excerpts only; UI labels partly garbled by auto-transcription."
+                    },
+                    {
+                        "source_id":  "SRC-016",
+                        "name":  "Roblox Fandom wiki — Steal An Egg game article",
+                        "url":  "https://roblox.fandom.com/wiki/And_Collect_Rare_Pets/Steal_An_Egg",
+                        "type":  "community_wiki",
+                        "game_id":  "steal_egg",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "game_concept"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "limitations":  "Snippet truncated mid-sentence."
+                    },
+                    {
+                        "source_id":  "SRC-017",
+                        "name":  "Live read-only observation of Break and Steal an Egg (executor MCP)",
+                        "url":  "file: evidence_live_bse_2026-10-18.json",
+                        "type":  "live_game_observation",
+                        "game_id":  "break_steal_egg",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "identity",
+                                         "zone_config",
+                                         "guard_ai_params",
+                                         "animal_pools_and_cash",
+                                         "pickaxe_prices_and_damage",
+                                         "speed_and_treadmill_economy",
+                                         "plot_and_satchel_upgrades",
+                                         "mutations",
+                                         "pity",
+                                         "lucky_eggs",
+                                         "merge_machine",
+                                         "bat_pvp_system",
+                                         "monetization_product_ids",
+                                         "offline_and_group_rewards",
+                                         "remote_inventory",
+                                         "events_and_bosses"
+                                     ],
+                        "access_status":  "ACCESSED_FULL",
+                        "method":  "executor MCP `script` tool: instance trees read directly; config data tables read by requiring ReplicatedStorage.Shared ModuleScripts. No mutation, no remote fired, no purchase.",
+                        "limitations":  "Read on one live server (placeVersion 1360). Two configs truncated by output budget (PickaxeConfig tier 20, Legacy animal list partial). Robux prices not captured. Config values are shipped client data — server may apply additional validation not visible here."
+                    },
+                    {
+                        "source_id":  "SRC-018",
+                        "name":  "Live read-only observation of Steal An Egg (executor MCP)",
+                        "url":  "file: evidence_live_sae_2026-10-18.json",
+                        "type":  "live_game_observation",
+                        "game_id":  "steal_egg",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "area_config_with_drop_tables",
+                                         "guard_ai_parameters",
+                                         "bat_tiers_and_combat",
+                                         "anti_theft_gears",
+                                         "base_upgrade_costs",
+                                         "treadmill_tiers",
+                                         "pet_income_rates",
+                                         "egg_size_bands",
+                                         "carry_penalty",
+                                         "fusion_machine",
+                                         "gamepasses_and_product_ids",
+                                         "events_and_modes_inventory",
+                                         "balance_constants"
+                                     ],
+                        "access_status":  "ACCESSED_FULL",
+                        "method":  "executor MCP `script` tool: instance trees read directly; config data tables read by requiring ReplicatedStorage.Data and Shared.Flags modules. No mutation, no remote fired, no purchase.",
+                        "limitations":  "One live server; a Halloween seasonal event was active (structure partly event-shaped). 263 pet entries sampled (12 shown) due to output budget. Five flag modules errored on require (need runtime). Robux prices not captured. Client was mid-event so some folders are event-specific and may not exist off-season."
+                    },
+                    {
+                        "source_id":  "SRC-900",
+                        "name":  "Live in-game observation via Roblox executor MCP",
+                        "url":  null,
+                        "type":  "live_game_observation",
+                        "game_id":  null,
+                        "collected_at":  null,
+                        "supports":  [
+
+                                     ],
+                        "access_status":  "RESOLVED_2026-10-18",
+                        "limitations":  "Was \u0027fetch failed\u0027 earlier on 2026-10-18; connection restored the same day. Live observation of break_steal_egg completed and registered as SRC-017. steal_egg and ride_a_pet still have NO live observation — the client must be switched to those places."
+                    },
+                    {
+                        "source_id":  "SRC-901",
+                        "name":  "Player analytics / retention metrics",
+                        "url":  null,
+                        "type":  "analytics",
+                        "game_id":  null,
+                        "collected_at":  null,
+                        "supports":  [
+
+                                     ],
+                        "access_status":  "NOT_AVAILABLE",
+                        "limitations":  "No developer-side or third-party retention data is accessible. Every retention statement must be tagged RETENTION_HYPOTHESIS."
+                    },
+                    {
+                        "source_id":  "SRC-019",
+                        "name":  "Live read-only observation of Ride A Pet (executor MCP)",
+                        "url":  "file: evidence_live_rap_2026-10-18.json",
+                        "type":  "live_game_observation",
+                        "game_id":  "ride_a_pet",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "pet_inventory",
+                                         "egg_inventory",
+                                         "shop_foods_gears",
+                                         "rebirths_config",
+                                         "fusion_config"
+                                     ],
+                        "access_status":  "ACCESSED_PARTIAL",
+                        "method":  "executor MCP `script` tool: instance trees read directly; config tables read by requiring ReplicatedStorage modules. No mutation.",
+                        "limitations":  "Output budget limited; Worlds/Zones/Gamepasses/Products not fully serialized."
+                    },
+                    {
+                        "source_id":  "SRC-PASE-001",
+                        "name":  "Live read-only observation of Punch and Steal an Egg (executor MCP)",
+                        "url":  "file: punch_and_steal_an_egg.json (target evidence)",
+                        "type":  "live_game_observation",
+                        "game_id":  "punch_and_steal_an_egg",
+                        "collected_at":  "2026-10-18",
+                        "supports":  [
+                                         "game_identity",
+                                         "core_loop",
+                                         "mechanics",
+                                         "economy_treadmill_pen",
+                                         "products",
+                                         "biomes_animals",
+                                         "pvp_config",
+                                         "mother_threat",
+                                         "zones"
+                                     ],
+                        "access_status":  "ACCESSED",
+                        "method":  "executor MCP script: read ReplicatedStorage configs (GameConfig/IndexConfig/ShopConfig/PvpConfig/MotherHitShapes/UiImagesConfig/SettingsConfig); inspected RS/Workspace structure; no mutation.",
+                        "limitations":  "Full pet/egg tables not fully serialized in compact form; universe_id not confirmed; in-game behavior not witnessed (only config/structure)."
+                    }
+                ]
+}

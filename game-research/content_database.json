@@ -1,0 +1,163 @@
+{
+  "schema_version": "1.0",
+  "last_updated": "2026-10-18",
+  "status": "BSE_CONTENT_POPULATED_FROM_LIVE_CAPTURE; SAE_AND_RAP_STILL_EMPTY",
+  "note": "Stable keys used to avoid duplication. BSE entries are OBSERVED via SRC-017 (evidence_live_bse_2026-10-18.json).",
+  "content": {
+    "break_steal_egg": {
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-017"],
+      "zones": [
+        { "key": "zone1", "name": "Zone1", "guard": "Chicken", "RequiredPower": 5, "rarity": "Common", "nests": 28 },
+        { "key": "zone2", "name": "Zone2", "guard": "SPHINX", "RequiredPower": 1000, "rarity": "Uncommon", "nests": 32 },
+        { "key": "zone3", "name": "Zone3", "guard": "IceYeti", "RequiredPower": 50000, "rarity": "Rare", "nests": 36 },
+        { "key": "zone4", "name": "Zone4", "guard": "EmeraldSerpent", "RequiredPower": 750000, "rarity": "Epic", "nests": 40 },
+        { "key": "zone5", "name": "Zone5", "guard": "WoollyMammoth", "RequiredPower": 12000000, "rarity": "Legendary", "nests": 44 },
+        { "key": "zone6", "name": "Zone6", "guard": "RedshellCrab", "RequiredPower": 150000000, "rarity": "Mythic", "nests": 46 },
+        { "key": "zone7", "name": "Zone7", "guard": "MoleTitan", "RequiredPower": 1000000000, "rarity": "Divine", "nests": 52 },
+        { "key": "zone8", "name": "Zone8", "guard": "Griffin", "RequiredPower": 5000000000, "rarity": "Cosmic", "nests": 56 },
+        { "key": "zone9", "name": "Zone9", "guard": "3Hydra", "RequiredPower": 25000000000, "rarity": "Secret", "nests": 60 },
+        { "key": "zone10", "name": "Zone10", "guard": "AlienGuardian", "RequiredPower": 100000000000, "rarity": "Celestial", "nests": 64 },
+        { "key": "safezone", "name": "SafeZone", "guard": null, "RequiredPower": 0, "rarity": null, "nests": 0, "note": "contains treadmill/plots/shops" }
+      ],
+      "nest_total": 458,
+      "guard_npc_count": 10,
+      "animals": {
+        "pool_count_by_zone": { "zone1": 8, "zone2": 8, "zone3": 8, "zone4": 8, "zone5": 8, "zone6": 8, "zone7": 8, "zone8": 8, "zone9": 10, "zone10": 12 },
+        "base_pool_total": 86,
+        "event_extras": 22,
+        "legacy_pool": { "count": 58, "capture": "PARTIAL — first ~40 entries persisted", "examples": ["Wizard Owl (Omega, 4.5B)", "Volcano Turtle (Void, 3B)", "Scarecrow (Void, 2.3B)", "Black Widow (Inferno, 1.8B)", "Mimic (Secret, 30M)", "Kitsune (Celestial, 45M)"] },
+        "note": "Event Extras are all IndexHidden=true.",
+        "detail_file": "evidence_live_bse_2026-10-18.json → zone_animal_pools"
+      },
+      "rarities": ["Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Divine", "Cosmic", "Secret", "Celestial", "Inferno", "Void", "Omega"],
+      "items_gear": {
+        "pickaxes": { "count": 20, "detail": "economy_database.break_steal_egg.pickaxe_tiers", "swing_cooldown": 0.5 },
+        "bats": { "count": 10, "zone_gated": true, "detail": "BatConfig tiers 1-10 (Zone1 Bat → Zone10 Electric Hammer)" },
+        "trails": { "count": 11, "names": ["Blue", "Green", "Gray", "Red", "Purple", "Moonlight", "Golden", "Rainbow", "Laser", "Galaxy", "Secret"] },
+        "satchels": { "count": 6 },
+        "treadmills": { "count": "6 (SpeedConfig) or 9 (TreadmillUpgradeConfig) — CONFLICTING" }
+      },
+      "machines_and_structures": [
+        { "key": "egg-machine", "name": "EggMachine" },
+        { "key": "merge-machine", "name": "MergeMachineEgg / MergeMachineRemote", "detail": "3 slots, real-time growth up to 7 days, Diamond/Gold variants" },
+        { "key": "fuse-machine", "name": "FuseMachine" },
+        { "key": "furnace", "name": "Furnace" },
+        { "key": "special-egg-spawn", "name": "Special Egg Spawn" },
+        { "key": "group-reward", "name": "GroupReward" },
+        { "key": "friend-npc", "name": "FriendNpc" },
+        { "key": "leaderboards", "name": "Leaderboards" },
+        { "key": "booth-pickaxe-shop", "name": "Pickaxe Shop" },
+        { "key": "booth-trails-shop", "name": "Trails Shop" },
+        { "key": "hell-portal", "name": "HellPortal / HellBossFight" }
+      ],
+      "npcs": [
+        { "key": "guards-x10", "detail": "One named guardian per zone (see zones)" },
+        { "key": "hell-boss", "detail": "HellBossFight folder + HellBossHitRemote" },
+        { "key": "rran-boss", "detail": "RranBossConfig; character models monkisrokBoss/realrranBoss" },
+        { "key": "friend-npc", "detail": "FriendNpcConfig + FriendBoostPercent attribute" }
+      ],
+      "events": [
+        { "key": "hell-event", "detail": "HellEventConfig, HellJoinRemote, HellEssence, HellSummon, LeaveHell structure" },
+        { "key": "demon-event", "detail": "DemonEventConfig, DemonTokens currency (player had 310)" },
+        { "key": "celestial-event", "detail": "CelestialTestConfig, Angel/Demon/Celestial egg folders" },
+        { "key": "lucky-egg", "detail": "Parachuting Lucky Eggs with luck boosts + 'Lucky' badge" },
+        { "key": "polls", "detail": "PollVote/PollState + PollConfig" },
+        { "key": "admin-abuse", "detail": "AdminAbuseConfig + EnvironmentVFXAdminAbuse1" },
+        { "key": "global-boost", "detail": "AdminPanelGlobalBoost, GlobalAnnouncement" }
+      ],
+      "gamepasses_products": {
+        "status": "PARTIALLY_KNOWN",
+        "detail": "3 permanent Robux upgrades (x2 Cash, x2 Swing, x2 Growth) + 6 speed packs + 5 cash packs + 6 potions + 5 fallen-token packs + 4 fallen-egg packs + ~28 timer-skip products + every pickaxe tier has a DevProductId.",
+        "robux_prices": "NOT CAPTURED",
+        "gap": "GAP-012"
+      },
+      "tutorial": { "status": "EXISTS_BUT_CONTENT_NOT_READ", "evidence": "TutorialConfig, TutorialArrowParts, BatConfig.TutorialEndDelay=20" },
+      "egg_count_claim_30": { "value": 30, "evidence_status": "SOURCE_DERIVED", "confidence": "LOW", "source_ids": ["SRC-004"], "conflict_note": "CONFLICTING with live capture: 458 nests across 10 zones and 86+ base animals. The '30 eggs' claim likely refers to a different grouping (biome egg types, not nests) — unresolved." }
+    },
+    "steal_egg": {
+      "evidence_status": "OBSERVED_PARTIAL",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"],
+      "zones": [
+        { "key": "forest", "name": "Forest", "rank": 1, "rarity": "Common", "guard": "Forest (WalkSpeed 16)", "pool_size": 8 },
+        { "key": "lake", "name": "Lake", "rank": 2, "rarity": "Uncommon", "guard": "Lake (WalkSpeed 35.1)", "pool_size": 8 },
+        { "key": "desert", "name": "Desert", "rank": 3, "rarity": "Rare", "guard": "Desert (WalkSpeed 62.3)", "pool_size": 8 },
+        { "key": "jungle", "name": "Jungle", "rank": 4, "rarity": "Epic", "guard": "Jungle (WalkSpeed 82.4)", "pool_size": 8 },
+        { "key": "snow", "name": "Snow", "rank": 5, "rarity": "Legendary", "guard": "Snow", "pool_size": 8 },
+        { "key": "volcano", "name": "Volcano", "rank": 6, "rarity": "Mythic", "guard": "Volcano (WalkSpeed 113.6)", "pool_size": 8 },
+        { "key": "abyss-ocean", "name": "Abyss Ocean", "rank": 7, "rarity": "Cosmic", "guard": "Abyss Ocean (WalkSpeed 130.7)", "pool_size": 8 },
+        { "key": "prehistoric", "name": "Prehistoric", "rank": 8, "rarity": "Secret", "guard": "Prehistoric (WalkSpeed 152.8)", "pool_size": 8 },
+        { "key": "cosmic", "name": "Cosmic", "rank": 9, "rarity": "Eternal", "guard": "Cosmic (WalkSpeed 201)", "pool_size": 8 },
+        { "key": "cherry-blossom", "name": "Cherry Blossom", "rank": 10, "rarity": "Divine", "guard": "Cherry Blossom (WalkSpeed 223.2)", "pool_size": 8 },
+        { "key": "titan-temple", "name": "Titan Temple", "rank": 11, "rarity": "Titan", "guard": "Titan Temple (WalkSpeed 230.7)", "pool_size": 8 },
+        { "key": "light-dark", "name": "Angels & Demons (Light Dark)", "rank": 12, "rarity": "Light & Dark", "guard": "Light Dark + Light/Dark/Mixed variants (WalkSpeed 246.1)", "pool_size": 16, "note": "3 sub-biomes rolled by weight: Light 45 / Dark 45 / Mixed 10 (Mixed announced as 'the rarest egg')" },
+        { "key": "enchanted-forest", "name": "Enchanted Forest", "rank": 8, "progression_order": 13, "rarity": "Secret", "guard": "Enchanted Forest (WalkSpeed 251.075)", "pool_size": 8 }
+      ],
+      "zone_total": 13,
+      "guard_npc_count": 16,
+      "animals": {
+        "area_pool_entries": 120,
+        "total_pet_entries": 263,
+        "capture": "PARTIAL — 11 of 263 pets sampled with earning rates/growth times",
+        "detail_file": "evidence_live_sae_2026-10-18.json → pet_income",
+        "note": "Drop tables are per-area with relative weights (sum ≈100). Event/limited pets live outside area pools (DontRoll / DropWeight=0)."
+      },
+      "rarities": ["Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Cosmic", "Secret", "Eternal", "Divine", "Titan", "Light & Dark", "(plus SuperRare, Rainbow, Prismatic, Limited, BrainrotGod, Transcendent — 18 entries total)"],
+      "mutations": ["Scrambled", "Golden", "Rainbow", "Silver", "Sakura", "GreatBloom", "Boss", "Enchanted", "Nitro", "Spectral", "Monstrous"],
+      "items_gear": {
+        "bats": { "count": 13, "unlocked_by": "area index completion", "detail": "evidence_live_sae_2026-10-18.json → gears_and_combat" },
+        "anti_theft": ["Trap (1000 cash, freeze 7s)", "BigTrap", "GravityDisruptor (slow 50%)", "BeeLauncher (10000 cash, invert controls)"],
+        "slap_tools": ["The Scrambler", "Flyswatter", "Cricket's Banjo"],
+        "utility": ["Manor Key", "Haunted Rod (fishing)", "Phone", "GravityDisruptor"],
+        "treadmills": { "count": 12 },
+        "trails": { "count": 7, "note": "each also a Robux product" }
+      },
+      "cosmetics": ["Trails (7)"],
+      "npcs": [
+        { "key": "area-guards-x16", "detail": "One per area + Light/Dark variants; retrieve and deposit eggs" },
+        { "key": "ghost-fisherman", "detail": "Fishing interaction" },
+        { "key": "ghost-dog", "detail": "GhostDogQuest" },
+        { "key": "star-handler", "detail": "Star bundles/quests" }
+      ],
+      "events": [
+        { "key": "halloween-dimension", "detail": "LIVE at capture (InHalloweenDimension=true); egg shop, Halloween index, PumpkinBoss, GhostBoss, GhostDogQuest" },
+        { "key": "train-event", "detail": "TrainEvent assets/runtime, boarding prompts, ghost templates" },
+        { "key": "capture-the-egg", "detail": "CaptureEvent: egg speed malus -0.7" },
+        { "key": "demonic-event", "detail": "60s prep, 600s fight, equalised speed power 1e9" },
+        { "key": "dragon-egg-race", "detail": "Race laps, lair egg count 10, fly speed 120→450" },
+        { "key": "light-vs-darkness", "detail": "Event + cutscene assets" },
+        { "key": "sakura-great-bloom", "detail": "Incubator, Sakura crystals, luck boost products" },
+        { "key": "shrine-fusion", "detail": "ShrineFusion controllers/sequences" },
+        { "key": "others", "detail": "Beanstalk, Sammy, Monster parasite, Rift, Scramble boss/trade-in, Mount Race, Race Rally, Cursed Island Wars, Fishing, Banjo Cricket, Shooting Star, Trex Run, Red Light Green Light, Boss shop/mastery, Pet Wheel, Wisp Quests, Star Handler" }
+      ],
+      "gamepasses_products": {
+        "status": "PARTIALLY_KNOWN",
+        "gamepasses": ["x2 Money", "x2 Growth", "Lucky"],
+        "products_total": 127,
+        "robux_prices": "NOT CAPTURED",
+        "gap": "GAP-012"
+      },
+      "badges": [
+        { "key": "WELCOME!", "awards_snapshot": 13357711, "source_ids": ["SRC-007"], "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM" },
+        { "key": "Hatched Eternal!", "awards_snapshot": 1001335, "asset_id": 4448343437950888, "source_ids": ["SRC-007", "SRC-018"], "evidence_status": "OBSERVED", "confidence": "HIGH" },
+        { "key": "Hatched Secret!", "awards_snapshot": 1943082, "asset_id": 383815774941459, "source_ids": ["SRC-007", "SRC-018"], "evidence_status": "OBSERVED", "confidence": "HIGH" }
+      ],
+      "variant_axes": ["rarity", "size (11 weighted scale bands)", "mutation (11 variants)"],
+      "legacy_removed": ["DNA stealing (products persist with 'no longer available' desc)"],
+      "note": "Live capture resolves the earlier UNKNOWNs: guards DO exist, bats/combat DO exist, and anti-theft counter-play DOES exist."
+    },
+    "ride_a_pet": {
+      "zones": [],
+      "zone_summary": { "text": "Wiki has 'Locations/worlds' page claiming unlockable areas with requirements", "evidence_status": "SOURCE_DERIVED", "confidence": "LOW", "source_ids": ["SRC-011"] },
+      "eggs": [], "pets": [],
+      "pet_odds_ladder": { "value": ["1 in 2", "1 in 5", "1 in 20", "1 in 30", "1 in 50", "1 in 100", "1 in 150", "1 in 200", "1 in 300", "1 in 1,000", "1 in 3,000", "1 in 9,000", "1 in 25,000", "1 in 75,000", "1 in 150,000", "1 in 180,000", "1 in 500,000", "1 in 700,000", "1 in 900,000", "1 in 1 million", "1 in 1.2 million", "1 in 1.5 million", "1 in 21 million", "1 in 50 million"], "pet_mapping": "NOT CAPTURED", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-012"] },
+      "items_gear": [{ "key": "gears_shop", "detail": "Shop selling upgrades incl. mutation/reroll", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-015"] }],
+      "cosmetics": [], "npcs": [],
+      "events": [{ "key": "seasonal-event-oct-2026", "detail": "[🎃EVENT] title prefix", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-009"] }],
+      "gamepasses_products": [],
+      "note": "Unchanged — no new data this session."
+    }
+  }
+}

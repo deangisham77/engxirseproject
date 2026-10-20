@@ -1,0 +1,295 @@
+{
+  "schema_version": "1.0",
+  "capture_id": "LIVE-SAE-2026-10-18-01",
+  "game_id": "steal_egg",
+  "evidence_status": "OBSERVED",
+  "confidence": "HIGH",
+  "collected_at": "2026-10-18",
+  "method": "Read-only inspection via executor MCP `script` tool on live client. Instance trees read directly; config data tables read by requiring ModuleScripts (ReplicatedStorage.Data.* and Shared.Flags.*). NO state mutated: no movement, no remote fired, no purchase, no character action.",
+  "session": {
+    "mcp_session": "86364cc6-c66e-4cd7-9668-aaf55030cd49",
+    "client": "KengPrime (userId 11456836185), executor Real 2.7.8",
+    "placeId": 107778070777162,
+    "placeName_api": "Ugc",
+    "jobId": "f77c2b4f-de3c-4fe5-bf3d-222db01a2077"
+  },
+  "identity_notes": {
+    "place_id_matches_registry": "107778070777162 = steal_egg (registry). Universe 10563114921 was from the store page; live client did not re-report it this pass.",
+    "live_event_state": "InHalloweenDimension=true (live seasonal event active at capture time)"
+  },
+
+  "structure_observed": {
+    "workspace_top": ["World", "_Guards", "Stands", "Plots", "Map", "Eggs", "Halloween Eggs PT2", "TrainEventAssets", "TrainEventRuntime", "HalloweenDimension", "AreaEggSlotsClient", "ClientMountedPets", "BanjoCricketRings", "__ClientTreadmillRenders", "PlacedEggRenders", "HalloweenEggHolders", "FishingSpotRipples", "GhostBossVisuals", "ScrambleLocalVisuals"],
+    "config_locations": {
+      "primary": "ReplicatedStorage.Data (56 ModuleScripts: Assets, Bases, Currency, Guards, Areas, Gears, Rarity, Products, Gamepasses, CashPacks, Trails, Treadmills, Badges, ...)",
+      "secondary": "ReplicatedStorage.Shared.Flags (48 flag modules incl. GameplayBalance, EggFlags, EconomyFlags, ServerLuckFlags)",
+      "note": "BalanceConfig/EggFlags/EconomyFlags/OfflineFlags/NewPlayerFlags/ServerLuckFlags returned 'Requested module experienced an error while loading' when required — they need runtime state. Only GameplayBalance was readable."
+    },
+    "feature_flags_inventory": 48
+  },
+
+  "areas_config": {
+    "source": "ReplicatedStorage.Data.Areas",
+    "note": "13 areas. Each has: Rarity rank (ties to egg rarity tier), a GuardId (one guardian per area), an IndexBatGearId (bat unlocked by completing that area's index), and a DropTable of 8 animals with relative weights (sum ≈100).",
+    "fields": "DropTable[n] = {1=animalName, 2=weight}",
+    "areas": [
+      { "id": "Forest", "rank": 1, "rarity": "Common", "drop_table": [["Chicken",34],["Dog",24],["DesertLark",17],["Burrowing Owl",10],["Raccoon",7],["Mire Fox",4.5],["Bear",2.5],["Brr Brr Patapim",1]] },
+      { "id": "Lake", "rank": 2, "rarity": "Uncommon", "drop_table": [["Frog",29.274],["Duckling",23.217],["Catfish",17.161],["Turtle",12.113],["Trulimero Trulicina",8.076],["Swan",5.552],["Dream Axolotl",4.038],["Basilisk",0.569]] },
+      { "id": "Desert", "rank": 3, "rarity": "Rare", "drop_table": [["Jerboa",26.585],["FennecFox",20.45],["Camel",15.338],["Tob Tobi Tob Tob",12.27],["Rattlesnake",9.203],["Sand Spider",8.18],["DeathstalkerScorpion",6.646],["Irihorus",1.327]] },
+      { "id": "Jungle", "rank": 4, "rarity": "Epic", "drop_table": [["Chimpanzee",26.007],["Toucan",20.005],["Crocodile",17.004],["Gorilla",13.003],["Orangutini Ananassini",11.003],["Spider",7.852],["Tiger",5.001],["Warden",0.124]] },
+      { "id": "Snow", "rank": 5, "rarity": "Legendary", "drop_table": [["Penguin",29.444],["Walrus",21.571],["Polar Bear",18.335],["Sabertooth Tiger",14.021],["Mammoth",11.864],["Colossal Mammoth",4.171],["Yeti",0.372],["Ice Dragon",0.222]] },
+      { "id": "Volcano", "rank": 6, "rarity": "Mythic", "drop_table": [["Ash Gecko",26.849],["Lava frog",22.04],["Flaming Bull",18.033],["Lava Iguana",15.027],["Chillin Chilli",17.031],["Cerberus",0.62],["Ascended Vermilion Phoenix",0.222],["Dragon",0.178]] },
+      { "id": "Abyss Ocean", "rank": 7, "rarity": "Cosmic", "drop_table": [["Parrotfish",34.756],["Swordfish",24.665],["Finned Thresher",19.06],["Orca",14.575],["Whale Shark",3.413],["Alabaster Whale",2.616],["Kraken",0.826],["El Maja",0.089]] },
+      { "id": "Prehistoric", "rank": 8, "rarity": "Secret", "drop_table": [["Dodo",39.066],["Pterodactyl",26.044],["Ankylosaurus",20.835],["Bronto",6.996],["Triceratops",4.929],["TyrannosaurusRex",0.992],["Tralaledon",0.826],["Mosasaurus",0.311]] },
+      { "id": "Cosmic", "rank": 9, "rarity": "Eternal", "drop_table": [["Centapede",39.87],["Galaxy Gecko",34.387],["Cyclops Gorilla",19.619],["La Vacca Saturno Saturnita",4.55],["Cave Dragon",0.744],["Alien Skeleton Boss",0.496],["Eternal Lunar Dragon",0.311],["Unicorn",0.023]] },
+      { "id": "Cherry Blossom", "rank": 10, "rarity": "Divine", "drop_table": [["Crane",37.51],["Salamander",26.27],["Red Panda",16.83],["Snowy Owl",13.96],["Koi",4.36],["Stag",0.74],["Oni Tiger",0.31],["Kitsune",0.02]] },
+      { "id": "Titan Temple", "rank": 11, "rarity": "Titan", "drop_table": [["Kaiju Spider",37.51],["Crab",26.27],["Blade Head",16.83],["Mantis",13.96],["Rhino",4.36],["Shark",0.74],["King Kong",0.31],["Godzilla",0.02]] },
+      { "id": "Light Dark", "rank": 12, "rarity": "Light & Dark", "note": "Splits into 3 sub-biomes rolled by weight: Light 45 / Dark 45 / Mixed 10. Each sub-biome has its own 8-entry drop table and guards.",
+        "light": [["Dove",37.51],["Lamb",26.27],["Moth",16.83],["Peacock",13.96],["Jellyfish",4.36],["Centaur",0.74],["Pegasus",0.31],["ArchAngel",0.02]],
+        "dark": [["Flame Sprite",37.51],["Toro",26.27],["Imp",16.83],["Demon Hound",13.96],["Dark Gargoyle",4.36],["RazorFang",0.74],["Skeleton Horse",0.31],["World Burner",0.02]],
+        "mixed_announcement": "The rarest Angels & Demons egg" },
+      { "id": "Enchanted Forest", "rank": 8, "rarity": "Secret", "progression_order": 13, "note": "IndexHidden-style flag IndexIncludeDontRoll present; later-progression area despite Secret rank",
+        "drop_table": [["Prism Gecko",37.51],["Cosmic Beetle Blue",26.27],["Enchanted Bluejay",16.83],["Spirit Hare",13.96],["Spirit Panda",4.36],["Cosmic Fox",0.74],["Cosmic Lion",0.31],["Royal Skywhale",0.02]] }
+    ],
+    "animal_pool_total": "13 areas x 8 = 104 (+16 more for the 2 extra Light/Dark sub-biome tables) = 120 area-pool entries"
+  },
+
+  "guard_config": {
+    "source": "ReplicatedStorage.Data.Guards",
+    "note": "16 guard configurations (13 areas + Light Dark Light/Dark/Mixed). ONE NAMED GUARDIAN PER AREA — same design family as break_steal_egg.",
+    "params_per_guard": ["WalkSpeed", "AnimationBaseWalkSpeed", "HitDistance", "FlatRadius=20", "HomeImpulseBoostDistanceXZ", "EggPickupDistance=18 (on Abyss Ocean, Prehistoric, Volcano)", "sleep/wake/attack/footstep sounds", "Sleep/Wake/Attack/Idle/Walk animations"],
+    "walkspeed_by_area": [
+      { "area": "Forest", "WalkSpeed": 16, "HitDistance": 2.5, "HomeImpulseBoostDistanceXZ": 70 },
+      { "area": "Lake", "WalkSpeed": 35.1, "HitDistance": 3, "HomeImpulseBoostDistanceXZ": 100 },
+      { "area": "Desert", "WalkSpeed": 62.3, "HitDistance": 4, "HomeImpulseBoostDistanceXZ": 130 },
+      { "area": "Jungle", "WalkSpeed": 82.4, "HitDistance": 3, "HomeImpulseBoostDistanceXZ": 160 },
+      { "area": "Volcano", "WalkSpeed": 113.6, "HitDistance": 5, "HomeImpulseBoostDistanceXZ": 220 },
+      { "area": "Abyss Ocean", "WalkSpeed": 130.7, "HitDistance": 5, "HomeImpulseBoostDistanceXZ": 250 },
+      { "area": "Prehistoric", "WalkSpeed": 152.8, "HitDistance": 7, "HomeImpulseBoostDistanceXZ": 275 },
+      { "area": "Cosmic", "WalkSpeed": 201, "HitDistance": 4, "HomeImpulseBoostDistanceXZ": 300 },
+      { "area": "Cherry Blossom", "WalkSpeed": 223.2, "HitDistance": 7, "HomeImpulseBoostDistanceXZ": 300 },
+      { "area": "Titan Temple", "WalkSpeed": 230.7, "HitDistance": 7, "HomeImpulseBoostDistanceXZ": 300 },
+      { "area": "Light Dark (Light/Dark/Mixed)", "WalkSpeed": 246.1, "HitDistance": 7, "HomeImpulseBoostDistanceXZ": 300 },
+      { "area": "Enchanted Forest", "WalkSpeed": 251.075, "HitDistance": 7, "HomeImpulseBoostDistanceXZ": 300 }
+    ],
+    "behaviour_params": {
+      "source": "Shared.Flags.GameplayBalance",
+      "GuardAttack": { "RAGDOLL_TIME": 2.5 },
+      "GuardChase": { "WAKING_DURATION": 0.63, "MAX_DISTANCE_MULTIPLIER": 4, "DISTANCE_MULTIPLIER_STRENGTH": 0.5, "DEFAULT_HIT_DISTANCE": 10 },
+      "GuardKnockback": { "BASE_HORIZONTAL_SPEED": 20, "UPWARD_SPEED": 60, "HOME_HORIZONTAL_MULTIPLIER": 5, "RANDOM_YAW_DEGREES": 12 },
+      "GuardMovement": { "RETURN_WALK_SPEED_MULTIPLIER": 1.5, "ATTACK_MIN_INTERVAL": 0.75, "PINNED_HIT_DELAY": 0.5, "PINNED_SPEED_RATIO": 0.25, "MIN_REFERENCE_WALK_SPEED": 16, "MAX_REFERENCE_WALK_SPEED": 231 },
+      "GuardRecovery": { "RETURN_HOME_TIMEOUT": 20, "STUCK_TIMEOUT": 10, "FALL_RECOVERY_DEPTH": 5 },
+      "GuardRequirements": { "CARRY_SPEED_RATIO": 0.9, "REQUIREMENT_MARGIN": 1.05 },
+      "GuardPrediction": { "FULL_GREEN_EGG_CARRY_SPEED_RATIO": 0.6 },
+      "GuardRetrieval": { "DEPOSIT_DISTANCE_XZ": 20 },
+      "GuardImpulse": { "MAX_AREA_IMPULSE_MULTIPLIER": 5 }
+    },
+    "interpretation": "Guards here also RETRIEVE and DEPOSIT eggs (GuardRetrieval), i.e. they defend area eggs as well as chase players. Exact flow NOT witnessed live."
+  },
+
+  "gears_and_combat": {
+    "source": "ReplicatedStorage.Data.Gears",
+    "base_bat_description": "Fling players and steal their eggs!",
+    "bats_unlocked_by": "Completing each area's bat index (IndexBatGearId). 13 tiers.",
+    "bats": [
+      { "tier": 1, "name": "Forest Bat", "force": 35, "duration": 0.5, "range_bonus": 0, "rarity": "Common" },
+      { "tier": 2, "name": "Lake Bat", "force": 38.5, "duration": 0.55, "range_bonus": 1.875, "rarity": "Uncommon" },
+      { "tier": 3, "name": "Desert Bat", "force": 42.35, "duration": 0.605, "range_bonus": 3.75, "rarity": "Rare" },
+      { "tier": 4, "name": "Jungle Bat", "force": 46.585, "duration": 0.6655, "range_bonus": 5.625, "rarity": "Legendary" },
+      { "tier": 5, "name": "Snow Bat", "force": 51.2435, "duration": 0.73205, "range_bonus": 7.5, "rarity": "Mythic" },
+      { "tier": 6, "name": "Volcano Bat", "force": 56.368, "duration": 0.805, "range_bonus": 9.375, "rarity": "Divine" },
+      { "tier": 7, "name": "Abyss Ocean Bat", "force": 62.005, "duration": 0.886, "range_bonus": 11.25, "rarity": "Transcendent" },
+      { "tier": 8, "name": "Prehistoric Bat", "force": 68.205, "duration": 0.974, "range_bonus": 13.125, "rarity": "Prismatic" },
+      { "tier": 9, "name": "Cosmic Bat", "force": 75.026, "duration": 1.072, "range_bonus": 15, "rarity": "Prismatic" },
+      { "tier": 10, "name": "Katana", "force": 82.528, "duration": 1.179, "range_bonus": 16.875, "rarity": "Prismatic" },
+      { "tier": 11, "name": "Titan Axe", "force": 90.781, "duration": 1.297, "range_bonus": 18.75, "rarity": "Prismatic" },
+      { "tier": 12, "name": "Light Dark Staff", "force": 99.859, "duration": 1.4266, "range_bonus": 20.625, "rarity": "Prismatic" },
+      { "tier": 13, "name": "Enchanted Hammer", "force": 99.859, "duration": 1.4266, "range_bonus": 20.625, "rarity": "Prismatic" }
+    ],
+    "anti_theft_gears": [
+      { "name": "Trap", "cost": 1000, "effect": "Freeze thieves for 7 seconds", "max_active": 3, "rarity": "Common", "shop_drop_weight": 100 },
+      { "name": "BigTrap", "cost": 0, "effect": "Freeze thieves 7 seconds, 3x scale", "max_active": 3, "rarity": "Common" },
+      { "name": "GravityDisruptor", "cost": 0, "effect": "Slows thieves caught in gravity field by 50%, 3 max active", "rarity": "Prismatic" },
+      { "name": "BeeLauncher", "cost": 10000, "effect": "Bees attack opponent and invert their controls", "hit_radius": 45, "effect_seconds": 5, "cooldown": 58, "rarity": "Legendary" }
+    ],
+    "slap_tools": [
+      { "name": "The Scrambler", "slap_power": 70, "force": 35, "duration": 0.9 },
+      { "name": "Flyswatter", "slap_power": 80, "force": 35, "duration": 1.03, "note": "parasite-event tool" },
+      { "name": "Cricket's Banjo", "slap_power": 80, "note": "musical weapon, secret" }
+    ],
+    "cooldowns": { "client": 0.6, "server": 0.7 },
+    "starter_gear": { "STARTER_BAT_COUNT": 1, "STARTER_TRAP_COUNT": 3 },
+    "legacy_note": "Products StealCommon/StealDivine/StealEternal carry desc 'DNA stealing is no longer available' — an older steal mechanic was removed."
+  },
+
+  "economy_configs": {
+    "currencies": ["Money", "BossTokens", "SakuraCrystals", "HalloweenTokens (Candy Corn)"],
+    "bases": {
+      "source": "ReplicatedStorage.Data.Bases",
+      "note": "12 upgrade levels. MaxAssets = how many pets you can place (7 -> 19).",
+      "levels": [ { "l": 1, "cost": 1000, "max_assets": 7 }, { "l": 2, "cost": 1000000, "max_assets": 9 }, { "l": 3, "cost": 75000000, "max_assets": 10 }, { "l": 4, "cost": 500000000, "max_assets": 11 }, { "l": 5, "cost": 1000000000, "max_assets": 12 }, { "l": 6, "cost": 50000000000, "max_assets": 13 }, { "l": 7, "cost": 500000000000, "max_assets": 14 }, { "l": 8, "cost": 1000000000000, "max_assets": 15 }, { "l": 9, "cost": 25000000000000, "max_assets": 16 }, { "l": 10, "cost": 100000000000000, "max_assets": 17 }, { "l": 11, "cost": 500000000000000, "max_assets": 18 }, { "l": 12, "cost": 5000000000000000, "max_assets": 19 } ]
+    },
+    "treadmills": {
+      "source": "ReplicatedStorage.Data.Treadmills",
+      "note": "12 tiers + 1 session-only dev treadmill (BrockTreadmill, x1e9, price 0). Each purchasable with cash AND has a Robux ProductId.",
+      "tiers": [
+        { "t": 1, "name": "Treadmill", "price": 0, "multiplier": 2, "rarity": "Common" },
+        { "t": 2, "name": "Sci-Fi Treadmill", "price": 15000, "multiplier": 5, "rarity": "Uncommon", "productId": 3611606667 },
+        { "t": 3, "name": "Flame Treadmill", "price": 250000, "multiplier": 12, "rarity": "Rare", "productId": 3611606677 },
+        { "t": 4, "name": "Celebrity Treadmill", "price": 5000000, "multiplier": 30, "rarity": "Epic", "productId": 3611606688 },
+        { "t": 5, "name": "Golden Treadmill", "price": 120000000, "multiplier": 80, "rarity": "Legendary", "productId": 3611606694 },
+        { "t": 6, "name": "The Freeze Treadmill", "price": 3000000000, "multiplier": 100, "rarity": "Mythic", "productId": 3611606701 },
+        { "t": 7, "name": "Lucky Block Treadmill", "price": 75000000000, "multiplier": 200, "rarity": "Cosmic", "productId": 3611606706 },
+        { "t": 8, "name": "Hacker Treadmill", "price": 2000000000000, "multiplier": 500, "rarity": "Secret", "productId": 3611606718 },
+        { "t": 9, "name": "Demonic Treadmill", "price": 50000000000000, "multiplier": 1000, "rarity": "Eternal", "productId": 3611606728 },
+        { "t": 10, "name": "Angelic Treadmill", "price": 1000000000000000, "multiplier": 2000, "rarity": "Divine", "productId": 3611606732 },
+        { "t": 11, "name": "Astral Treadmill", "price": 2500000000000000, "multiplier": 3000, "rarity": "Titan", "productId": 3712487576 },
+        { "t": 12, "name": "Guardian Treadmill", "price": 7500000000000000, "multiplier": 8500, "rarity": "Titan", "productId": 3716090292 }
+      ]
+    },
+    "speed_progression": {
+      "source": "Shared.Flags.GameplayBalance.TreadmillProgression",
+      "CURVE_BASE_XP": 100,
+      "CURVE_XP_GROWTH": 1.15,
+      "CURVE_SPEED_GAIN_PER_LEVEL": 2,
+      "CURVE_REFERENCE_BASE_WALK_SPEED": 10,
+      "CURVE_REFERENCE_MAX_WALK_SPEED": 400,
+      "DEFAULT_BASE_SPEED_POWER_PER_STEP": 1,
+      "TREADMILL_SPEED_GAIN_INTERVAL": 1,
+      "SPEED_BOOST_MULTIPLIERS_BY_TIER": "1=2, 2=4, 3=8 ... 12=4096 (12 tiers)",
+      "note": "Walk-speed curve is level-based with 1.15 growth — a DIFFERENT speed model from BSE's fixed-cost SpeedPower gates."
+    },
+    "pet_income": {
+      "source": "ReplicatedStorage.Data.Assets (263 entries)",
+      "fields": "EarningRate = money per second when placed; Egg.GrowthTime = real seconds to grow; Egg.WeightKg; IndexSpeedReward; VisualOdds; ModelWeight",
+      "sample_earning_rates": [
+        { "pet": "Mire Fox", "earning_rate": 180, "growth_time_s": 90, "rarity": "Epic", "index_speed_reward": 720 },
+        { "pet": "Dream Axolotl", "earning_rate": 2800, "growth_time_s": 300, "rarity": "Legendary", "index_speed_reward": 4000 },
+        { "pet": "Flame Sprite", "earning_rate": 225000, "growth_time_s": 300, "rarity": "Legendary", "index_speed_reward": 3000000 },
+        { "pet": "Demon Imp", "earning_rate": 700000, "growth_time_s": 50400, "rarity": "Cosmic", "index_speed_reward": 900000 },
+        { "pet": "Hellhound", "earning_rate": 1800000, "growth_time_s": 64800, "rarity": "Cosmic", "index_speed_reward": 1400000 },
+        { "pet": "Mantis", "earning_rate": 11000000, "growth_time_s": 1020, "rarity": "Cosmic", "index_speed_reward": 3435120 },
+        { "pet": "Drill Monster", "earning_rate": 100000000, "growth_time_s": 720, "rarity": "Cosmic", "index_speed_reward": 150000 },
+        { "pet": "Mecha Froggo", "earning_rate": 155000000, "growth_time_s": 10, "rarity": "Secret", "index_speed_reward": 0 },
+        { "pet": "World Eater", "earning_rate": 500000000, "growth_time_s": 60, "rarity": "Eternal", "index_speed_reward": 60000 },
+        { "pet": "Halloween Dunkleosteus", "earning_rate": 450000000, "growth_time_s": 10, "rarity": "Secret", "index_speed_reward": 0 },
+        { "pet": "Ghost Fish", "earning_rate": 1500000000, "growth_time_s": 36000, "rarity": "Eternal", "index_speed_reward": 0 },
+        { "pet": "Kitsune", "earning_rate": 1800000000, "growth_time_s": 50400, "rarity": "Divine", "index_speed_reward": 6870240 }
+      ],
+      "capture_note": "263 pet entries total; only 12 sampled this pass (output budget). EarningRate spans 180/s -> 1.8B/s in the sample.",
+      "evidence_status": "OBSERVED_PARTIAL"
+    },
+    "egg_size_system": {
+      "source": "GameplayBalance.Eggs",
+      "SCALE_BANDS": "11 bands: sizes 0.85-1.05 (weight 2000) down to 20-35x (weight 0.0001); rare tiny band 0.1-0.2 (weight 5)",
+      "SCALE_HARD_CAP": 150,
+      "SCALE_DOUBLING_ODDS": 0.01,
+      "SELL_PRICE_SHARE": 0.8,
+      "FLAT_GROWTH_MAX_SCALE": 2,
+      "note": "Confirmed: Steal An Egg's size axis is a REAL weighted band system on egg scale — the third-party size claim is now OBSERVED in config."
+    },
+    "earnings_curve": {
+      "source": "GameplayBalance.Earnings",
+      "TAPER_KNEE_SCALE": 5,
+      "TAPERED_SCALE_POWER": 1.2,
+      "STEEP_SCALE_POWER": 1.85,
+      "MINIMUM_RATE": 1,
+      "note": "Pet income is TAPERED against size scale — bigger pets earn more but with diminishing returns."
+    },
+    "carry_penalty": {
+      "source": "GameplayBalance.CarryPenalty",
+      "MAX_CARRY_SLOWDOWN": 0.33,
+      "CURVE_POWER": 1.2,
+      "per_biome_max_slowdown": { "Forest": 0.33, "Lake": 0.33, "Desert": 0.33, "Jungle": 0.223, "Snow": 0.221, "Volcano": 0.224, "Abyss Ocean": 0.204, "Prehistoric": 0.201, "Cosmic": 0.175, "Cherry Blossom": 0.147, "Titan Temple": 0.164, "Enchanted Forest": 0.168, "Light Dark": 0.154 },
+      "note": "Carrying eggs slows you down (up to 33%), less so in later biomes — an explicit risk/reward knob on the theft loop."
+    },
+    "fusion_machine": {
+      "source": "GameplayBalance.Fusion",
+      "INPUT_COUNT": 3,
+      "PRICED_MINUTES_OF_INCOME": 3,
+      "BIAS_STRENGTH": 0.6,
+      "ONE_MUTATION_SURCHARGE": 2,
+      "MANY_MUTATION_SURCHARGE": 3,
+      "note": "Fusion takes 3 pets; cost priced in minutes of income."
+    },
+    "sell_rewards": {
+      "source": "GameplayBalance.SellRewards",
+      "SALE_SECONDS_OF_INCOME": 100,
+      "INDEX_REWARD_SECONDS": 100,
+      "WEIGHT_SCALE_POWER": 3
+    },
+    "egg_inventory": { "MAX_PLACED_EGGS": 30, "FIRST_EGG_PLACEMENT_GROWTH_DURATION": 3 },
+    "dropped_eggs": { "ABANDONED_DISTANCE_XZ": 200, "ABANDONED_SECONDS": 75, "OUTSIDE_GAMEPLAY_SECONDS": 15 },
+    "server_luck": { "MAX_MULTIPLIER": 8, "BOOST_DURATION": 900, "source": "GameplayBalance.ServerLuck" },
+    "area_luck": { "CAPPED_LUCK_MULTIPLIER": 1.5 }
+  },
+
+  "monetization_inventory": {
+    "note": "Product/gamepass IDs from shipped config. NO purchase was prompted. Robux PRICES not captured.",
+    "gamepasses": [
+      { "name": "x2 Money", "productId": 1935039424 },
+      { "name": "x2 Growth", "productId": 1931468161, "desc": "Eggs grow x2 faster" },
+      { "name": "Lucky", "productId": 1854056525, "desc": "More luck to get better pets from blocks and from fuse" }
+    ],
+    "products_total": "127 entries in Products.Directory (capture truncated; ~80+ shown)",
+    "product_families": [
+      "Money packs: $24K / $200K / $800K(?) / $4M (fixed products) + 5 scaled CashPacks (Floor 24,000 -> 8,000,000, each tied to a real-time refresh window of 40min -> 48h)",
+      "SpeedPower_1000000: +1M speed direct purchase",
+      "TreadmillSpeed time offers: 5min / 30min / 1h / 4h instant speed equal to current treadmill rate",
+      "TemporarySpeedBoost_10Minutes: x2 speed for 600s",
+      "SpeedBoostTier2: permanent upgrade to x4 speed (tiered)",
+      "ServerLuck_X4 / ServerLuck_X8: paid luck boost for the WHOLE SERVER (900s)",
+      "Instant Hatch (1)-(9): skip egg growth by 15min -> 10h (EggSkipGrowthMaxRemainingSeconds 900 -> 36000)",
+      "All 12 treadmill upgrades also sold individually for Robux",
+      "Trails: Purple/Green/Golden/Galaxy/Eternal/Divine/Secret (per-trail products)",
+      "Limited Egg packs: x1 / x3 / x50 (plus Halloween variants and Extinction egg)",
+      "DoubleTrophies: permanent 2x race trophies",
+      "SakuraLuckBoost1/2: x2 and x4 Great Bloom odds for incubator egg",
+      "SamplePack1: 100 samples",
+      "StarBundle10: 5 stars (Star Handler)",
+      "RVBillboard_*: rewarded-video ad billboards granting cash/2x/4x (ads-for-rewards monetization)",
+      "Legacy StealCommon/Divine/Eternal: 'DNA stealing is no longer available'"
+    ],
+    "ethics_note": "No purchase prompt was ever issued. Prices in Robux remain NOT CAPTURED."
+  },
+
+  "systems_inventory": {
+    "source": "ReplicatedStorage feature modules + 48 flag modules + CutsceneAssets",
+    "events_and_modes_observed": [
+      "Halloween Dimension (live at capture; InHalloweenDimension=true, egg shop, HalloweenIndex, PumpkinBoss, GhostBoss, GhostDogQuest)",
+      "Train event (TrainEventAssets/Runtime/GhostTemplates)",
+      "Capture the Egg (CaptureEvent: egg speed malus -0.7)",
+      "Demonic event (prep 60s, fight 600s, equalised speed power 1e9)",
+      "Dragon egg race event (DragonEvent: laps, lair egg count 10)",
+      "Light vs Darkness event",
+      "Sakura / Great Bloom (incubator, crystals, luck boosts)",
+      "Shrine Fusion",
+      "Beanstalk event, Sammy event, Monster parasite event, Rift, Scramble boss / Scramble trade-in",
+      "Mount Race + Race Rally + Trophies",
+      "Cursed Island Wars",
+      "Fishing (Haunted Rod, Ghost Fisherman)",
+      "Banjo Cricket (musical weapon)",
+      "Shooting Star, Trex Run, Red Light Green Light",
+      "Boss shop + Boss mastery + Boss tokens",
+      "Pet Wheel, Wisp Quests, Star Handler, Sample packs"
+    ],
+    "defensive_systems": ["Traps (freeze 7s)", "Gravity Disruptor (slow 50%)", "BeeLauncher (invert controls)"],
+    "cooperative_systems": ["Server-wide paid luck boosts", "Group reward (young-account eligibility gate, 5 days)"],
+    "legacy_removed": ["DNA stealing (products still present with 'no longer available' desc)"]
+  },
+
+  "player_state": {
+    "leaderstats": { "Money_per_second": 2291746612, "Speed": 1629838567 },
+    "attributes_note": "AreaId=Forest, InHalloweenDimension=true, CashPacksReady=true, MonetizationX2MoneyGamepassOwned=false, MonetizationLuckyGamepassOwned=false, FriendsInServer=1",
+    "caveat": "Same KengPrime account as the BSE capture — advanced progression; NOT typical-player data."
+  },
+
+  "gaps_this_capture": {
+    "robux_prices": "not captured (no purchase prompted)",
+    "full_pet_table": "263 entries, only 12 sampled (output budget) — OBSERVED_PARTIAL",
+    "egg_growth_live_flow": "config confirms real-time growth timers; flow not witnessed",
+    "area_unlock_gate": "no explicit speed gate found in Areas config; access rule UNKNOWN (index-completion hypothesis is INFERRED from bat-unlock text)",
+    "theft_flow_live": "not witnessed; only config-level evidence",
+    "modules_that_errored": ["EconomyFlags", "EggFlags", "OfflineFlags", "NewPlayerFlags", "ServerLuckFlags", "BalanceConfig (returns only Bind/Changed)"]
+  }
+}

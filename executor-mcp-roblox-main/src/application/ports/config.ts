@@ -1,0 +1,56 @@
+import type { SessionId } from "../../domain/shared/ids.js";
+import type { LogLevel } from "./logger.js";
+
+/**
+ * The fully-resolved, validated application configuration. Produced once at
+ * startup by the config adapter (env + CLI flags) and injected read-only
+ * everywhere. No code reads `process.env` directly.
+ */
+export interface AppConfig {
+  readonly server: {
+    /** Bind address. Loopback by default; `0.0.0.0` only for trusted networks. */
+    readonly host: string;
+    /** Bridge + dashboard port. */
+    readonly port: number;
+  };
+  readonly session: {
+    readonly id: SessionId;
+    readonly label: string;
+  };
+  readonly logging: {
+    readonly level: LogLevel;
+    /** Pretty-print logs (dev) vs. JSON lines (prod). */
+    readonly pretty: boolean;
+  };
+  readonly execution: {
+    readonly defaultTimeoutMs: number;
+    readonly defaultThreadContext: number;
+    /** Extra allow-listed roots for host filesystem reads (execute-file), beyond cwd + ~/Documents. */
+    readonly scriptDirs: readonly string[];
+  };
+  readonly semantic: {
+    /** Embeddings HTTP endpoint (Ollama/OpenAI-compatible). Null = local fallback embedding. */
+    readonly embeddingsUrl: string | null;
+    readonly embeddingsModel: string;
+  };
+  readonly bridge: {
+    readonly heartbeatIntervalMs: number;
+    /** Per Roblox client. Minimum 2 keeps a reserved lane for nested script RPCs. */
+    readonly maxConcurrentEvals?: number;
+    readonly maxQueuedEvals?: number;
+    readonly maxQueuedSourceBytes?: number;
+    readonly rpcBatchConcurrency?: number;
+    readonly maxRpcBatchCalls?: number;
+    readonly maxConcurrentRpcFrames?: number;
+    readonly maxQueuedRpcFrames?: number;
+    /**
+     * Optional shared secret. When set, connectors must send this exact string
+     * as `client.token` in their hello frame or the bridge rejects them. Closes
+     * the documented auth gap on local-but-multi-user systems. Null = open.
+     */
+    readonly authToken: string | null;
+  };
+  readonly dashboard: {
+    readonly enabled: boolean;
+  };
+}

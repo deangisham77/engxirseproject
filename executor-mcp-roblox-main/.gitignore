@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Test / coverage
+coverage/
+.vitest/
+
+# Migration scratch (legacy upstream source kept locally as a porting reference)
+_legacy/
+
+# Upstream Luau source (luau-lang/luau) — vendored locally as a reference for
+# reimplementing connector hot paths in pure Luau. NEVER push (license + bloat).
+_luau/
+
+# Logs
+*.log
+logs/
+
+# Editor / OS
+.DS_Store
+.idea/
+.cursor/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+Thumbs.db
+
+# Local env
+.env
+.env.local
+.env.*.local

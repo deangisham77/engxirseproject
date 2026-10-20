@@ -1,0 +1,201 @@
+{
+    "schema_version":  "1.0",
+    "last_updated":  "2026-10-18",
+    "gaps":  [
+                 {
+                     "gap_id":  "GAP-001",
+                     "game_id":  "break_steal_egg",
+                     "what":  "Numeric economy: upgrade prices, cash per animal, pickaxe cost curve",
+                     "status":  "PARTIALLY_OBTAINED_2026-10-18",
+                     "detail":  "Pickaxe/plot/satchel/treadmill prices + per-animal cash captured live (SRC-017). Still missing: tier-20 pickaxe row, index reward formula, egg HP.",
+                     "how_to_obtain":  "Second read-only pass (EggConfig/EggRewards/IndexConfig.Reward())"
+                 },
+                 {
+                     "gap_id":  "GAP-002",
+                     "game_id":  "break_steal_egg",
+                     "what":  "Zone names, biome order, speed requirements",
+                     "status":  "CLOSED_2026-10-18",
+                     "detail":  "Zone1-10 + SafeZone with RequiredPower, guards, rarities and nest counts captured (SRC-017).",
+                     "how_to_obtain":  "done"
+                 },
+                 {
+                     "gap_id":  "GAP-003",
+                     "game_id":  "break_steal_egg",
+                     "what":  "Egg and pet lists with rarities (30 eggs claimed)",
+                     "status":  "PARTIALLY_OBTAINED_2026-10-18",
+                     "detail":  "86 base pool animals + 22 event extras with weights/cash captured; Legacy pool partial (~40/58); egg HP values still missing; the \u002730 eggs\u0027 claim now CONFLICTS with 458 nests.",
+                     "how_to_obtain":  "Second read-only pass + resolve egg-type grouping"
+                 },
+                 {
+                     "gap_id":  "GAP-004",
+                     "game_id":  "break_steal_egg",
+                     "what":  "Exact failure outcome when caught by guard (drop vs. lose vs. respawn)",
+                     "status":  "NOT_AVAILABLE",
+                     "how_to_obtain":  "User in-game observation per checklist item OBS-BSE-03"
+                 },
+                 {
+                     "gap_id":  "GAP-005",
+                     "game_id":  "steal_egg",
+                     "what":  "Any NPC/defense system, and failure state when robbed",
+                     "status":  "PARTIALLY_OBTAINED_2026-10-18",
+                     "detail":  "NPC/defense RESOLVED OBSERVED via SRC-018: 16 guard configs (one per area), plus player-placed anti-theft gear (Trap freeze 7s, GravityDisruptor slow 50%, BeeLauncher invert controls 5s). Failure state config: ragdoll 2.5s + knockback. NOT yet witnessed live — guard catch outcome needs user observation.",
+                     "how_to_obtain":  "Live witnessing per checklist item OBS-SAE-02/03 (guard catch, trap freeze) — config is complete, observation is pending"
+                 },
+                 {
+                     "gap_id":  "GAP-006",
+                     "game_id":  "steal_egg",
+                     "what":  "Effect of sizes and mutations on stats",
+                     "status":  "PARTIALLY_OBTAINED_2026-10-18",
+                     "detail":  "Size mechanic observed in config (SRC-018): 11 weighted scale bands, income tapered against size (taper knee 5, powers 1.2/1.85), sell price share 0.8, weight_scale_power 3. Mutation list observed (11 variants) but per-mutation stat effects NOT read. A worked example (same pet, different size → different income) still needed.",
+                     "how_to_obtain":  "Second pass: mutation config modules; or user pet-detail-UI screenshots"
+                 },
+                 {
+                     "gap_id":  "GAP-007",
+                     "game_id":  "steal_egg",
+                     "what":  "Full zone/egg/pet inventory",
+                     "status":  "PARTIALLY_OBTAINED_2026-10-18",
+                     "detail":  "Zones CLOSED: 13 areas + 3 Light/Dark sub-biomes with full drop tables (SRC-018). Pets PARTIAL: 263 entries exist, 11 sampled with earning rates/growth times. Full table needs a second pass with higher output budget.",
+                     "how_to_obtain":  "Second read-only pass chunking Data.Assets by rarity/area"
+                 },
+                 {
+                     "gap_id":  "GAP-008",
+                     "game_id":  "ride_a_pet",
+                     "what":  "Pet names mapped to the 24-tier hatch odds ladder",
+                     "status":  "NOT_AVAILABLE",
+                     "how_to_obtain":  "Full fetch of SRC-012 (All Pets page)"
+                 },
+                 {
+                     "gap_id":  "GAP-009",
+                     "game_id":  "ride_a_pet",
+                     "what":  "Confirmation of the egg timer mechanic",
+                     "status":  "NOT_AVAILABLE",
+                     "how_to_obtain":  "User observation per checklist OBS-RAP-02"
+                 },
+                 {
+                     "gap_id":  "GAP-010",
+                     "game_id":  "ride_a_pet",
+                     "what":  "Rebirth requirements/rewards and gem sources (currently wiki-page-existence only)",
+                     "status":  "NOT_AVAILABLE",
+                     "how_to_obtain":  "User observation of rebirth UI or full wiki fetch"
+                 },
+                 {
+                     "gap_id":  "GAP-011",
+                     "game_id":  "ride_a_pet",
+                     "what":  "Content of the active [🎃EVENT]",
+                     "status":  "NOT_AVAILABLE",
+                     "how_to_obtain":  "User opens the game and records event UI"
+                 },
+                 {
+                     "gap_id":  "GAP-012",
+                     "game_id":  "all",
+                     "what":  "Gamepass and developer-product inventories (prices, contents)",
+                     "status":  "PARTIALLY_OBTAINED_2026-10-18",
+                     "detail":  "break_steal_egg AND steal_egg product IDs captured from shipped config (SRC-017, SRC-018); Robux PRICES still missing for both; RAP inventory untouched.",
+                     "how_to_obtain":  "Read-only MarketplaceService:GetProductInfo (pending user approval) or store-UI screenshots — NO purchase prompts"
+                 },
+                 {
+                     "gap_id":  "GAP-013",
+                     "game_id":  "all",
+                     "what":  "Update/changelog history and live-ops cadence",
+                     "status":  "NOT_AVAILABLE",
+                     "how_to_obtain":  "Official Roblox social/group posts or developer changelogs"
+                 },
+                 {
+                     "gap_id":  "GAP-014",
+                     "game_id":  "all",
+                     "what":  "In-game onboarding/tutorial experience, first-minutes flow",
+                     "status":  "NOT_AVAILABLE",
+                     "how_to_obtain":  "User plays each game fresh and follows checklist section A"
+                 },
+                 {
+                     "gap_id":  "GAP-015",
+                     "game_id":  "all",
+                     "what":  "Live-game structural verification of every mechanic claimed from third-party sources",
+                     "status":  "PARTIALLY_OBTAINED_2026-10-18",
+                     "detail":  "break_steal_egg verified live (SRC-017) and steal_egg verified live (SRC-018). ride_a_pet still unverified — requires the client to be switched to place 124216119978534.",
+                     "how_to_obtain":  "Switch client to place 124216119978534 and repeat the read-only capture recipe"
+                 },
+                 {
+                     "gap_id":  "GAP-016",
+                     "game_id":  "all",
+                     "what":  "Player analytics needed to say anything non-hypothetical about retention",
+                     "status":  "NOT_AVAILABLE",
+                     "how_to_obtain":  "Only obtainable with developer-side data or paid third-party analytics; treat as permanently unavailable for this project"
+                 },
+                 {
+                     "gap_id":  "GAP-017",
+                     "game_id":  "break_steal_egg",
+                     "what":  "universe_id",
+                     "status":  "CLOSED_2026-10-18",
+                     "detail":  "10765288803, read live from the active client (SRC-017).",
+                     "how_to_obtain":  "done"
+                 },
+                 {
+                     "gap_id":  "GAP-018",
+                     "game_id":  "steal_egg",
+                     "what":  "What gates access to a new area (no numeric speed gate found in Areas config)",
+                     "status":  "NOT_AVAILABLE",
+                     "detail":  "Index-completion is INFERRED from bat-unlock text but not proven. EconomyFlags/ServerLuckFlags modules errored on require (need runtime).",
+                     "how_to_obtain":  "Second pass: read area-unlock client logic, or user observation of the unlock moment"
+                 },
+                 {
+                     "gap_id":  "GAP-019",
+                     "game_id":  "steal_egg",
+                     "what":  "Offline reward values (module exists, errored on require)",
+                     "status":  "NOT_AVAILABLE",
+                     "detail":  "OfflineFlags module exists but requires runtime state to load. Its existence is OBSERVED; values are UNKNOWN.",
+                     "how_to_obtain":  "Second pass with runtime values, or user observation after an away-period"
+                 },
+                 {
+                     "gap_id":  "GAP-020",
+                     "game_id":  "steal_egg",
+                     "what":  "Full 263-pet earning-rate/growth-time table (11/263 sampled)",
+                     "status":  "PARTIALLY_OBTAINED_2026-10-18",
+                     "detail":  "Sampled pets span 180/s to 1.8B/s income, growth 10s to 64,800s. Full table needs chunked second pass.",
+                     "how_to_obtain":  "Second read-only pass, iterating Data.Assets in chunks by area/rarity"
+                 },
+                 {
+                     "gap_id":  "GAP-021",
+                     "category":  "identity",
+                     "game_id":  "punch_and_steal_an_egg",
+                     "question":  "Confirm universe_id for place 86978157069603?",
+                     "importance":  "HIGH",
+                     "current_status":  "UNKNOWN",
+                     "attempted_methods":  [
+                                               "webfetch public page",
+                                               "live context inspection"
+                                           ],
+                     "planned_method":  "Fetch official page metadata/API context",
+                     "evidence_needed":  "universe_id with verification",
+                     "blocking":  false
+                 },
+                 {
+                     "gap_id":  "GAP-022",
+                     "category":  "mechanics",
+                     "game_id":  "punch_and_steal_an_egg",
+                     "question":  "Verify punch-to-hatch, angry Mother AI, bench press (strength), carry weight, garden earning, theft details",
+                     "importance":  "HIGH",
+                     "current_status":  "PARTIALLY_OBTAINED",
+                     "attempted_methods":  [
+                                               "live read-only config inspection"
+                                           ],
+                     "planned_method":  "In-game observation to witness behavior (not just config)",
+                     "evidence_needed":  "instance/config evidence",
+                     "blocking":  false
+                 },
+                 {
+                     "gap_id":  "GAP-023",
+                     "category":  "content",
+                     "game_id":  "punch_and_steal_an_egg",
+                     "question":  "Enumerate pets/animals, eggs, zones, trails/gloves, gamepasses/products",
+                     "importance":  "MEDIUM",
+                     "current_status":  "PARTIALLY_OBTAINED",
+                     "attempted_methods":  [
+                                               "live read-only config inspection"
+                                           ],
+                     "planned_method":  "Config inspection done; full serialization of all animal entries if needed",
+                     "evidence_needed":  "lists with counts",
+                     "blocking":  false
+                 }
+             ]
+}

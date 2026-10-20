@@ -1,0 +1,229 @@
+{
+    "schema_version":  "1.0",
+    "last_updated":  "2026-10-18",
+    "readiness":  "GATE_REVIEW_NEEDED",
+    "readiness_reason":  "Break and Steal an Egg (SRC-017) and steal_egg (SRC-018) both have OBSERVED live economy + content data of equivalent depth. The §14 gate (\u003e=2 games at equivalent depth) is therefore arguably met for a TWO-way comparison — but ride_a_pet still has only third-party material, and the gate\u0027s intent was originally a 3-way study. Awaiting explicit user decision before generating update ideas; until then update_opportunities.json stays empty.",
+    "comparisons":  [
+                        {
+                            "dimension":  "core_gameplay_loop",
+                            "break_steal_egg":  "Break egg (HP) → escape guards → deposit animal at base → cash → upgrade speed/pickaxe → deeper biomes",
+                            "steal_egg":  "OBSERVED (SRC-018): steal egg (world pets via proximity + players via bat fling) → grow egg in real time (10s→18h) → hatch → place pet at base for money/s → upgrade base (12 levels) + treadmill (12 tiers) → rarer areas (13 areas) + size/mutation chase",
+                            "ride_a_pet":  "Find egg on map → hatch → ride pet (speed) → mutate for speed → reach rarer eggs",
+                            "same":  "All three: acquire egg → hatch → pet → speed is the progression stat → chase rarer content. Collection/Index meta present in at least two.",
+                            "different":  "Acquisition verb differs: MINE (pickaxe) vs. THEFT (players/pets) vs. SCAVENGE (map search). Speed source differs: trained stat (BSE, SAE) vs. pet stat (RAP). Banking step differs: deposit at base (BSE) vs. place-and-earn passive income (SAE) vs. ride directly (RAP).",
+                            "supporting_sources":  [
+                                                       "SRC-001",
+                                                       "SRC-006",
+                                                       "SRC-009",
+                                                       "SRC-018"
+                                                   ],
+                            "missing_data":  [
+                                                 "failure states for RAP",
+                                                 "live witnessing of SAE theft flow"
+                                             ],
+                            "sufficient_for_use":  true,
+                            "confidence":  "HIGH"
+                        },
+                        {
+                            "dimension":  "risk_vs_reward",
+                            "break_steal_egg":  "OBSERVED: NPC guardians (CatchDistance 2, OutrunSpeedFactor 0.85, fling 12-115) + player theft + zone bats for knockback; failure state partially known (fling/ragdoll 3s, animal drop per guide)",
+                            "steal_egg":  "OBSERVED (SRC-018): THREE stacked risk layers like BSE — area guardians (WalkSpeed 16→251, ragdoll 2.5s, retrieve/deposit eggs), player bats (fling), plus explicit counter-play the player can place (freeze traps 7s, gravity slow, control-inverting bees). Carry penalty slows you up to 33% while holding eggs — quantified risk knob.",
+                            "ride_a_pet":  "Possible egg timer / spawn competition; no theft or NPC threat observed",
+                            "same":  "All create a retrieval challenge between acquiring and banking a reward.",
+                            "different":  "Risk source: NPC (BSE) vs. NPC+players+carry-weight (SAE) vs. time/competition (RAP, unconfirmed). SAE is now the only one with QUANTIFIED escape penalties (carry slowdown 15–33%) and player-placed counter-play.",
+                            "supporting_sources":  [
+                                                       "SRC-001",
+                                                       "SRC-002",
+                                                       "SRC-006",
+                                                       "SRC-013",
+                                                       "SRC-017",
+                                                       "SRC-018"
+                                                   ],
+                            "missing_data":  [
+                                                 "exact failure penalties for BSE (OBS-BSE-03)",
+                                                 "failure penalties for RAP",
+                                                 "whether RAP egg timer really exists"
+                                             ],
+                            "sufficient_for_use":  false,
+                            "confidence":  "MEDIUM"
+                        },
+                        {
+                            "dimension":  "progression",
+                            "break_steal_egg":  "OBSERVED: SpeedPower gates zones (5 -\u003e 1e11), 20 pickaxe tiers (0 -\u003e 7.5e16 cash), 9 plot levels, 6 satchels, treadmill (two CONFLICTING tables: 6 tiers vs 9 levels)",
+                            "steal_egg":  "OBSERVED (SRC-018): base 12 levels (1,000 → 5e15 cash, capacity 7→19), treadmill 12 tiers (0 → 7.5e15 cash, x2 → x8,500 multiplier), speed XP curve (1.15 growth, +2/level, base 10 → ref max 400), index completion unlocks bats + speed rewards",
+                            "ride_a_pet":  "Pet speed via rarity + mutation rerolls; possible rebirth multipliers (unconfirmed)",
+                            "same":  "Speed-centric progression in all three; cash sinks in all three.",
+                            "different":  "RAP invests in PETS as the speed vehicle; the other two invest in the PLAYER\u0027s stat and tool. Both BSE and SAE split progression into multiple independent cash sinks (BSE: 4 sinks + separate speed currency; SAE: base + treadmill + index, with Speed trained separately from Money).",
+                            "supporting_sources":  [
+                                                       "SRC-001",
+                                                       "SRC-002",
+                                                       "SRC-006",
+                                                       "SRC-009",
+                                                       "SRC-011",
+                                                       "SRC-017",
+                                                       "SRC-018"
+                                                   ],
+                            "missing_data":  [
+                                                 "index reward formula (BSE)",
+                                                 "treadmill table conflict resolution (BSE)",
+                                                 "full pet earning table (SAE, 11/263 sampled)"
+                                             ],
+                            "sufficient_for_use":  false,
+                            "confidence":  "MEDIUM"
+                        },
+                        {
+                            "dimension":  "collection",
+                            "break_steal_egg":  "Index of animals (official)",
+                            "steal_egg":  "OBSERVED (SRC-018): 18 rarity entries (ranks 1–12), 11 weighted size scale bands (0.1x–35x), 11 mutation variants, per-area indexes that unlock bats",
+                            "ride_a_pet":  "Index/collection panel observed in video; 24 rarity tiers listed by IGN",
+                            "same":  "All three are collection games at heart.",
+                            "different":  "Variant depth: SAE has explicit size (11 bands) + mutation (11 variants) axes now OBSERVED; RAP has mutation; BSE has mutation (5) but size is UNKNOWN, not absent.",
+                            "supporting_sources":  [
+                                                       "SRC-001",
+                                                       "SRC-006",
+                                                       "SRC-012",
+                                                       "SRC-015",
+                                                       "SRC-018"
+                                                   ],
+                            "missing_data":  [
+                                                 "complete pet/egg lists for all three",
+                                                 "BSE size axis check"
+                                             ],
+                            "sufficient_for_use":  true,
+                            "confidence":  "MEDIUM"
+                        },
+                        {
+                            "dimension":  "multiplayer_and_social",
+                            "break_steal_egg":  "OBSERVED: theft of carried animals (guide/video) + zone-gated BAT weapons with knockback/ragdoll (BatConfig, remotes) + global boosts, friend boosts, leaderboards",
+                            "steal_egg":  "OBSERVED: theft (bats fling players to steal eggs), 13 bats, traps/freeze (7s), GravityDisruptor (50%), BeeLauncher (invert controls 5s); guards retrieve/deposit eggs; area guardians exist.",
+                            "ride_a_pet":  "Shared 6-player servers; no player-interaction verb observed",
+                            "same":  "All three run in shared servers.",
+                            "different":  "BSE has zone-gated bat combat + theft. SAE has bat-based theft AND a richer defensive counter-play kit (traps/gravity/bees) AND area guardians that retrieve/deposit — it\u0027s much closer to BSE on the \u0027theft arms race\u0027 than previously assumed. RAP appears more parallel/co-op.",
+                            "supporting_sources":  [
+                                                       "SRC-001",
+                                                       "SRC-006",
+                                                       "SRC-009",
+                                                       "SRC-010",
+                                                       "SRC-014",
+                                                       "SRC-017",
+                                                       "SRC-018"
+                                                   ],
+                            "missing_data":  [
+                                                 "confirmed absence of any PvP in RAP",
+                                                 "live PvP observation in BSE (witnessed config + existence)",
+                                                 "live theft flow observation in SAE"
+                                             ],
+                            "sufficient_for_use":  false,
+                            "confidence":  "MEDIUM"
+                        },
+                        {
+                            "dimension":  "monetization",
+                            "break_steal_egg":  "OBSERVED inventory: 3 permanent Robux upgrades (x2 Cash / x2 Swing / x2 Growth), 6 speed packs, 5 cash packs, 6 potions, fallen egg/token packs, ~28 timer-skip products, a DevProductId on every pickaxe tier. Robux PRICES not captured.",
+                            "steal_egg":  "OBSERVED (SRC-018): 3 gamepasses (x2 Money, x2 Growth, Lucky) + 127 product entries: money packs, +1M speed, treadmill-speed time offers, permanent/temporary speed boosts, SERVER-WIDE paid luck x4/x8, 9 Instant Hatch tiers (15min–10h), all 12 treadmills, trails, limited-egg packs, rewarded-video ads. Robux prices not captured.",
+                            "ride_a_pet":  "NOT CAPTURED",
+                            "same":  "All three presumably monetize; BSE and SAE now have verified inventories.",
+                            "different":  "BSE monetizes time skips + stats + per-pickaxe-tier products. SAE monetizes more broadly still: egg-growth time (Instant Hatch), SERVER-WIDE luck (social monetization), and rewarded-video ads (ad-monetization hybrid) — structurally the widest monetization surface observed so far.",
+                            "supporting_sources":  [
+                                                       "SRC-007",
+                                                       "SRC-017",
+                                                       "SRC-018"
+                                                   ],
+                            "missing_data":  [
+                                                 "robux prices for all three",
+                                                 "RAP gamepass/product inventory"
+                                             ],
+                            "sufficient_for_use":  false,
+                            "confidence":  "LOW"
+                        },
+                        {
+                            "dimension":  "update_cadence_and_live_ops",
+                            "break_steal_egg":  "NOT CAPTURED",
+                            "steal_egg":  "OBSERVED (SRC-018): a seasonal event (Halloween Dimension) was LIVE at capture time; 20+ event/mode systems exist as modules — indicates active live-ops",
+                            "ride_a_pet":  "Seasonal event observed in page title (Oct 2026)",
+                            "same":  "At least SAE and RAP show live-ops evidence (seasonal events); BSE not yet captured.",
+                            "different":  "SAE\u0027s live-ops is broad (20+ event systems, seasonal dimension); RAP shows a seasonal event title only.",
+                            "supporting_sources":  [
+                                                       "SRC-009",
+                                                       "SRC-018"
+                                                   ],
+                            "missing_data":  [
+                                                 "changelogs/update histories for all three"
+                                             ],
+                            "sufficient_for_use":  false,
+                            "confidence":  "LOW"
+                        },
+                        {
+                            "dimension":  "core_gameplay_loop_target",
+                            "punch_and_steal_an_egg":  "Punch eggs open ? hatch animals ? grab and run before angry Mother catches you ? put in garden for cash ? steal from other players\u0027 gardens ? bench press (strength/carry weight) + treadmills (speed) ? unlock zones/trails/gloves ? Index",
+                            "break_steal_egg":  "Break egg (HP) ? escape guards ? deposit animal at base ? cash ? upgrade speed/pickaxe ? deeper biomes",
+                            "steal_egg":  "Steal egg (world pets/players) ? hatch ? place pet at base for income ? base+treadmill upgrades ? rarer areas; bats + guards + counter-play",
+                            "ride_a_pet":  "Find egg ? hatch ? ride pet (speed) ? mutate ? rarer eggs",
+                            "same":  "Egg?hatch?pet/animal?collection (Index) + speed/progression + cash; family of \u0027break/steal egg\u0027 games",
+                            "different":  "Punch verb (vs break/steal from pets/players) and explicit weight/strength (bench press) plus \u0027angry Mother\u0027 threat; garden earning vs base vs ride-direct",
+                            "supporting_sources":  [
+
+                                                   ],
+                            "missing_data":  [
+                                                 "actual loop verification",
+                                                 "failure states",
+                                                 "zones list",
+                                                 "pet lists"
+                                             ],
+                            "sufficient_for_use":  false,
+                            "confidence":  "LOW",
+                            "note":  "SOURCE_DERIVED from description text only; no in-game/live config observation yet."
+                        }
+                    ],
+    "uniqueness_claims_checked":  [
+                                      {
+                                          "claim":  "\u0027Guards\u0027 NPC defense",
+                                          "status":  "OBSERVED in break_steal_egg (10 named guardians) AND OBSERVED in steal_egg (16 guard configs, one per area + Light/Dark variants; retrieval/deposit)",
+                                          "rule":  "NOT called unique — present in BSE and SAE. RAP NPC data is UNKNOWN."
+                                      },
+                                      {
+                                          "claim":  "\u0027Player theft\u0027 as core",
+                                          "status":  "evidenced in steal_egg and break_steal_egg",
+                                          "rule":  "Not unique to either; RAP unconfirmed."
+                                      },
+                                      {
+                                          "claim":  "\u0027Pet as speed vehicle\u0027",
+                                          "status":  "only evidenced in ride_a_pet",
+                                          "rule":  "NOT called unique — BSE/SAE pet mechanics partly unknown."
+                                      },
+                                      {
+                                          "claim":  "\u0027Rebirth system\u0027",
+                                          "status":  "LOW-confidence claim only in ride_a_pet",
+                                          "rule":  "Not usable until confirmed; other games unknown."
+                                      },
+                                      {
+                                          "claim":  "\u0027Mutations\u0027",
+                                          "status":  "OBSERVED in break_steal_egg (5 tiers) AND officially claimed by steal_egg AND ride_a_pet",
+                                          "rule":  "Explicitly NOT a differentiator — present/claimed in all three."
+                                      },
+                                      {
+                                          "claim":  "\u0027Melee combat between players\u0027",
+                                          "status":  "OBSERVED in break_steal_egg (zone bats) AND OBSERVED in steal_egg (13 bat tiers fling players, plus slap tools)",
+                                          "rule":  "NOT a differentiator between BSE and SAE anymore. RAP combat still UNKNOWN — cannot call it a game-family trait until RAP is inspected."
+                                      },
+                                      {
+                                          "claim":  "\u0027Pity system\u0027",
+                                          "status":  "OBSERVED only in break_steal_egg; no pity config found in steal_egg live capture",
+                                          "rule":  "Still not unique — absence in SAE is \u0027not found\u0027, not proven absent; RAP unknown."
+                                      },
+                                      {
+                                          "claim":  "\u0027Offline rewards / return hooks\u0027",
+                                          "status":  "OBSERVED in break_steal_egg; steal_egg has an OfflineFlags module (exists but values unread) + cash-pack refresh windows (OBSERVED) as return hooks; RAP unknown",
+                                          "rule":  "Not unique; partial evidence in SAE now."
+                                      },
+                                      {
+                                          "claim":  "\u0027Defensive counter-play (player-placed traps/tools)\u0027",
+                                          "status":  "OBSERVED only in steal_egg (Trap/BigTrap/GravityDisruptor/BeeLauncher); break_steal_egg relies on guards only (player traps UNKNOWN); RAP unknown",
+                                          "rule":  "Promising differentiator for SAE but not yet unique — BSE/RAP player-level defense is UNKNOWN."
+                                      },
+                                      {
+                                          "claim":  "\u0027Egg size axis\u0027",
+                                          "status":  "OBSERVED config in steal_egg (11 weighted scale bands, 0.1x–35x, income taper); UNKNOWN in break_steal_egg and ride_a_pet",
+                                          "rule":  "NOT called unique — other two games unverified on size."
+                                      }
+                                  ]
+}

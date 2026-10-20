@@ -1,0 +1,25 @@
+{
+  "schema_version": "1.0",
+  "last_updated": "2026-10-18",
+  "status": "INTENTIONALLY_EMPTY_PENDING_GATE_DECISION",
+  "gate_rule": "No update idea is generated until (1) economy numbers exist for at least two games, (2) content inventories are populated beyond empty lists, and (3) the multiplayer/risk dimensions in cross_game_comparison.json are marked sufficient_for_use. Premature ideas would be generic (add pet/egg/zone/daily reward) and violate the brief.",
+  "readiness_checklist": {
+    "economy_numbers_available": "YES for 2 games — break_steal_egg (SRC-017) and steal_egg (SRC-018)",
+    "content_inventory_populated": "YES for 2 games — break_steal_egg and steal_egg",
+    "multiplayer_comparison_confirmed": false,
+    "failure_states_known": false,
+    "monetization_known": "PARTIAL — BSE and SAE inventories known (IDs/contents), Robux prices unknown for all; RAP untouched",
+    "gate_assessment_2026-10-18": "Conditions (1) and (2) of the literal gate are now MET for a BSE+SAE 2-way comparison. Condition (3) is NOT met (multiplayer/risk dimensions still sufficient_for_use=false; RAP unobserved). AWAITING USER DECISION on whether to unlock idea generation on a 2-way basis. Until then: ideas stay empty."
+  },
+  "ideas": [],
+  "candidate_directions_under_investigation": [
+    {
+      "note": "NOT an idea — a research thread only.",
+      "observation": "The three games split on how they create retrieval tension: NPC risk (BSE), player risk (SAE), time/spawn risk (RAP, unconfirmed).",
+      "why_it_matters": "If confirmed, adapting one game's risk source into another would be MECHANIC_ADAPTATION, not a novel invention — and must be labeled accordingly.",
+      "evidence_status": "INFERRED",
+      "confidence": "LOW",
+      "blocked_by": ["failure states unknown", "no in-game observation"]
+    }
+  ]
+}

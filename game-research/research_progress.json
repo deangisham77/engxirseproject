@@ -1,0 +1,483 @@
+{
+    "schema_version":  "1.0",
+    "last_updated":  "2026-10-18",
+    "active_game_id":  "ride_a_pet",
+    "readiness_gate_note":  "2026-10-18: BSE (SRC-017), SAE (SRC-018), and RAP (SRC-019) now have OBSERVED/PARTIAL live config data. All three observed. update_opportunities.json still EMPTY pending explicit user confirmation to unlock idea generation.",
+    "sessions":  [
+                     {
+                         "id":  "S1",
+                         "date":  "2026-10-18",
+                         "focus":  "environment check, identity of all 3 games, system scaffold",
+                         "note":  "MCP unavailable (fetch failed) — no live data"
+                     },
+                     {
+                         "id":  "S2",
+                         "date":  "2026-10-18",
+                         "focus":  "live read-only observation of break_steal_egg",
+                         "note":  "MCP restored; client already in place 114326934417838; capture persisted to evidence_live_bse_2026-10-18.json",
+                         "mutations":  "NONE — no remote fired, no movement, no purchase"
+                     },
+                     {
+                         "id":  "S3",
+                         "date":  "2026-10-18",
+                         "focus":  "live read-only observation of steal_egg (client switched by user)",
+                         "note":  "Client in place 107778070777162; capture persisted to evidence_live_sae_2026-10-18.json; 13 areas with drop tables, 16 guard configs, 13 bats + 4 anti-theft gears, 12 base levels, 12 treadmills, 263 pets (11 sampled), egg size bands, carry penalty, 3 gamepasses + 127 products all captured",
+                         "mutations":  "NONE — no remote fired, no movement, no purchase"
+                     },
+                     {
+                         "id":  "S4",
+                         "date":  "2026-10-18",
+                         "focus":  "live read-only observation of ride_a_pet (client switched by user)",
+                         "note":  "Client in place 124216119978534; capture persisted to evidence_live_rap_2026-10-18.json; Pets/Eggs/Shop/Fusion/Rebirths configs read (partial).",
+                         "mutations":  "NONE — no remote fired, no movement, no purchase"
+                     },
+                     {
+                         "id":  "S5",
+                         "date":  "2026-10-18",
+                         "focus":  "add Punch and Steal an Egg as TARGET_GAME (PlaceId 86978157069603)",
+                         "note":  "Created punch_and_steal_an_egg.json, added to games_registry.json, extended cross_game_comparison and unknowns_and_gaps. No live capture yet (not observed in-game).",
+                         "mutations":  "NONE"
+                     },
+                     {
+                         "id":  "S6",
+                         "date":  "2026-10-18",
+                         "focus":  "live read-only capture of Punch and Steal an Egg (TARGET_GAME)",
+                         "note":  "Read RS/Workspace + key configs (GameConfig/IndexConfig/ShopConfig/PvpConfig/MotherHitShapes/UiImagesConfig/SettingsConfig). Observed treadmill 1-10, PEN 1-11, 105 products+4 passes, 10 biomes+animals, CARRY_SLOW_MAX=0.3, Mother threat+PVP. punch_and_steal_an_egg.json -\u003e PARTIALLY_OBSERVED; SRC-PASE-001 added.",
+                         "mutations":  "NONE � no remote fired, no movement, no purchase"
+                     }
+                 ],
+    "games":  {
+                  "break_steal_egg":  {
+                                          "status":  "PARTIALLY_COMPLETE",
+                                          "sections":  {
+                                                           "A_identity_onboarding":  {
+                                                                                         "status":  "PARTIALLY_COMPLETE",
+                                                                                         "checked":  [
+                                                                                                         "description",
+                                                                                                         "universe_id",
+                                                                                                         "tutorial_existence",
+                                                                                                         "early_barrier_pity"
+                                                                                                     ],
+                                                                                         "unchecked":  [
+                                                                                                           "tutorial_content",
+                                                                                                           "fresh_account_flow",
+                                                                                                           "early_friction_measured"
+                                                                                                       ]
+                                                                                     },
+                                                           "B_core_loop":  {
+                                                                               "status":  "COMPLETE_STRUCTURALLY",
+                                                                               "checked":  [
+                                                                                               "full_loop_with_remediates",
+                                                                                               "repeat_activities",
+                                                                                               "progression_link"
+                                                                                           ],
+                                                                               "unchecked":  [
+                                                                                                 "failure_outcome_live"
+                                                                                             ]
+                                                                           },
+                                                           "C_mechanics":  {
+                                                                               "status":  "PARTIALLY_COMPLETE",
+                                                                               "checked":  [
+                                                                                               "movement",
+                                                                                               "combat_bats",
+                                                                                               "egg_collectible",
+                                                                                               "npc_guards",
+                                                                                               "inventory",
+                                                                                               "upgrades",
+                                                                                               "zones",
+                                                                                               "index",
+                                                                                               "multiplayer",
+                                                                                               "failure_partial",
+                                                                                               "events",
+                                                                                               "daily_offline",
+                                                                                               "gamepasses",
+                                                                                               "timed_systems"
+                                                                                           ],
+                                                                               "unchecked":  [
+                                                                                                 "theft_flow_live",
+                                                                                                 "exact_catch_penalty",
+                                                                                                 "trading_absence_proof",
+                                                                                                 "friend_boost_effect"
+                                                                                             ]
+                                                                           },
+                                                           "D_progression_economy":  {
+                                                                                         "status":  "PARTIALLY_COMPLETE",
+                                                                                         "checked":  [
+                                                                                                         "zone_gates",
+                                                                                                         "pickaxe_prices",
+                                                                                                         "plot_costs",
+                                                                                                         "satchel",
+                                                                                                         "treadmill_conflicting_tables",
+                                                                                                         "animal_cash_values",
+                                                                                                         "mutations",
+                                                                                                         "pity",
+                                                                                                         "monetization_product_ids",
+                                                                                                         "ratios_calculated"
+                                                                                                     ],
+                                                                                         "unchecked":  [
+                                                                                                           "robux_prices",
+                                                                                                           "egg_hp",
+                                                                                                           "index_reward_formula",
+                                                                                                           "tier20_pickaxe_row"
+                                                                                                       ]
+                                                                                     },
+                                                           "E_content_inventory":  {
+                                                                                       "status":  "PARTIALLY_COMPLETE",
+                                                                                       "checked":  [
+                                                                                                       "zones",
+                                                                                                       "guardians",
+                                                                                                       "nests",
+                                                                                                       "animal_pools",
+                                                                                                       "rarities",
+                                                                                                       "pickaxes",
+                                                                                                       "bats",
+                                                                                                       "trails",
+                                                                                                       "satchels",
+                                                                                                       "machines",
+                                                                                                       "events",
+                                                                                                       "bosses"
+                                                                                                   ],
+                                                                                       "unchecked":  [
+                                                                                                         "legacy_pool_full",
+                                                                                                         "cosmetics",
+                                                                                                         "tutorial_content",
+                                                                                                         "30egg_conflict_resolution"
+                                                                                                     ]
+                                                                                   },
+                                                           "F_multiplayer_social":  {
+                                                                                        "status":  "PARTIALLY_COMPLETE",
+                                                                                        "checked":  [
+                                                                                                        "theft_claim",
+                                                                                                        "bat_combat",
+                                                                                                        "cooperation_structures",
+                                                                                                        "griefing_analysis"
+                                                                                                    ],
+                                                                                        "unchecked":  [
+                                                                                                          "live_pvp_observation",
+                                                                                                          "new_vs_veteran_impact"
+                                                                                                      ]
+                                                                                    },
+                                                           "G_retention":  {
+                                                                               "status":  "PARTIALLY_COMPLETE",
+                                                                               "checked":  [
+                                                                                               "nine_retention_systems_identified",
+                                                                                               "goal_structure",
+                                                                                               "monotony_and_frustration_hypotheses"
+                                                                                           ],
+                                                                               "unchecked":  [
+                                                                                                 "any_measured_effect"
+                                                                                             ]
+                                                                           }
+                                                       },
+                                          "latest_findings":  [
+                                                                  "Universe ID 10765288803, creatorId 187288153 (= group in GroupRewardConfig) — identity fully closed.",
+                                                                  "10 zones gated by RequiredPower 5 → 1e11, each with a named guardian (speed 30→70, fling 12→115).",
+                                                                  "458 egg nests; 86 base animals with weights and cash values; 13 rarities; 5 mutations (up to x25 cash).",
+                                                                  "Complete cash-sink set: 20 pickaxes, 9 plot levels, 6 satchels, treadmill (two CONFLICTING tables).",
+                                                                  "Zone-gated bat weapons = verified player-vs-player combat, a system absent from prior guide material.",
+                                                                  "Rich retention layer: offline rewards, group/like reward, pity system, 7-day merge-machine timers, Lucky Egg drops, Hell/Demon/Celestial events, polls.",
+                                                                  "Monetization: 3 permanent passes + packs/potions/timers; every pickaxe tier also has a Robux product ID."
+                                                              ],
+                                          "open_questions":  [
+                                                                 "Exact outcome when a guard catches you (drop vs. lose vs. ragdoll-and-recover)?",
+                                                                 "Why do SpeedConfig.Tiers (6) and TreadmillUpgradeConfig.Levels (9) coexist with shared costs?",
+                                                                 "What are the Robux prices (read-only GetProductInfo or store screenshot)?",
+                                                                 "What does the tutorial actually teach (TutorialConfig unread)?"
+                                                             ],
+                                          "sources_processed":  [
+                                                                    "SRC-001",
+                                                                    "SRC-002",
+                                                                    "SRC-003",
+                                                                    "SRC-004",
+                                                                    "SRC-005",
+                                                                    "SRC-014",
+                                                                    "SRC-017"
+                                                                ],
+                                          "next_task":  "Second read-only pass: EggConfig/EggRewards/egg HP, TutorialConfig, IndexConfig.Reward(), tier-20 pickaxe row, Legacy pool completion."
+                                      },
+                  "steal_egg":  {
+                                    "status":  "PARTIALLY_COMPLETE",
+                                    "sections":  {
+                                                     "A_identity_onboarding":  {
+                                                                                   "status":  "PARTIALLY_COMPLETE",
+                                                                                   "checked":  [
+                                                                                                   "description",
+                                                                                                   "device_support",
+                                                                                                   "tutorial_module_existence",
+                                                                                                   "starter_gear"
+                                                                                               ],
+                                                                                   "unchecked":  [
+                                                                                                     "tutorial_content",
+                                                                                                     "fresh_account_flow",
+                                                                                                     "ui_flow"
+                                                                                                 ]
+                                                                               },
+                                                     "B_core_loop":  {
+                                                                         "status":  "COMPLETE_STRUCTURALLY",
+                                                                         "checked":  [
+                                                                                         "full_loop_with_evidence",
+                                                                                         "repeat_activities",
+                                                                                         "progression_link"
+                                                                                     ],
+                                                                         "unchecked":  [
+                                                                                           "live_witnessing_of_theft_flow"
+                                                                                       ]
+                                                                     },
+                                                     "C_mechanics":  {
+                                                                         "status":  "PARTIALLY_COMPLETE",
+                                                                         "checked":  [
+                                                                                         "movement",
+                                                                                         "combat_bats",
+                                                                                         "egg_collectible",
+                                                                                         "npc_guards",
+                                                                                         "anti_theft",
+                                                                                         "carry_penalty",
+                                                                                         "inventory",
+                                                                                         "upgrades",
+                                                                                         "zones",
+                                                                                         "index",
+                                                                                         "multiplayer",
+                                                                                         "failure_config",
+                                                                                         "events",
+                                                                                         "daily_offline",
+                                                                                         "gamepasses",
+                                                                                         "timed_systems",
+                                                                                         "fusion"
+                                                                                     ],
+                                                                         "unchecked":  [
+                                                                                           "theft_flow_live",
+                                                                                           "trap_freeze_live",
+                                                                                           "area_access_rule",
+                                                                                           "friend_boost_effect"
+                                                                                       ]
+                                                                     },
+                                                     "D_progression_economy":  {
+                                                                                   "status":  "PARTIALLY_COMPLETE",
+                                                                                   "checked":  [
+                                                                                                   "base_costs",
+                                                                                                   "treadmill_costs",
+                                                                                                   "speed_curve",
+                                                                                                   "pet_income_sample",
+                                                                                                   "size_bands",
+                                                                                                   "carry_penalty_values",
+                                                                                                   "fusion_costs",
+                                                                                                   "monetization_product_ids",
+                                                                                                   "ratios_calculated"
+                                                                                               ],
+                                                                                   "unchecked":  [
+                                                                                                     "robux_prices",
+                                                                                                     "full_pet_table",
+                                                                                                     "offline_reward_values",
+                                                                                                     "area_access_rule"
+                                                                                                 ]
+                                                                               },
+                                                     "E_content_inventory":  {
+                                                                                 "status":  "PARTIALLY_COMPLETE",
+                                                                                 "checked":  [
+                                                                                                 "zones",
+                                                                                                 "drop_tables",
+                                                                                                 "guards",
+                                                                                                 "bats",
+                                                                                                 "anti_theft",
+                                                                                                 "rarities",
+                                                                                                 "mutations",
+                                                                                                 "events",
+                                                                                                 "pet_sample"
+                                                                                             ],
+                                                                                 "unchecked":  [
+                                                                                                   "full_pet_table",
+                                                                                                   "all_trails",
+                                                                                                   "cosmetics",
+                                                                                                   "legacy_removed_items"
+                                                                                               ]
+                                                                             },
+                                                     "F_multiplayer_social":  {
+                                                                                  "status":  "PARTIALLY_COMPLETE",
+                                                                                  "checked":  [
+                                                                                                  "theft",
+                                                                                                  "combat_bats",
+                                                                                                  "counter_play",
+                                                                                                  "cooperation_structures",
+                                                                                                  "griefing_analysis"
+                                                                                              ],
+                                                                                  "unchecked":  [
+                                                                                                    "live_pvp_observation",
+                                                                                                    "new_vs_veteran_impact"
+                                                                                                ]
+                                                                              },
+                                                     "G_retention":  {
+                                                                         "status":  "PARTIALLY_COMPLETE",
+                                                                         "checked":  [
+                                                                                         "nine_retention_systems_identified",
+                                                                                         "goal_structure",
+                                                                                         "monotony_and_frustration_hypotheses"
+                                                                                     ],
+                                                                         "unchecked":  [
+                                                                                           "any_measured_effect"
+                                                                                       ]
+                                                                     }
+                                                 },
+                                    "latest_findings":  [
+                                                            "13 areas with rarity ranks and full 8-entry drop tables; Light Dark splits into 3 sub-biomes (Light 45 / Dark 45 / Mixed 10).",
+                                                            "16 guard configs — one per area + Light/Dark variants; guards RETRIEVE and DEPOSIT eggs (not just chasers), WalkSpeed 16 → 251.",
+                                                            "13 index-gated bats (fling to steal) + explicit anti-theft kit: freeze traps (7s), GravityDisruptor (50% slow), BeeLauncher (invert controls). Starter: 1 bat + 3 traps.",
+                                                            "263 pet entries with EarningRate and real-time GrowthTime; 11 weighted egg size bands (0.1x–35x) with income taper; carry penalty up to 33%.",
+                                                            "12 base levels (1,000 → 5e15, capacity 7→19), 12 treadmill tiers (0 → 7.5e15, x2 → x8,500), speed XP curve with 1.15 growth.",
+                                                            "3 gamepasses + 127 products including SERVER-WIDE paid luck, Instant Hatch ladder, rewarded-video ads; a Halloween Dimension event was LIVE at capture.",
+                                                            "Cross-game impact: guards, bat combat, mutations and collection-index are NOT unique to BSE — SAE has all of them."
+                                                        ],
+                                    "open_questions":  [
+                                                           "What unlocks a new area (no numeric gate found in Areas config)?",
+                                                           "What are the offline reward values (module errored on require)?",
+                                                           "Per-mutation stat effects (mutation list observed, effects not read)?",
+                                                           "What are the Robux prices (read-only GetProductInfo or store screenshot)?"
+                                                       ],
+                                    "sources_processed":  [
+                                                              "SRC-006",
+                                                              "SRC-007",
+                                                              "SRC-008",
+                                                              "SRC-016",
+                                                              "SRC-018"
+                                                          ],
+                                    "next_task":  "Second read-only pass: full 263-pet table (chunked), area-access logic, mutation effect configs. Live witnessing of theft/guard/trap flow per OBS-SAE checklist."
+                                },
+                  "ride_a_pet":  {
+                                     "status":  "PARTIALLY_COMPLETE",
+                                     "sections":  {
+                                                      "A_identity_onboarding":  {
+                                                                                    "status":  "PARTIALLY_COMPLETE",
+                                                                                    "checked":  [
+                                                                                                    "description",
+                                                                                                    "device_support",
+                                                                                                    "max_players_claim"
+                                                                                                ],
+                                                                                    "unchecked":  [
+                                                                                                      "tutorial",
+                                                                                                      "fresh_account_flow",
+                                                                                                      "ui",
+                                                                                                      "barriers"
+                                                                                                  ]
+                                                                                },
+                                                      "B_core_loop":  {
+                                                                          "status":  "PARTIALLY_COMPLETE",
+                                                                          "checked":  [
+                                                                                          "official_loop"
+                                                                                      ],
+                                                                          "unchecked":  [
+                                                                                            "egg_timer_confirmation",
+                                                                                            "in_game_verification"
+                                                                                        ]
+                                                                      },
+                                                      "C_mechanics":  {
+                                                                          "status":  "PARTIALLY_COMPLETE",
+                                                                          "checked":  [
+                                                                                          "riding",
+                                                                                          "egg_pickup",
+                                                                                          "hatching",
+                                                                                          "index",
+                                                                                          "gears",
+                                                                                          "selling",
+                                                                                          "feeding",
+                                                                                          "mutation_reroll",
+                                                                                          "fusion_config"
+                                                                                      ],
+                                                                          "unchecked":  [
+                                                                                            "combat",
+                                                                                            "npc",
+                                                                                            "pvp",
+                                                                                            "inventory",
+                                                                                            "costs",
+                                                                                            "zones",
+                                                                                            "rebirth",
+                                                                                            "quests",
+                                                                                            "trading",
+                                                                                            "failure",
+                                                                                            "events",
+                                                                                            "daily",
+                                                                                            "gamepasses"
+                                                                                        ]
+                                                                      },
+                                                      "D_progression_economy":  {
+                                                                                    "status":  "PARTIALLY_COMPLETE",
+                                                                                    "checked":  [
+                                                                                                    "shop_prices",
+                                                                                                    "pet_income_speed_sample",
+                                                                                                    "rebirths_config"
+                                                                                                ],
+                                                                                    "unchecked":  [
+                                                                                                      "all_numeric_full",
+                                                                                                      "gamepasses_devproducts",
+                                                                                                      "world_unlocks"
+                                                                                                  ]
+                                                                                },
+                                                      "E_content_inventory":  {
+                                                                                  "status":  "PARTIALLY_COMPLETE",
+                                                                                  "checked":  [
+                                                                                                  "pets_sample",
+                                                                                                  "eggs_sample",
+                                                                                                  "gears_foods"
+                                                                                              ],
+                                                                                  "unchecked":  [
+                                                                                                    "full_lists",
+                                                                                                    "worlds",
+                                                                                                    "gamepasses"
+                                                                                                ]
+                                                                              },
+                                                      "F_multiplayer_social":  {
+                                                                                   "status":  "PARTIALLY_COMPLETE",
+                                                                                   "checked":  [
+                                                                                                   "max_players"
+                                                                                               ],
+                                                                                   "unchecked":  [
+                                                                                                     "all"
+                                                                                                 ]
+                                                                               },
+                                                      "G_retention":  {
+                                                                          "status":  "PARTIALLY_COMPLETE",
+                                                                          "checked":  [
+                                                                                          "goal_structure"
+                                                                                      ],
+                                                                          "unchecked":  [
+                                                                                            "measured_effect"
+                                                                                        ]
+                                                                      }
+                                                  },
+                                     "latest_findings":  [
+                                                             "Live config: 75+ pets (speed 50→260, income scales), 20+ eggs (GrowthTime 3s→43200s), Shop foods/gears prices, Fusion config, Rebirths config. Halloween-related eggs observed."
+                                                         ],
+                                     "open_questions":  [
+                                                            "Does the egg timer exist?",
+                                                            "Rebirth trigger/UI values?",
+                                                            "Event contents?",
+                                                            "Worlds/zones unlocks?",
+                                                            "Gamepasses/DevProducts?"
+                                                        ],
+                                     "sources_processed":  [
+                                                               "SRC-009",
+                                                               "SRC-010",
+                                                               "SRC-011",
+                                                               "SRC-012",
+                                                               "SRC-013",
+                                                               "SRC-015",
+                                                               "SRC-019"
+                                                           ],
+                                     "next_task":  "Manual observation of timer/rebirth/event if desired; optionally capture full gamepasses/products."
+                                 }
+              },
+    "questions_waiting_for_user":  [
+                                       "Now that BSE and SAE both have live data: should \u0027generate update ideas\u0027 be unlocked on a 2-way (BSE+SAE) basis, or wait for ride_a_pet?",
+                                       "Should the client be switched to Ride A Pet (124216119978534) next for the same read-only capture?",
+                                       "Is \u0027Punch and Steal an Egg\u0027 (PlaceId 86978157069603, in this repo\u0027s AGENTS.md) a fourth game for this research, or out of scope?",
+                                       "May I run MarketplaceService:GetProductInfo (read-only metadata lookup) to capture Robux prices, or should those come from store screenshots instead? No purchase will ever be prompted.",
+                                       "Is the connected account (KengPrime, all-tier gear, 5.4e17 cash) an admin/test account? Its stats should not be treated as typical-player data."
+                                   ],
+    "data_collection_capabilities":  {
+                                         "local_files":  "AVAILABLE",
+                                         "public_web_sources":  "AVAILABLE_PARTIAL",
+                                         "image_analysis":  "AVAILABLE_IF_USER_PROVIDES_FILES",
+                                         "live_game_observation":  "AVAILABLE — restored 2026-10-18; used for break_steal_egg (SRC-017)",
+                                         "auto_detect_open_game":  "AVAILABLE_INDIRECTLY — agent-context reports the active client\u0027s placeId (this is how the current game was identified)",
+                                         "player_analytics":  "NOT_AVAILABLE"
+                                     },
+    "method_note":  "Repeatable read-only capture recipe (proven on BSE): agent-context → script: tree ReplicatedStorage/workspace → script: ZonesConfig → script: economy configs → persist to evidence_live_\u003cgame\u003e_\u003cdate\u003e.json. Requires the client to be in the target place; switching places is a user action."
+}

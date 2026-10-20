@@ -1,0 +1,107 @@
+{
+  "schema_version": "1.0",
+  "capture_id": "LIVE-RAP-2026-10-18-01",
+  "game_id": "ride_a_pet",
+  "evidence_status": "OBSERVED",
+  "confidence": "HIGH",
+  "collected_at": "2026-10-18",
+  "method": "Read-only inspection via executor MCP `script` tool on live client. Instance trees read directly; config data read by requiring ReplicatedStorage modules. NO state mutated.",
+  "session": {
+    "mcp_session": "86364cc6-c66e-4cd7-9668-aaf55030cd49",
+    "client": "KengPrime (userId 11456836185), executor Real 2.7.8",
+    "placeId": 124216119978534,
+    "name": "Ugc",
+    "gameId": 10035204815,
+    "jobId": "b322c322-26ea-4404-bf7f-2bf87b295928",
+    "maxPlayers": 6,
+    "placeVersion": 5460
+  },
+  "identity_notes": {
+    "matches_registry": "Place 124216119978534 = ride_a_pet (registry).",
+    "structure_high_level": "Workspace contains Map, Eggs, Plots, Functionals, Stalls, TutorialBeam and Halloween/volcano/fusion-related models."
+  },
+  "pets_inventory": {
+    "source": "ReplicatedStorage.Pets",
+    "count": "many (captures truncated to ~75+ entries)",
+    "fields": ["Rarity", "Speed", "JumpPower", "Income", "SampleSize", "FlySpeed", "MovementSpeed", "GlobalHatch", "FusionOnly", "EventOnly"],
+    "rarities_order": ["Common", "Rare", "Epic", "Legendary", "Mythic", "Divine", "Ethereal", "Secret"],
+    "samples": [
+      {"pet": "Snail", "rarity": "Common", "speed": 50, "income": 3},
+      {"pet": "Turtle", "rarity": "Common", "speed": 52, "income": 5},
+      {"pet": "Axolotl", "rarity": "Common", "speed": 54, "income": 9},
+      {"pet": "Capybara", "rarity": "Rare", "speed": 60, "income": 20},
+      {"pet": "Panda", "rarity": "Rare", "speed": 80, "income": 50},
+      {"pet": "Gorilla", "rarity": "Epic", "speed": 98, "income": 200},
+      {"pet": "Wolf", "rarity": "Legendary", "speed": 102, "income": 375},
+      {"pet": "Ostrich", "rarity": "Legendary", "speed": 110, "income": 750},
+      {"pet": "Fox", "rarity": "Mythic", "speed": 120, "income": 1200},
+      {"pet": "Unicorn", "rarity": "Divine", "speed": 150, "income": 30000},
+      {"pet": "Phoenix", "rarity": "Divine", "speed": 180, "income": 100000},
+      {"pet": "Cerberus", "rarity": "Ethereal", "speed": 200, "income": 15000000},
+      {"pet": "Kitsune", "rarity": "Ethereal", "speed": 240, "income": 90000000},
+      {"pet": "Dragon", "rarity": "Ethereal", "speed": 240, "income": 150000000, "hardCap": 5},
+      {"pet": "Headless Horseman", "rarity": "Secret", "speed": 260, "income": 240000000, "hideOnIndex": true, "eventOnly": true},
+      {"pet": "Volkaris", "rarity": "Secret", "speed": 255, "income": 250000000, "maxChance": 0.1}
+    ]
+  },
+  "eggs_inventory": {
+    "source": "ReplicatedStorage.Eggs",
+    "count_truncated": 20,
+    "fields": ["GrowthTime", "Luck", "SellPrice", "Rarity", "AppearChance", "PoolLuck", "Pets", "MinAmount/MaxAmount"],
+    "samples": [
+      {"egg": "White Egg", "rarity": "Common", "growth": 3, "luck": 1},
+      {"egg": "Brown Egg", "rarity": "Common", "growth": 3, "luck": 5},
+      {"egg": "Easter Egg", "rarity": "Rare", "growth": 5, "luck": 50},
+      {"egg": "Leaf Egg", "rarity": "Rare", "growth": 8, "luck": 200},
+      {"egg": "Mushroom Egg", "rarity": "Epic", "growth": 60, "luck": 500},
+      {"egg": "Crystal Egg", "rarity": "Mythic", "growth": 900, "luck": 150000},
+      {"egg": "Skull Egg", "rarity": "Mythic", "growth": 1800, "luck": 250000},
+      {"egg": "Galaxy Egg", "rarity": "Divine", "growth": 9000, "luck": 1500000000},
+      {"egg": "Aurora Egg", "rarity": "Divine", "growth": 9000, "luck": 300000000},
+      {"egg": "Solaris Egg", "rarity": "Ethereal", "growth": 18000, "luck": 363636363636},
+      {"egg": "Cherub Egg", "rarity": "Ethereal", "growth": 28800, "luck": 1000000000000},
+      {"egg": "Halloween Egg", "rarity": "Ethereal", "eventOnly": true, "poolLuck": "nested"},
+      {"egg": "Volcanic Egg", "rarity": "Ethereal", "growth": 43200, "luck": 2500000000000, "breakSeconds": 38, "escapeSeconds": 20, "requiresVolcano": true}
+    ],
+    "notes": "PoolLuck nested (LogGaussian) with Chase/Jacpot/Fade and per-pet SampleSize/MaxChance — complex hatch-roll system OBSERVED."
+  },
+  "shop": {
+    "source": "ReplicatedStorage.Shop",
+    "categories": ["Foods", "Gears"],
+    "foods": ["Grass (10)", "Meat (30000)", "Bone (1500)", "Magic Apple (700000)", "Dragonfruit (30000000)"],
+    "gears": ["Advanced Radar (50)", "Jewel Radar (700)", "Magic Radar (300000)", "Royal Radar (15000)", "Angelic Radar (7000000)", "Eternal Radar (30000000)", "Name Tag (200000000)"],
+    "note": "Radars appear to help find eggs? (common theme). Stock/StockChance present."
+  },
+  "rebirths": {
+    "source": "ReplicatedStorage.Rebirths",
+    "initialCost": 1000000,
+    "costMultiplier": 50,
+    "multiplierPerRebirth": 1,
+    "basePetCapacity": 5,
+    "petCapacityPerRebirth": 1,
+    "cap": 7,
+    "riggedCost": "1->1M, 2->500M, 3->2.5B, 4->74.7B, 5->68.8T, 6->1.036e15, 7->1.877e16",
+    "evidence_status": "OBSERVED_PARTIAL"
+  },
+  "fusion": {
+    "source": "ReplicatedStorage.Fusion",
+    "requiredPets": 4,
+    "minimumInputRarity": "Legendary",
+    "rarityFuseCost": {"Legendary":1000000, "Mythic":10000000, "Divine":1000000000, "Ethereal":2500000000000, "Secret":30000000000000},
+    "rarityFuseTime": {"Legendary":450, "Ethereal":1800, "Secret":1800},
+    "sizeExponent": 7,
+    "mutationChancePerInput": 0.0625,
+    "activeWeeks": 3,
+    "inactiveWeeks": 3,
+    "startTime": "2026-10-03 21:00 UTC-8",
+    "evidence_status": "OBSERVED"
+  },
+  "gaps": {
+    "full_pet_list": "many entries; not enumerated exhaustively",
+    "worlds/zones": "not fully captured (budget)",
+    "gamepasses/products_devproducts": "not captured",
+    "egg_timer_confirmation": "SOURCE_DERIVED claim exists; live observation needed (OBS-RAP-02)",
+    "rebirth_ui_values": "config observed; in-game UI observation pending",
+    "halloween_event_contents": "Halloween Egg etc exist; event UI pending"
+  }
+}

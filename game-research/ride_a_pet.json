@@ -1,0 +1,160 @@
+{
+  "schema_version": "1.0",
+  "game_id": "ride_a_pet",
+  "name": "Ride A Pet",
+  "last_updated": "2026-10-18",
+  "research_status": "IN_PROGRESS",
+
+  "A_identity_onboarding": {
+    "description_and_purpose": {
+      "text": "Find eggs around the map, hatch rarer and faster pets to find rarer eggs, and mutate pets to go even faster.",
+      "evidence_status": "SOURCE_DERIVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-009"]
+    },
+    "tutorial": { "value": "NOT OBSERVED", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] },
+    "new_player_experience": { "value": "NOT OBSERVED — video starts mid-play with basic egg pickup and hatching", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] },
+    "first_minutes_goals": { "value": "Implicit: find a nearby egg, hatch it, ride it (from guide video flow)", "evidence_status": "SOURCE_DERIVED", "confidence": "LOW", "source_ids": ["SRC-015"] },
+    "ui_and_hints": { "value": "Video shows index/claim panel, gears shop, sell interaction", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-015"] },
+    "early_barriers": { "value": "NOT OBSERVED", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] },
+    "device_support": { "value": "Desktop, Console, Mobile, Tablet officially stated; max players 6 per server (third-party)", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-009", "SRC-010"] }
+  },
+
+  "B_core_loop": {
+    "mapped_loop": {
+      "ACTION": "Explore the map to find an egg and carry it back",
+      "CHALLENGE": "Reach the egg and return before it despawns/expires (an egg timer is CLAIMED by a third-party source, unconfirmed); faster travel needed for rarer eggs",
+      "REWARD": "Hatch the egg → obtain a pet you can ride",
+      "PROGRESSION": "Pets have speed; mutate pets for more speed; buy gears/upgrades; index completion; rebirth system",
+      "NEXT_GOAL": "Faster pets reach rarer eggs → rarer pets → even faster"
+    },
+    "evidence_status": "OBSERVED_PARTIAL",
+    "confidence": "MEDIUM",
+    "source_ids": ["SRC-009", "SRC-013", "SRC-015", "SRC-019"],
+    "caveat": "The egg-timer element comes from one third-party source only — treat as unconfirmed until observed. Config observed (SRC-019) confirms Pets have Speed/Income, Eggs have GrowthTime/Luck, Shop has gears/foods."
+  },
+  "repeated_activities": [
+    { "activity": "Travel to and pick up eggs", "evidence_status": "SOURCE_DERIVED", "confidence": "HIGH", "source_ids": ["SRC-009", "SRC-015"] },
+    { "activity": "Hatch eggs", "evidence_status": "SOURCE_DERIVED", "confidence": "HIGH", "source_ids": ["SRC-015"] },
+    { "activity": "Ride pets for traversal", "evidence_status": "SOURCE_DERIVED", "confidence": "HIGH", "source_ids": ["SRC-009", "SRC-015"] },
+    { "activity": "Mutate/reroll pets (purchased at gears)", "evidence_status": "OBSERVED_PARTIAL", "confidence": "MEDIUM", "source_ids": ["SRC-015", "SRC-019"] },
+    { "activity": "Sell items at a sell point", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-015"] },
+    { "activity": "Feed pets", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-015"], "note": "Transcript wording garbled ('you feed the chicken'); effect unknown." }
+  ],
+  "why_loop_connects_to_next_goal": {
+    "statement": "Speed is both the reward and the gating stat: faster pets unlock access to rarer eggs, which hatch faster pets — a self-reinforcing exploration loop.",
+    "evidence_status": "SOURCE_DERIVED",
+    "confidence": "HIGH",
+    "source_ids": ["SRC-009"]
+  },
+
+  "C_mechanics": {
+    "movement_traversal": { "value": "Riding pets is the traversal system; pet speed is the core stat", "evidence_status": "OBSERVED_PARTIAL", "confidence": "HIGH", "source_ids": ["SRC-009", "SRC-015", "SRC-019"] },
+    "combat_or_primary_interaction": { "value": "No combat observed; primary interactions are egg pickup, hatching, shop, selling", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-015"] },
+    "egg_pet_collectible": { "value": "Eggs found in world; pets hatch with rarity odds; pets are mounts. OBSERVED: Eggs module has entries with GrowthTime, Luck, Rarity, PoolLuck; Pets module has Speed/Income/JumpPower/FlySpeed.", "evidence_status": "OBSERVED_PARTIAL", "confidence": "HIGH", "source_ids": ["SRC-009", "SRC-012", "SRC-019"] },
+    "npc_ai": { "value": "NOT OBSERVED", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] },
+    "stealing_pvp": { "value": "NOT OBSERVED — no player theft mentioned in official description (unlike the two Steal-an-Egg games). Absence not proven.", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] },
+    "inventory_equipment": { "value": "Index/collection panel; gears shop; sell point", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-015"] },
+    "upgrade_stat_progression": { "value": "Pet mutation ('reroll') increases speed; gears shop sells upgrades", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-015"] },
+    "zones_unlock": { "value": "Wiki has a 'Locations/worlds' section claiming unlockable areas with requirements — details NOT CAPTURED", "evidence_status": "SOURCE_DERIVED", "confidence": "LOW", "source_ids": ["SRC-011"] },
+    "quests_missions_achievements": { "value": "NOT OBSERVED", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] },
+    "multiplayer": { "value": "Shared servers (max 6 per third-party)", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-010"] },
+    "trading_economy_between_players": { "value": "NOT OBSERVED", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] },
+    "failure_penalty": { "value": "Third-party source claims eggs have a timer that runs out — possible failure state; UNCONFIRMED", "evidence_status": "SOURCE_DERIVED", "confidence": "LOW", "source_ids": ["SRC-013"] },
+    "rebirth": { "value": "Wiki has a 'Rebirths' page claiming requirements, gems and multiplier rewards — existence of page only, values NOT CAPTURED", "evidence_status": "SOURCE_DERIVED", "confidence": "LOW", "source_ids": ["SRC-011"] },
+    "events_limited_content": { "value": "Roblox page title '[🎃EVENT] Ride A Pet' indicates an active seasonal event", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-009"] },
+    "daily_offline_rewards": { "value": "Codes exist per third-party article; daily rewards NOT OBSERVED", "evidence_status": "SOURCE_DERIVED", "confidence": "LOW", "source_ids": ["SRC-013"] },
+    "gamepasses_products": { "value": "NOT OBSERVED", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] }
+  },
+
+  "D_progression_economy": {
+    "currencies": [
+      { "name": "Unnamed cash (from selling)", "earned_by": "Selling at sell point (per video)", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-015"] },
+      { "name": "Gems", "earned_by": "Unknown; wiki associates gems with rebirths", "evidence_status": "SOURCE_DERIVED", "confidence": "LOW", "source_ids": ["SRC-011"] }
+    ],
+    "prices": [
+      {"item": "Grass", "price": 10, "source_ids": ["SRC-019"], "evidence_status": "OBSERVED"},
+      {"item": "Meat", "price": 30000, "source_ids": ["SRC-019"], "evidence_status": "OBSERVED"},
+      {"item": "Bone", "price": 1500, "source_ids": ["SRC-019"], "evidence_status": "OBSERVED"},
+      {"item": "Magic Apple", "price": 700000, "source_ids": ["SRC-019"], "evidence_status": "OBSERVED"},
+      {"item": "Dragonfruit", "price": 30000000, "source_ids": ["SRC-019"], "evidence_status": "OBSERVED"},
+      {"item": "Advanced Radar", "price": 50, "source_ids": ["SRC-019"], "evidence_status": "OBSERVED"},
+      {"item": "Jewel Radar", "price": 700, "source_ids": ["SRC-019"], "evidence_status": "OBSERVED"},
+      {"item": "Magic Radar", "price": 300000, "source_ids": ["SRC-019"], "evidence_status": "OBSERVED"},
+      {"item": "Angelic Radar", "price": 7000000, "source_ids": ["SRC-019"], "evidence_status": "OBSERVED"},
+      {"item": "Eternal Radar", "price": 30000000, "source_ids": ["SRC-019"], "evidence_status": "OBSERVED"},
+      {"item": "Name Tag", "price": 200000000, "source_ids": ["SRC-019"], "evidence_status": "OBSERVED"}
+    ],
+    "reward_values": [
+      {"pet": "Snail", "income": 3, "speed": 50, "source_ids": ["SRC-019"], "evidence_status": "OBSERVED"},
+      {"pet": "Kitsune", "income": 90000000, "speed": 240, "source_ids": ["SRC-019"], "evidence_status": "OBSERVED"},
+      {"pet": "Dragon", "income": 150000000, "speed": 240, "source_ids": ["SRC-019"], "evidence_status": "OBSERVED"},
+      {"pet": "Volkaris", "income": 250000000, "speed": 255, "source_ids": ["SRC-019"], "evidence_status": "OBSERVED"}
+    ],
+    "rebirths": {
+      "initialCost": 1000000,
+      "costMultiplier": 50,
+      "riggedCostSample": [1000000, 500000000, 2500000000, 74736000000, 68832000000000, 1036800000000000, 18777600000000000],
+      "petCapacityBase": 5,
+      "petCapacityPer": 1,
+      "cap": 7,
+      "source_ids": ["SRC-019"],
+      "evidence_status": "OBSERVED"
+    },
+    "rarity_data": [
+      { "note": "Hatch chance ladder observed (pet names not captured): 1-in-2, 5, 20, 30, 50, 100, 150, 200, 300, 1000, 3000, 9000, 25000, 75000, 150000, 180000, 500000, 700000, 900000, 1,000,000, 1,200,000, 1,500,000, 21,000,000, 50,000,000", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-012"], "caveat": "Odds list captured without pet mapping; may be incomplete." }
+    ],
+    "unlock_requirements": [],
+    "multipliers": [],
+    "bottlenecks": [],
+    "premium_purchases": [],
+    "snapshot_data": {
+      "visits": "2,880,418 (third-party snapshot, date unknown)",
+      "approval": "96.4% of 10,863 votes (third-party snapshot)",
+      "release_date_claim": "Apr 14, 2026 (third-party, unconfirmed)",
+      "evidence_status": "SOURCE_DERIVED",
+      "confidence": "LOW",
+      "source_ids": ["SRC-010"]
+    },
+    "note": "Partial numeric data from live config (SRC-019). Gamepasses/DevProducts not fully captured."
+  },
+
+  "E_content_inventory": {
+    "zones": [],
+    "eggs": [],
+    "pets": [],
+    "items_tools": [
+      { "key": "gears_shop", "detail": "Shop selling upgrades incl. mutation/reroll", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-015"] }
+    ],
+    "cosmetics": [],
+    "npcs": [],
+    "events_quests": [
+      { "key": "seasonal_event", "detail": "Title-prefix [🎃EVENT] active around 2026-10", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-009"] }
+    ],
+    "unlockables": [],
+    "gamepasses_products": [],
+    "count_claims": [
+      { "claim": "24 distinct hatch-rarity tiers listed by IGN", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-012"], "caveat": "Tiers counted from the snippet ladder; total pet count unknown." }
+    ]
+  },
+
+  "F_multiplayer_social": {
+    "player_influence": { "value": "NOT OBSERVED", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] },
+    "competition_vs_cooperation": { "value": "Competition for egg spawns is plausible (shared map, 6 players) but NOT OBSERVED", "evidence_status": "INFERRED", "confidence": "LOW", "source_ids": ["SRC-010"] },
+    "risk_strategy": { "value": "NOT OBSERVED", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] },
+    "griefing_risk": { "value": "NOT OBSERVED", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] },
+    "why_play_with_friends": { "value": "NOT OBSERVED", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] },
+    "impact_on_new_vs_veteran": { "value": "NOT OBSERVED", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] }
+  },
+
+  "G_retention_replayability": {
+    "short_term_goals": [{ "goal": "Hatch first pet and ride it", "tag": "RETENTION_HYPOTHESIS", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-009", "SRC-015"] }],
+    "mid_long_term_goals": [{ "goal": "Obtain faster pets through rarity ladder + mutations; unlock locations; possible rebirth", "tag": "RETENTION_HYPOTHESIS", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-009", "SRC-011", "SRC-012"] }],
+    "reward_frequency": { "value": "NOT MEASURED", "evidence_status": "UNKNOWN", "source_ids": [] },
+    "variation_of_activity": { "value": "Loop is exploration + collection; variation comes from rarity chase and mutations", "evidence_status": "INFERRED", "confidence": "MEDIUM", "source_ids": ["SRC-009"] },
+    "likely_frustration": [{ "point": "Missing an egg to a timer (unconfirmed) or to another player", "tag": "RETENTION_HYPOTHESIS", "evidence_status": "SOURCE_DERIVED", "confidence": "LOW", "source_ids": ["SRC-013"] }],
+    "analytics_available": false
+  },
+
+  "sections_not_yet_checked": ["numeric economy (D)", "full content inventory (E)", "multiplayer/social (F)", "retention measurement (G)"]
+}

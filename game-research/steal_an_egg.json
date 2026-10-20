@@ -1,0 +1,281 @@
+{
+  "schema_version": "1.0",
+  "game_id": "steal_egg",
+  "name": "Steal An Egg",
+  "last_updated": "2026-10-18",
+  "research_status": "PARTIALLY_COMPLETE (advanced by live observation SRC-018)",
+  "primary_evidence": "evidence_live_sae_2026-10-18.json (OBSERVED, HIGH) + public sources SRC-006..SRC-008, SRC-016",
+
+  "A_identity_onboarding": {
+    "description_and_purpose": {
+      "text": "Steal eggs from wild pets and from other players, grow and hatch them, place the hatched pets at your base to earn money/s, train Speed on treadmills, and chase rarer pets, sizes and mutations.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-006", "SRC-018"]
+    },
+    "tutorial": {
+      "value": "GuardTutorialSteps module + GuardTutorialPresentation controller exist (teaches the guard threat). OnboardingQuestlineFlags module exists but content NOT read.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "new_player_experience": {
+      "value": "Starter gear is fixed: 1 bat + 3 traps (GameplayBalance.StarterGear). NewPlayerFlags module exists (unread). NewPlayer GRADUATED_SPEED_MULTIPLIER=2.5.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "first_minutes_goals": {
+      "value": "Structural inference: Forest area (rank 1) + free tier-1 treadmill + 1,000-cost base level 1 = first goals are Forest egg steals and first base upgrade.",
+      "evidence_status": "INFERRED",
+      "confidence": "MEDIUM",
+      "source_ids": ["SRC-018"]
+    },
+    "ui_and_hints": {
+      "value": "SmartProximityPrompt, HoverCard, ShopPreview, ShopNavigation, notifications; official description has a How-to-Play list.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-006", "SRC-018"]
+    },
+    "early_barriers": {
+      "value": "No pity system found (unlike BSE). Guard threat is introduced via tutorial steps. Exact early friction NOT measured.",
+      "evidence_status": "INFERRED",
+      "confidence": "LOW",
+      "source_ids": ["SRC-018"]
+    },
+    "device_support": { "value": "Desktop, Console, Mobile, Tablet officially stated; GamepadBindings/InputIconsConfig confirm gamepad support.", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-006", "SRC-018"] }
+  },
+
+  "B_core_loop": {
+    "mapped_loop": {
+      "ACTION": "Steal an egg (from wild pet spawns in an area, and from other players' carried/placed eggs) — base Bat: 'Fling players and steal their eggs!'",
+      "CHALLENGE": "Area guardian chases (WalkSpeed 16 → 251, HitDistance 2.5 → 7, attack ragdoll 2.5s, knockback); carrying eggs SLOWS you up to 33% (less in later biomes); rivals can bat you and place traps that freeze you 7s",
+      "REWARD": "Egg grows in real time (per-pet GrowthTime, 10s → 18h) → hatch pet → place at base for EarningRate money/s; size bands and mutations multiply value",
+      "PROGRESSION": "Base upgrades 12 levels (1,000 → 5e15, capacity 7 → 19 pets), treadmills 12 tiers (0 → 7.5e15, x2 → x8,500), Speed curve, index completion unlocks bats",
+      "NEXT_GOAL": "Next area's drop table (rarity rank 1 → 12), the 13th index-bat, rare size bands (up to 35x) and mutations"
+    },
+    "evidence_status": "OBSERVED",
+    "confidence": "HIGH",
+    "source_ids": ["SRC-018"],
+    "caveat": "Every step is confirmed in config; the exact live pick-up/deposit sequence was not witnessed this pass (OBS-SAE pending)."
+  },
+  "repeated_activities": [
+    { "activity": "Steal eggs with bats (fling players, snatch eggs)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-018"] },
+    { "activity": "Grow eggs in real time, hatch, place pets at base", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-018"] },
+    { "activity": "Train speed on treadmill (per-second gain, tier multiplier)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-018"] },
+    { "activity": "Upgrade base (12 levels) and treadmill (12 tiers)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-018"] },
+    { "activity": "Complete area indexes to unlock stronger bats", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-018"] },
+    { "activity": "Place traps / gravity disruptor to defend your eggs", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-018"] },
+    { "activity": "Fusion (3 pets in, biased result)", "evidence_status": "OBSERVED", "confidence": "MEDIUM", "source_ids": ["SRC-018"] }
+  ],
+  "why_loop_connects_to_next_goal": {
+    "statement": "Money and Speed are separate: money buys capacity (base) and throughput (treadmill), while Speed comes from treadmill time and gates nothing numeric in the area config — area access appears to be gated by INDEX completion rather than a stat threshold (INFERRED from bat/index wording; the actual gate is UNKNOWN).",
+    "evidence_status": "INFERRED",
+    "confidence": "MEDIUM",
+    "source_ids": ["SRC-018"]
+  },
+
+  "C_mechanics": {
+    "movement_traversal": {
+      "value": "Walk-speed curve: base 10 → reference max 400, XP growth 1.15, +2 speed/level, treadmill gain interval 1s; carrying eggs applies 0–33% slowdown (per-biome cap); MountRace/PetMount systems exist.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "combat_or_primary_interaction": {
+      "value": "Bats: 13 index-gated tiers, force 35 → 99.86, range bonus 0 → 20.63, duration 0.5 → 1.43s; client cooldown 0.6s / server 0.7s. Slap tools (The Scrambler, Flyswatter, Cricket's Banjo).",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "egg_pet_collectible": {
+      "value": "263 pet entries with EarningRate (180/s → 1.8B/s sampled), real-time GrowthTime (10s → 64,800s), 11 weighted size SCALE_BANDS (0.1x → 35x, hard cap 150x), 18 rarity entries, 11 mutation variants.",
+      "evidence_status": "OBSERVED_PARTIAL",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "npc_ai": {
+      "value": "16 guard configs, one per area (+3 Light/Dark sub-biome guards). WalkSpeed 16 → 251.075, HitDistance 2.5 → 7, ragdoll 2.5s, knockback 20 horizontal/60 up, return-home timeout 20s, stuck timeout 10s, retrieval deposit radius 20, some guards have EggPickupDistance 18 (they carry eggs themselves).",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"],
+      "note": "Guards ALSO retrieve/deposit eggs — they are not only chasers. Exact behaviour not witnessed live."
+    },
+    "stealing_pvp": {
+      "value": "Theft is the headline verb (official + bat description). Explicit COUNTER-PLAY exists: Trap/BigTrap (freeze 7s, 3 max), GravityDisruptor (slow 50%, 3 max), BeeLauncher (invert controls, 5s, cd 58s). Starter kit includes 3 traps.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"],
+      "note": "Closes the long-standing 'defensive counter-play in SAE' gap."
+    },
+    "inventory_equipment": {
+      "value": "Base capacity 7 → 19 (12 levels); MAX_PLACED_EGGS=30; 3 fusion inputs; gear slots for bats/traps/tools; EggInventory + InventoryFlags.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "upgrade_stat_progression": {
+      "value": "Two sinks: base (12 levels, capacity) and treadmill (12 tiers, multiplier). Plus index completion (unlocks bats + IndexSpeedReward).",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "zones_unlock": {
+      "value": "13 areas with rarity ranks 1–12 + a Light/Dark split with 3 sub-biomes. No numeric speed gate found in the Areas config — access rule UNKNOWN (index-completion is INFERRED, not proven).",
+      "evidence_status": "OBSERVED",
+      "confidence": "MEDIUM",
+      "source_ids": ["SRC-018"]
+    },
+    "quests_missions_achievements": {
+      "value": "Area indexes per area (unlock bats, grant IndexSpeedReward); Wisp Quests; Roblox badges (Hatched Eternal/Divine/Secret, Got Divine Trail, Got Angelic Treadmill); Boss Mastery; Scramble Mastery.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "multiplayer": {
+      "value": "Shared servers; bats + traps + gravity disruptor + bee launcher; FriendsInServer tracking; group reward gated to accounts ≥5 days old; content-creator remotes; rewarded-video billboards.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "trading_economy_between_players": {
+      "value": "Gifting module + Giftable products exist; ScrambleTradeIn (event trade-in). No pet-to-pet trading observed.",
+      "evidence_status": "OBSERVED",
+      "confidence": "MEDIUM",
+      "source_ids": ["SRC-018"]
+    },
+    "failure_penalty": {
+      "value": "Guard attack → ragdoll 2.5s + knockback (20h/60v, home multiplier 5). Trap → freeze 7s. BeeLauncher → inverted controls 5s. Dropped eggs abandoned after 75s or 200 studs away. Guard attack interval 0.75s; pinned-hit delay 0.5s.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "events_limited_content": {
+      "value": "Very dense: Halloween Dimension (live), Train event, Capture the Egg, Demonic event, Dragon race, Light vs Darkness, Sakura/Great Bloom, Shrine Fusion, Beanstalk, Sammy, Monster parasite, Rift, Scramble boss/trade-in, Mount Race, Race Rally, Cursed Island Wars, Fishing, Banjo Cricket, Shooting Star, Trex Run, Red Light Green Light, Boss shop/mastery, Pet Wheel, Wisp Quests, Star Handler.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "daily_offline_rewards": {
+      "value": "OfflineFlags module exists but ERRORED on require — offline reward system EXISTS, values UNKNOWN. CashPacks refresh on real-time windows (40min → 48h) as a return hook.",
+      "evidence_status": "OBSERVED",
+      "confidence": "MEDIUM",
+      "source_ids": ["SRC-018"]
+    },
+    "gamepasses_products": {
+      "value": "3 gamepasses (x2 Money, x2 Growth, Lucky) + 127 product entries: money packs, +1M speed, treadmill-speed time offers (5min–4h), permanent/temporary speed boosts, paid SERVER-WIDE luck x4/x8, 9 Instant Hatch tiers (15min–10h), all 12 treadmills, trails, limited-egg packs, double trophies, rewarded-video ads, legacy 'DNA stealing no longer available' products.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "timed_systems": {
+      "value": "Egg growth timers (10s → 18h per pet), Instant Hatch skip ladder, potion-style luck boosts (900s), event preparation/fight windows, cash-pack refresh windows.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "codes": { "value": "No code-redemption remote observed; absence NOT proven.", "evidence_status": "INFERRED", "confidence": "LOW", "source_ids": ["SRC-018"] }
+  },
+
+  "D_progression_economy": {
+    "evidence_status": "OBSERVED",
+    "confidence": "HIGH",
+    "source_ids": ["SRC-018"],
+    "detail_file": "economy_database.json → steal_egg",
+    "currencies": ["Money (pet EarningRate)", "Speed", "BossTokens", "SakuraCrystals", "HalloweenTokens (Candy Corn)"],
+    "prices_captured": "12 base levels (1,000 → 5e15), 12 treadmill tiers (0 → 7.5e15), trap 1,000, BeeLauncher 10,000",
+    "reward_values_captured": "pet EarningRate samples (180/s → 1.8B/s of 263 entries), IndexSpeedReward per pet, area drop-table weights",
+    "ratios_calculated": ["CALC-004 base cost curve", "CALC-005 treadmill multiplier vs price", "CALC-006 pet income span"],
+    "still_missing": ["full 263-pet table", "Robux prices", "egg growth→size→income worked example", "area access rule"]
+  },
+
+  "E_content_inventory": {
+    "evidence_status": "OBSERVED_PARTIAL",
+    "confidence": "HIGH",
+    "source_ids": ["SRC-018"],
+    "detail_file": "content_database.json → steal_egg",
+    "summary": {
+      "areas": "13 (ranks 1–12) + 3 Light/Dark sub-biomes",
+      "area_pool_entries": "104 (+16 sub-biome) = 120",
+      "pets_total_entries": 263,
+      "rarities": "18 entries (ranks 1–12 with duplicates: Rainbow/BrainrotGod share rank 6)",
+      "mutations": "11 variants: Scrambled, Golden, Rainbow, Silver, Sakura, GreatBloom, Boss, Enchanted, Nitro, Spectral, Monstrous",
+      "bats": 13,
+      "anti_theft_items": 4,
+      "treadmills": 12,
+      "currencies": 4,
+      "feature_flag_modules": 48,
+      "events_observed": "20+ distinct event/mode systems",
+      "live_event_at_capture": "Halloween Dimension (active)"
+    },
+    "conflict": {
+      "claim": "Third-party guides described SAE as having NO guard/NPC defence and NO player-combat tools",
+      "vs_live": "16 guard configs + 13 bats + 4 anti-theft gears",
+      "status": "RESOLVED_BY_LIVE_DATA",
+      "resolution": "The earlier UNKNOWN was correct to be unknown; live data supersedes. Guides were simply incomplete."
+    }
+  },
+
+  "F_multiplayer_social": {
+    "player_influence": {
+      "value": "Theft of eggs (core verb), bat flinging (13 tiers), freeze traps, gravity slow, control-inverting bees, gifting. Paid luck boosts affect the whole server.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "competition_vs_cooperation": {
+      "value": "Competition is primary (theft + tools), but SAE has genuine cooperative monetization: ServerLuck x4/x8 benefits everyone for 900s. Group reward requires account age ≥5 days.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "risk_strategy": {
+      "value": "Explicit and quantified: carrying eggs slows you up to 33% (less in late biomes), so long carries are slower and more exposed; traps cost money to place (1,000) and cap at 3; dropped eggs expire in 75s.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-018"]
+    },
+    "griefing_risk": {
+      "value": "Real: bats + BeeLauncher (control inversion) + traps. Mitigations: freeze capped at 7s and 3 instances, guard threat is shared, late-biome carry penalty is lower. Severity NOT observed.",
+      "evidence_status": "INFERRED",
+      "confidence": "MEDIUM",
+      "source_ids": ["SRC-018"]
+    },
+    "why_play_with_friends": { "value": "FriendsInServer is tracked as an attribute; friend-boost effect NOT read.", "evidence_status": "OBSERVED", "confidence": "LOW", "source_ids": ["SRC-018"] },
+    "impact_on_new_vs_veteran": { "value": "NOT OBSERVED", "evidence_status": "UNKNOWN", "confidence": null, "source_ids": [] }
+  },
+
+  "G_retention_replayability": {
+    "systems_actually_present": [
+      { "system": "Egg growth timers (real time, up to 18h)", "evidence_status": "OBSERVED", "source_ids": ["SRC-018"] },
+      { "system": "Instant Hatch skip ladder (Robux)", "evidence_status": "OBSERVED", "source_ids": ["SRC-018"] },
+      { "system": "Area indexes with completion rewards (bats + speed)", "evidence_status": "OBSERVED", "source_ids": ["SRC-018"] },
+      { "system": "20+ rotating events/modes", "evidence_status": "OBSERVED", "source_ids": ["SRC-018"] },
+      { "system": "Offline rewards (module exists, values unread)", "evidence_status": "OBSERVED", "confidence_note": "values UNKNOWN", "source_ids": ["SRC-018"] },
+      { "system": "Cash packs refreshing on 40min–48h windows", "evidence_status": "OBSERVED", "source_ids": ["SRC-018"] },
+      { "system": "Boss tokens/mastery, Sakura crystals, trophies/races as parallel collections", "evidence_status": "OBSERVED", "source_ids": ["SRC-018"] },
+      { "system": "Server-wide paid luck events", "evidence_status": "OBSERVED", "source_ids": ["SRC-018"] },
+      { "system": "Rewarded-video ad rewards", "evidence_status": "OBSERVED", "source_ids": ["SRC-018"] }
+    ],
+    "short_term_goals": [{ "goal": "Steal → grow → hatch → place → first base upgrade", "tag": "RETENTION_HYPOTHESIS", "evidence_status": "INFERRED", "confidence": "MEDIUM", "source_ids": ["SRC-018"] }],
+    "mid_long_term_goals": [{ "goal": "12 base levels, 12 treadmills, 13 index-bats, rare size bands, event collections", "tag": "RETENTION_HYPOTHESIS", "evidence_status": "INFERRED", "confidence": "MEDIUM", "source_ids": ["SRC-018"] }],
+    "reward_frequency": { "value": "Money ticks every second from placed pets; egg growth is slow (minutes→hours) — a fast-income/slow-cadence split", "evidence_status": "OBSERVED", "confidence": "MEDIUM", "source_ids": ["SRC-018"] },
+    "monotony_risk": [
+      { "point": "Unlike BSE, SAE varies verbs heavily (fishing, races, fusion, quests, 20+ events) — structural monotony risk looks LOWER than BSE, but this is a structural comparison, not a measured one.", "tag": "RETENTION_HYPOTHESIS", "evidence_status": "INFERRED", "confidence": "MEDIUM", "source_ids": ["SRC-018"] }
+    ],
+    "likely_frustration": [
+      { "point": "Egg growth timers up to 18h with Robux skips", "tag": "RETENTION_HYPOTHESIS", "evidence_status": "INFERRED", "confidence": "LOW", "source_ids": ["SRC-018"] },
+      { "point": "Being repeatedly flung/trapped while carrying slowed eggs", "tag": "RETENTION_HYPOTHESIS", "evidence_status": "INFERRED", "confidence": "LOW", "source_ids": ["SRC-018"] }
+    ],
+    "analytics_available": false
+  },
+
+  "sections_not_yet_checked": [
+    "Full 263-pet earning-rate table (second pass)",
+    "Area access rule (what unlocks a new area)",
+    "Offline reward values (module errored on require)",
+    "Robux prices (no purchase will be made)",
+    "Live witnessing of a theft, a guard catch, and a trap freeze",
+    "Group/friend boost effect"
+  ]
+}

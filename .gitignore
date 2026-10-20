@@ -1,0 +1,59 @@
+# ---- Archives / build output ----
+*.zip
+*.7z
+*.rar
+*.tar
+*.tar.gz
+
+# ---- Roblox / Luau build artifacts ----
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+*.rbxl.lock
+*.rbxlx.lock
+sourcemap.json
+*.sourcemap.json
+
+# ---- Third-party projects (keep out of this repo) ----
+luau-decompiler/
+OpenCode/
+
+# ---- Node / MCP tooling (local installs, not source) ----
+node_modules/
+dist/
+build/
+out/
+*.tsbuildinfo
+.npm/
+.yarn/
+pnpm-lock.yaml
+package-lock.json
+
+# ---- OpenCode / editor ----
+.opencode/
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Secrets & local config ----
+.env
+.env.*
+*.local
+!.env.example
+secrets/
+credentials.json
+token.json
+
+# ---- Local scratch / dumps ----
+scratch/
+tmp/
+temp/
+*.log
+logs/
+*.tmp
+*.bak
+*.orig

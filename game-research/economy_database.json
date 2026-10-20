@@ -1,0 +1,179 @@
+{
+  "schema_version": "1.0",
+  "last_updated": "2026-10-18",
+  "status": "BSE_AND_SAE_NUMERIC_DATA_CAPTURED; RAP_STILL_EMPTY",
+  "principle": "No estimate is ever written here without evidence_status = INFERRED and an explicit basis.",
+  "currencies": [
+    { "game_id": "break_steal_egg", "name": "Cash", "source": "Placing hatched animals at base (AnimalBankedRemote / PlaceAnimalRemote)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    { "game_id": "break_steal_egg", "name": "Speed (SpeedPower)", "source": "Treadmill training (SpeedGainRemote); gates zone access via RequiredPower", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    { "game_id": "break_steal_egg", "name": "DemonTokens", "source": "Demon event currency (player attribute observed = 310)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    { "game_id": "break_steal_egg", "name": "Fallen Tokens", "source": "RobuxShopConfig.FallenTokenPack section", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    { "game_id": "steal_egg", "name": "Money", "source": "Placed pets earn EarningRate/s (Data.Assets)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-018"] },
+    { "game_id": "steal_egg", "name": "Speed", "source": "Treadmill training (GameplayBalance.TreadmillProgression)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-018"] },
+    { "game_id": "steal_egg", "name": "BossTokens", "source": "Data.Currency + Boss shop", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-018"] },
+    { "game_id": "steal_egg", "name": "SakuraCrystals", "source": "Sakura/Great Bloom event", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-018"] },
+    { "game_id": "steal_egg", "name": "HalloweenTokens", "source": "Halloween event (display name Candy Corn)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-018"] },
+    { "game_id": "ride_a_pet", "name": "Cash (unverified name)", "source": "Selling items", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-015"] },
+    { "game_id": "ride_a_pet", "name": "Gems (claimed)", "source": "Associated with rebirths per community wiki", "evidence_status": "SOURCE_DERIVED", "confidence": "LOW", "source_ids": ["SRC-011"] }
+  ],
+
+  "break_steal_egg": {
+    "evidence_source": "SRC-017 live capture (evidence_live_bse_2026-10-18.json); all values OBSERVED/HIGH unless noted",
+    "zone_speed_gates": [
+      { "zone": 1, "RequiredPower": 5 }, { "zone": 2, "RequiredPower": 1000 }, { "zone": 3, "RequiredPower": 50000 },
+      { "zone": 4, "RequiredPower": 750000 }, { "zone": 5, "RequiredPower": 12000000 }, { "zone": 6, "RequiredPower": 150000000 },
+      { "zone": 7, "RequiredPower": 1000000000 }, { "zone": 8, "RequiredPower": 5000000000 }, { "zone": 9, "RequiredPower": 25000000000 },
+      { "zone": 10, "RequiredPower": 100000000000 }
+    ],
+    "zone_gate_analysis": {
+      "ratios_between_consecutive_gates": ["x200", "x500", "x15000", "x16000", "x12.5", "x6.67", "x5", "x5", "x4"],
+      "observation": "The gate curve is wildly non-uniform: 5→1000 (x200) and 50k→750k (x15,000) are steep, while 6→10 is x4. Zones 5→7 are comparatively cheap.",
+      "evidence_status": "INFERRED (arithmetic on OBSERVED values)",
+      "confidence": "HIGH",
+      "note": "This suggests uneven pacing between mid-game zones — but pacing impact on players is a RETENTION_HYPOTHESIS without analytics."
+    },
+    "pickaxe_tiers": [
+      { "t": 1, "name": "Wooden", "price": 0, "damage": 1, "rarity": "Common" },
+      { "t": 2, "name": "Stone", "price": 80, "damage": 4, "rarity": "Common" },
+      { "t": 3, "name": "Iron", "price": 800, "damage": 15, "rarity": "Uncommon" },
+      { "t": 4, "name": "Golden", "price": 20000, "damage": 60, "rarity": "Uncommon" },
+      { "t": 5, "name": "Diamond", "price": 160000, "damage": 250, "rarity": "Rare" },
+      { "t": 6, "name": "Strawberry", "price": 1200000, "damage": 1000, "rarity": "Rare" },
+      { "t": 7, "name": "Cactus", "price": 6000000, "damage": 4000, "rarity": "Epic" },
+      { "t": 8, "name": "Lightning", "price": 40000000, "damage": 15000, "rarity": "Legendary" },
+      { "t": 9, "name": "Candy", "price": 400000000, "damage": 60000, "rarity": "Mythic" },
+      { "t": 10, "name": "Rainbow", "price": 2800000000, "damage": 250000, "rarity": "Mythic" },
+      { "t": 11, "name": "Crystal", "price": 20000000000, "damage": 1000000, "rarity": "Divine" },
+      { "t": 12, "name": "Demon", "price": 120000000000, "damage": 4000000, "rarity": "Divine" },
+      { "t": 13, "name": "Hacker", "price": 1200000000000, "damage": 15000000, "rarity": "Cosmic" },
+      { "t": 14, "name": "Ufo", "price": 12000000000000, "damage": 60000000, "rarity": "Cosmic" },
+      { "t": 15, "name": "Secret", "price": 80000000000000, "damage": 250000000, "rarity": "Secret" },
+      { "t": 16, "name": "Cool", "price": 600000000000000, "damage": 1000000000, "rarity": "Secret" },
+      { "t": 17, "name": "Galaxy", "price": 4000000000000000, "damage": 5000000000, "rarity": "Celestial" },
+      { "t": 18, "name": "Celestial", "price": 20000000000000000, "damage": 25000000000, "rarity": "Celestial" },
+      { "t": 19, "name": "Sci Fi", "price": 75000000000000000, "damage": 75000000000, "rarity": "Void" },
+      { "t": 20, "name": "Enchanted", "price": "TRUNCATED — re-read needed", "damage": "TRUNCATED — re-read needed", "rarity": "TRUNCATED — re-read needed" }
+    ],
+    "pickaxe_analysis": {
+      "price_ratio_per_step": ["x80 (1→2…2→3 uses 800/80=10)", "precise ratios: 10, 25, 8, 7.3, 8.3, 5, 6.7, 10, 7, 7.1, 6, 10, 10, 6.7, 7.5, 6.7, 5, 3.75"],
+      "damage_growth": "1 → 75,000,000,000 (tier 19); price tier1→tier19 spans 0 → 7.5e16",
+      "observation": "Damage scales far faster than price in absolute terms but both are exponential; the tool is also purchasable with Robux at every tier (DevProductId per tier).",
+      "evidence_status": "INFERRED (arithmetic on OBSERVED values)",
+      "confidence": "HIGH"
+    },
+    "treadmill_and_speed": {
+      "unlock_cost": 100,
+      "speed_config": { "DefaultSpeedPower": 10, "SpeedPowerPerStep": 1, "MaxSpeedPower": 1000000000, "SoftCapWalkSpeed": 100, "MaxWalkSpeed": 240, "WalkSpeedCurveExponent": 1.59, "BaseWalkSpeed": 18 },
+      "overdrive_steps": [ { "WalkSpeed": 200, "Power": 1e16 }, { "WalkSpeed": 240, "Power": 1e19 } ],
+      "tiers_speed_config": [ { "t": 1, "name": "Treadmill", "price": 0, "mult": 1 }, { "t": 2, "name": "Sci-Fi Treadmill", "price": 850000, "mult": 2 }, { "t": 3, "name": "Flame Treadmill", "price": 10000000, "mult": 4 }, { "t": 4, "name": "Celebrity Treadmill", "price": 500000000, "mult": 8 }, { "t": 5, "name": "Golden Treadmill", "price": 9500000000, "mult": 16 }, { "t": 6, "name": "The Freeze Treadmill", "price": 120000000000, "mult": 32 } ],
+      "levels_upgrade_config": [ { "l": 1, "cost": 850000, "mult": 1 }, { "l": 2, "cost": 10000000, "mult": 2 }, { "l": 3, "cost": 500000000, "mult": 4 }, { "l": 4, "cost": 9500000000, "mult": 8 }, { "l": 5, "cost": 120000000000, "mult": 16 }, { "l": 6, "cost": 1000000000000, "mult": 32 }, { "l": 7, "cost": 15000000000000, "mult": 64 }, { "l": 8, "cost": 250000000000000, "mult": 128 }, { "l": 9, "cost": null, "mult": 256 } ],
+      "conflict": "Two overlapping treadmill tables with different names/counts but shared cost values (850000, 10000000, 500000000, 9500000000, 120000000000). Relationship unknown — stored as CONFLICTING, both retained.",
+      "evidence_status": "CONFLICTING",
+      "confidence": "HIGH (values) / LOW (interpretation)"
+    },
+    "plot_upgrades": { "BaseCapacity": 8, "CapacityPerLevel": 1, "MaxLevel": 9, "costs": [10000, 1000000, 45000000, 1700000000, 60000000000, 2200000000000, 50000000000000, 150000000000000] },
+    "satchel_tiers": [ { "t": 1, "name": "Bare Hands", "cap": 1, "price": 0 }, { "t": 2, "name": "Pouch", "cap": 2, "price": 60000 }, { "t": 3, "name": "Satchel", "cap": 3, "price": 10000000 }, { "t": 4, "name": "Big Satchel", "cap": 4, "price": 2000000000 }, { "t": 5, "name": "Huge Satchel", "cap": 5, "price": 400000000000 }, { "t": 6, "name": "Titanic Satchel", "cap": 6, "price": 12000000000000 } ],
+    "mutations": [ { "name": "Shiny", "one_in": 30, "cash_mult": 2 }, { "name": "Golden", "one_in": 100, "cash_mult": 3.5, "requires_variant": "Gold" }, { "name": "Diamond", "one_in": 300, "cash_mult": 6, "requires_variant": "Diamond" }, { "name": "Radioactive", "one_in": 750, "cash_mult": 12 }, { "name": "Rainbow", "one_in": 2000, "cash_mult": 25 } ],
+    "pity_system": { "PlaytimeSeconds": 330, "ExpirePlaytimeSeconds": 1800, "MinRarity": "Rare", "MaxRarity": "Epic", "MaxZone": 2, "CashReward": [3500, 5000] },
+    "index_rewards": { "CashMult": 100, "SpeedMin": 60, "SpeedRankGrowth": 1.5, "SpeedZoneShare": 0.3, "SpeedFinalZoneStep": 2, "formula_status": "function not evaluated" },
+    "animal_cash_values": {
+      "note": "Full per-zone tables in evidence_live_bse_2026-10-18.json. Representative endpoints:",
+      "lowest": "Chicken (Zone1, Common, weight 46) = 1 cash",
+      "highest_zone_pool": "CelestialSpirit (Zone10, Omega, weight 0.001) = 1,944,000,000 cash",
+      "highest_known_overall": "Wizard Owl (Legacy, Omega) = 4,500,000,000 cash"
+    },
+    "monetization_product_ids": {
+      "permanent_upgrades": ["3714065639 x2 Cash", "3714065679 x2 Swing Speed", "3717726136 x2 Growth"],
+      "speed_packs": [150000, 1000000, 10000000, 50000000, 250000000, 1000000000],
+      "cash_packs": [100000, 500000, 2000000, 20000000, 100000000],
+      "potions": ["WalkSpeed x1.25", "Cash x2", "Treadmill x2", "EggGrowth x2", "Swing x1.25", "EggLuck x2 (cap x10)"],
+      "timers_sold": "merge skip 8 tiers, treadmill skip 9 tiers, grow-all 5 tiers, offline reward robux claim",
+      "robux_prices": "NOT CAPTURED — need MarketplaceService:GetProductInfo or store UI screenshot (GAP-012)"
+    }
+  },
+
+  "steal_egg": {
+    "evidence_source": "SRC-018 live capture (evidence_live_sae_2026-10-18.json); all values OBSERVED/HIGH unless noted",
+    "currencies": [
+      { "name": "Money", "source": "Placed pets earn EarningRate per second", "evidence_status": "OBSERVED", "confidence": "HIGH" },
+      { "name": "Speed", "source": "Treadmill training; walk-speed curve", "evidence_status": "OBSERVED", "confidence": "HIGH" },
+      { "name": "BossTokens", "source": "Currency config + Boss shop", "evidence_status": "OBSERVED", "confidence": "HIGH" },
+      { "name": "SakuraCrystals", "source": "Sakura/Great Bloom event", "evidence_status": "OBSERVED", "confidence": "HIGH" },
+      { "name": "HalloweenTokens (Candy Corn)", "source": "Halloween event", "evidence_status": "OBSERVED", "confidence": "HIGH" }
+    ],
+    "base_upgrades": {
+      "levels": 12, "capacity": "7 -> 19 pets",
+      "costs": [1000, 1000000, 75000000, 500000000, 1000000000, 50000000000, 500000000000, 1000000000000, 25000000000000, 100000000000000, 500000000000000, 5000000000000000]
+    },
+    "treadmills": [
+      { "t": 1, "name": "Treadmill", "price": 0, "multiplier": 2, "rarity": "Common" },
+      { "t": 2, "name": "Sci-Fi Treadmill", "price": 15000, "multiplier": 5, "rarity": "Uncommon" },
+      { "t": 3, "name": "Flame Treadmill", "price": 250000, "multiplier": 12, "rarity": "Rare" },
+      { "t": 4, "name": "Celebrity Treadmill", "price": 5000000, "multiplier": 30, "rarity": "Epic" },
+      { "t": 5, "name": "Golden Treadmill", "price": 120000000, "multiplier": 80, "rarity": "Legendary" },
+      { "t": 6, "name": "The Freeze Treadmill", "price": 3000000000, "multiplier": 100, "rarity": "Mythic" },
+      { "t": 7, "name": "Lucky Block Treadmill", "price": 75000000000, "multiplier": 200, "rarity": "Cosmic" },
+      { "t": 8, "name": "Hacker Treadmill", "price": 2000000000000, "multiplier": 500, "rarity": "Secret" },
+      { "t": 9, "name": "Demonic Treadmill", "price": 50000000000000, "multiplier": 1000, "rarity": "Eternal" },
+      { "t": 10, "name": "Angelic Treadmill", "price": 1000000000000000, "multiplier": 2000, "rarity": "Divine" },
+      { "t": 11, "name": "Astral Treadmill", "price": 2500000000000000, "multiplier": 3000, "rarity": "Titan" },
+      { "t": 12, "name": "Guardian Treadmill", "price": 7500000000000000, "multiplier": 8500, "rarity": "Titan" }
+    ],
+    "treadmill_note": "Every tier ALSO has a Robux ProductId. Plus a dev/session treadmill (BrockTreadmill, x1e9).",
+    "speed_curve": { "base_walk_speed": 10, "reference_max_walk_speed": 400, "xp_growth": 1.15, "speed_gain_per_level": 2, "gain_interval_s": 1, "speed_boost_multipliers_by_tier": "2,4,8 ... 4096" },
+    "pet_income": {
+      "entries_total": 263,
+      "sampled": [
+        { "pet": "Mire Fox", "earning_rate": 180, "growth_time_s": 90, "rarity": "Epic" },
+        { "pet": "Dream Axolotl", "earning_rate": 2800, "growth_time_s": 300, "rarity": "Legendary" },
+        { "pet": "Flame Sprite", "earning_rate": 225000, "growth_time_s": 300, "rarity": "Legendary" },
+        { "pet": "Demon Imp", "earning_rate": 700000, "growth_time_s": 50400, "rarity": "Cosmic" },
+        { "pet": "Hellhound", "earning_rate": 1800000, "growth_time_s": 64800, "rarity": "Cosmic" },
+        { "pet": "Mantis", "earning_rate": 11000000, "growth_time_s": 1020, "rarity": "Cosmic" },
+        { "pet": "Drill Monster", "earning_rate": 100000000, "growth_time_s": 720, "rarity": "Cosmic" },
+        { "pet": "Mecha Froggo", "earning_rate": 155000000, "growth_time_s": 10, "rarity": "Secret" },
+        { "pet": "World Eater", "earning_rate": 500000000, "growth_time_s": 60, "rarity": "Eternal" },
+        { "pet": "Ghost Fish", "earning_rate": 1500000000, "growth_time_s": 36000, "rarity": "Eternal" },
+        { "pet": "Kitsune", "earning_rate": 1800000000, "growth_time_s": 50400, "rarity": "Divine" }
+      ],
+      "evidence_status": "OBSERVED_PARTIAL",
+      "note": "Sampled 11 of 263 (output budget). Income spans 180/s -> 1.8B/s in sample."
+    },
+    "egg_size_bands": { "bands": 11, "range": "0.1x -> 35x (hard cap 150x)", "tiny_band": "0.1-0.2 (weight 5)", "common_band": "0.85-1.05 (weight 2000)", "rare_band": "20-35x (weight 0.0001)", "scale_doubling_odds": 0.01, "sell_price_share": 0.8 },
+    "earnings_taper": { "taper_knee_scale": 5, "tapered_scale_power": 1.2, "steep_scale_power": 1.85, "note": "Pet income TAPERS against size — diminishing returns on huge pets" },
+    "carry_penalty": { "max_slowdown": 0.33, "curve_power": 1.2, "per_biome": "0.33 (early biomes) -> 0.154 (Light Dark)", "note": "Carrying eggs slows you; late biomes penalise less" },
+    "fusion": { "inputs": 3, "priced_minutes_of_income": 3, "one_mutation_surcharge": 2, "many_mutation_surcharge": 3, "bias_strength": 0.6 },
+    "sell_rewards": { "sale_seconds_of_income": 100, "index_reward_seconds": 100, "weight_scale_power": 3 },
+    "misc_costs": { "trap": 1000, "bee_launcher": 10000, "max_placed_eggs": 30, "max_active_traps": 3, "server_luck_max": 8 },
+    "monetization_product_ids": {
+      "gamepasses": ["1935039424 x2 Money", "1931468161 x2 Growth", "1854056525 Lucky"],
+      "products_total": 127,
+      "families": ["money packs ($24K/$200K/$800K/$4M + 5 scaled packs)", "+1M speed", "treadmill-speed time offers 5min/30min/1h/4h", "permanent x4 + temporary x2 speed boosts", "ServerLuck x4/x8 (whole server)", "Instant Hatch (1)-(9) 15min-10h", "12 treadmill upgrades", "7 trails", "limited egg packs x1/x3/x50", "double trophies", "Sakura luck boosts", "rewarded-video ad billboards", "legacy DNA-steal products (removed feature)"],
+      "robux_prices": "NOT CAPTURED"
+    }
+  },
+  "ride_a_pet": { "currencies": [], "upgrade_prices": [], "reward_values": [], "cost_curves": [], "bottlenecks": [], "note": "No numeric data. Unchanged." },
+
+  "rarity_tables": [
+    { "game_id": "break_steal_egg", "entry": "13 tiers: Common < Uncommon < Rare < Epic < Legendary < Mythic < Divine < Cosmic < Secret < Celestial < Inferno < Void < Omega (EggRarity.Ladder == IndexConfig.RarityOrder)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-017"] },
+    { "game_id": "ride_a_pet", "entry": "Hatch odds ladder: 1/2 … 1/50M (pet mapping missing)", "evidence_status": "SOURCE_DERIVED", "confidence": "MEDIUM", "source_ids": ["SRC-012"] },
+    { "game_id": "steal_egg", "entry": "18 rarity entries, ranks 1-12 (Common < Uncommon < Rare < Epic < Legendary < Mythic < Cosmic < Secret < Eternal < Divine < Titan < Light & Dark), with duplicates sharing ranks (Rainbow/BrainrotGod at rank 6, SuperRare at rank 2, Limited at rank 9)", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-018"] }
+  ],
+  "ratios_and_calculations": [
+    { "id": "CALC-001", "game_id": "break_steal_egg", "what": "Zone gate step ratios", "result": "x200, x500, x15000, x16000, x12.5, x6.67, x5, x5, x4", "basis": "ZonesConfig.RequiredPower", "evidence_status": "INFERRED", "confidence": "HIGH" },
+    { "id": "CALC-002", "game_id": "break_steal_egg", "what": "Zone10 top animal (1.944B) vs Zone1 top animal (1800)", "result": "≈1.08 million x cash difference between endpoint animals", "basis": "ZoneAnimalsConfig cash values", "evidence_status": "INFERRED", "confidence": "HIGH" },
+    { "id": "CALC-003", "game_id": "break_steal_egg", "what": "Final zone gate (1e11 speed) vs plot upgrade level 8 cost (1.5e14 cash)", "result": "Two separate long-tail sinks on different currencies; direct comparison invalid without a cash↔speed conversion (NOT AVAILABLE)", "evidence_status": "INFERRED", "confidence": "MEDIUM", "caveat": "Currency contexts are not equivalent — flagged per §12 rule." },
+    { "id": "CALC-004", "game_id": "steal_egg", "what": "Base upgrade cost curve (1,000 -> 5e15 over 12 levels)", "result": "Roughly x1,000 -> x5,000 per step, total 5e12 x from level 1 to 12; capacity grows only 7 -> 19 (2.7x)", "basis": "Data.Bases.BASES", "evidence_status": "INFERRED", "confidence": "HIGH", "note": "Cost explodes far faster than capacity — late base levels are extremely expensive per slot gained." },
+    { "id": "CALC-005", "game_id": "steal_egg", "what": "Treadmill multiplier vs price (tier 1 -> 12)", "result": "Multiplier x2 -> x8,500 (4,250x) while price 0 -> 7.5e15; intermediate step Freeze(100x) -> LuckyBlock(200x) costs 25x more", "basis": "Data.Treadmills.Directory", "evidence_status": "INFERRED", "confidence": "HIGH", "note": "Tier 6 Freeze gives 100x for 3e9 while tier 7 gives only 2x more multiplier for 25x the price — a visible value cliff." },
+    { "id": "CALC-006", "game_id": "steal_egg", "what": "Sampled pet income span (Mire Fox 180/s vs Kitsune 1.8B/s)", "result": "10 million x income difference in the sampled subset (11 of 263 pets)", "basis": "Data.Assets EarningRate", "evidence_status": "INFERRED", "confidence": "HIGH", "caveat": "Sample is not exhaustive; true span may be wider." }
+  ],
+  "imbalance_flags": [
+    { "flag": "Treadmill double-table (6 tiers vs 9 levels) with mismatched names but shared costs", "severity": "needs interpretation", "status": "CONFLICTING", "source_ids": ["SRC-017"] },
+    { "flag": "Zone gate curve non-uniform (x16000 at 3→4 vs x4 at 9→10)", "severity": "possible pacing cliff", "status": "INFERRED", "source_ids": ["SRC-017"] },
+    { "flag": "Satchel capacity caps at 6 while plot capacity reaches 16 (8 base + 8 levels)", "severity": "carry vs. deposit asymmetry", "status": "INFERRED", "confidence": "MEDIUM", "source_ids": ["SRC-017"] },
+    { "flag": "SAE base cost explodes (5e12x total) while capacity grows only 2.7x (7→19)", "severity": "late base levels cost enormous sums per extra slot", "status": "INFERRED", "confidence": "HIGH", "source_ids": ["SRC-018"] },
+    { "flag": "SAE treadmill value cliff: Freeze(100x)=3e9 vs Lucky Block(200x)=7.5e10 (25x price for 2x multiplier)", "severity": "obvious skip-tier candidate", "status": "INFERRED", "confidence": "HIGH", "source_ids": ["SRC-018"] },
+    { "flag": "SAE pet income sampled span 10Mx (180/s → 1.8B/s) with growth times ranging 10s → 18h, i.e. cheapest-to-grow pets are not the worst earners", "severity": "growth time and income are not aligned — long waits are not obviously worth it in the sample", "status": "INFERRED", "confidence": "LOW", "source_ids": ["SRC-018"], "caveat": "Only 11 of 263 pets sampled; do not treat as conclusive." }
+  ],
+  "how_to_fill_next": "SAE: second pass for the full 263-pet table, area access rule, offline-reward values. RAP still needs live observation entirely. BSE needs tier-20 pickaxe, EggConfig, IndexConfig.Reward(), Robux price lookup (no purchase)."
+}

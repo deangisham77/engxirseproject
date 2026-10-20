@@ -1,0 +1,147 @@
+{
+  "schema_version": "1.0",
+  "game_id": "punch_and_steal_an_egg",
+  "name": "Punch and Steal an Egg",
+  "last_updated": "2026-10-18",
+  "research_status": "PARTIALLY_OBSERVED",
+  "target_game_flag": true,
+  "metadata": {
+    "place_id": "86978157069603",
+    "universe_id_status": "UNVERIFIED",
+    "creator_id": 617735136,
+    "creator": "Noodle Punchers",
+    "place_version": 692,
+    "game_id_live": 10769569690,
+    "job_id": "a9a87b2a-602f-4d3b-b474-a12b348df614",
+    "max_players": 7,
+    "capture_method": "live_readonly",
+    "capture_id": "LIVE-PASE-2026-10-18-01"
+  },
+  "A_identity_onboarding": {
+    "description_and_purpose": {
+      "text": "Welcome To Punch and Steal an Egg 🥊 👊 Punch eggs open to hatch rare animals 🏃 Grab them and run before the angry Mother catches you! 🌱 Put animals in your garden to earn cash 😈 Steal animals from other players' gardens 🏋️ Bench press to get stronger and carry heavier animals 👟 Run on treadmills to get faster and unlock new zones 🧤 Unlock stronger gloves and cool trails 🌍 Explore new zones! 📖 Collect every animal in the Index! ❤️ Like & favorite for updates!",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-PASE-001"],
+      "note": "Observed from live client context and GameConfig structure."
+    },
+    "official_url": "https://www.roblox.com/games/86978157069603",
+    "creator_status": "VERIFIED"
+  },
+  "B_core_loop": {
+    "mapped_loop": {
+      "ACTION": "Punch eggs open to hatch rare animals",
+      "CHALLENGE": "Grab them and run before the angry Mother catches you",
+      "REWARD": "Put animals in your garden to earn cash",
+      "PROGRESSION": "Bench press (strength) → carry heavier animals; treadmills (speed) → unlock zones; upgrade gloves/trails/pen",
+      "NEXT_GOAL": "Explore new zones; collect in Index; steal animals from other players' gardens"
+    },
+    "evidence_status": "OBSERVED_PARTIAL",
+    "confidence": "HIGH",
+    "source_ids": ["SRC-PASE-001"],
+    "note": "Confirmed via GameConfig (treadmill/pen/bench configs present, zone progression, strength/carry concepts present)."
+  },
+  "C_mechanics": {
+    "movement_traversal": {
+      "value": "Treadmills (TREADMILL tiers 1-10 with prices/PerStep/Name/Robux), speed progression via SpeedMult/Speed products.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-PASE-001"]
+    },
+    "strength_weight": {
+      "value": "BenchPose/BenchSolver present; strength kg logic (kgBase/kgLuck, fmtStrength), strength start/max present in GameConfig.",
+      "evidence_status": "OBSERVED_PARTIAL",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-PASE-001"]
+    },
+    "carry_penalty": {
+      "value": "CARRY_SLOW_MAX=0.3 (30% max slowdown) observed in GameConfig.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-PASE-001"]
+    },
+    "egg_pet_collectible": {
+      "value": "IndexConfig/Biomes with Animals (ids/names/rarities/income/rewards/icons), PET_SIZE/Egg size curves.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-PASE-001"]
+    },
+    "guard_threat": {
+      "value": "MotherHitShapes module + MotherAnimals in Workspace + MotherHitReport RemoteEvent present.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-PASE-001"]
+    },
+    "theft_multiplayer": {
+      "value": "PvpConfig present (ASSIST_RANGE/STEAL_GRACE/COOLDOWN etc); stealing animals from other gardens mentioned in description.",
+      "evidence_status": "OBSERVED_PARTIAL",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-PASE-001"]
+    },
+    "gear_cosmetic": {
+      "value": "Glove/Trail/Bench products observed; BenchIcons/Trail assets referenced.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-PASE-001"]
+    },
+    "zones_progression": {
+      "value": "BIOME_X0/BIOME_START + Biomes 1-10 in IndexConfig/GameConfig with names/backdrops/weapons.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-PASE-001"]
+    }
+  },
+  "D_progression_economy": {
+    "currencies": [
+      { "name": "Cash", "earned_by": "Put animals in garden (from description + income per animal observed)", "evidence_status": "OBSERVED_PARTIAL", "confidence": "HIGH", "source_ids": ["SRC-PASE-001"] },
+      { "name": "Speed", "earned_by": "Treadmills + Speed products", "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-PASE-001"] }
+    ],
+    "treadmill": {
+      "tiers": 10,
+      "data": "TREADMILL tiers 1-10 observed (prices 0→2.5e12, PerStep 1→1000, Robux amounts present)",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-PASE-001"]
+    },
+    "pen": {
+      "levels": 11,
+      "data": "PEN levels 1-11 observed (prices/products) in ShopConfig",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-PASE-001"]
+    },
+    "gamepasses_products": {
+      "products_count": 105,
+      "passes": ["x2Strength", "fastPunch", "x2Cash", "vip"],
+      "notes": "ShopConfig.ById/Products contain 105 product entries (gloves/trails/benches/treadmills/pen/speedmult/cash/speed/boosts/luck/eggs/offline etc), gift items present.",
+      "evidence_status": "OBSERVED",
+      "confidence": "HIGH",
+      "source_ids": ["SRC-PASE-001"]
+    },
+    "monetization_read_only": { "approved": false, "note": "GetProductInfo requires explicit user approval. Not attempted." }
+  },
+  "E_content_inventory": {
+    "zones_biomes": 10,
+    "animals_per_biome_sample": "IndexConfig.Biomes has animals per biome (counts vary; first biome shows 17 animals with Income/Rewards).",
+    "rarities": ["Common","Uncommon","Rare","Epic","Legendary","Mythical","Divine","Exotic","Celestial","Cosmic"],
+    "evidence_status": "OBSERVED",
+    "confidence": "HIGH",
+    "source_ids": ["SRC-PASE-001"]
+  },
+  "F_multiplayer_social": {
+    "max_players": 7,
+    "player_interaction": ["steal animals from other players' gardens"],
+    "pvp_config": { "present": true },
+    "evidence_status": "OBSERVED_PARTIAL",
+    "confidence": "HIGH",
+    "source_ids": ["SRC-PASE-001"]
+  },
+  "G_retention": {
+    "daily_rewards": { "present": true, "evidence_status": "OBSERVED", "confidence": "HIGH", "source_ids": ["SRC-PASE-001"] },
+    "note": "RETENTION_HYPOTHESIS only; no analytics available."
+  },
+  "evidence_live": {
+    "files": [],
+    "note": "Live read-only capture performed via executor MCP (script). Config modules read: GameConfig, IndexConfig, ShopConfig, PvpConfig, MotherHitShapes, SettingsConfig, UiImagesConfig. Workspace/RS structure inspected. No mutation."
+  }
+}

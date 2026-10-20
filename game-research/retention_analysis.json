@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "last_updated": "2026-10-18",
+  "disclaimer": "No player analytics are available for any of the three games (SRC-901). Every retention statement here is a RETENTION_HYPOTHESIS unless explicitly marked otherwise. Nothing in this file proves a feature increases retention.",
+  "measurement_data_available": false,
+  "games": {
+    "break_steal_egg": {
+      "short_term_pull": [
+        { "hypothesis": "First hatch + Index entry gives an early collection win", "tag": "RETENTION_HYPOTHESIS", "confidence": "MEDIUM", "source_ids": ["SRC-001"] }
+      ],
+      "mid_long_term_pull": [
+        { "hypothesis": "Biome depth + full Index create long targets", "tag": "RETENTION_HYPOTHESIS", "confidence": "MEDIUM", "source_ids": ["SRC-003", "SRC-005"] }
+      ],
+      "return_triggers": [
+        { "hypothesis": "Group join / like rewards (per official description)", "tag": "RETENTION_HYPOTHESIS", "confidence": "MEDIUM", "source_ids": ["SRC-001"] }
+      ],
+      "monotony_risk": [
+        { "hypothesis": "Single verb loop (swing → carry → deposit) may feel repetitive without event content; no events observed", "tag": "RETENTION_HYPOTHESIS", "confidence": "MEDIUM", "source_ids": ["SRC-001"] }
+      ],
+      "frustration_risk": [
+        { "hypothesis": "Losing a finished run to a guard or a rival stealer at the last moment", "tag": "RETENTION_HYPOTHESIS", "confidence": "MEDIUM", "source_ids": ["SRC-002", "SRC-014"] }
+      ]
+    },
+    "steal_egg": {
+      "short_term_pull": [
+        { "hypothesis": "Early hatches + treadmill upgrade give visible speed gains", "tag": "RETENTION_HYPOTHESIS", "confidence": "MEDIUM", "source_ids": ["SRC-006"] }
+      ],
+      "mid_long_term_pull": [
+        { "hypothesis": "Three parallel collection axes (rarity, size, mutation) extend the chase", "tag": "RETENTION_HYPOTHESIS", "confidence": "MEDIUM", "source_ids": ["SRC-006"] }
+      ],
+      "return_triggers": [],
+      "monotony_risk": [
+        { "hypothesis": "If theft is the only interaction verb, sessions may depend heavily on other players being present", "tag": "RETENTION_HYPOTHESIS", "confidence": "LOW", "source_ids": ["SRC-006"] }
+      ],
+      "frustration_risk": [
+        { "hypothesis": "Being robbed repeatedly by stronger players", "tag": "RETENTION_HYPOTHESIS", "confidence": "LOW", "source_ids": ["SRC-006"] }
+      ]
+    },
+    "ride_a_pet": {
+      "short_term_pull": [
+        { "hypothesis": "Find egg → hatch → immediately ride creates a fast first-payoff loop", "tag": "RETENTION_HYPOTHESIS", "confidence": "MEDIUM", "source_ids": ["SRC-009", "SRC-015"] }
+      ],
+      "mid_long_term_pull": [
+        { "hypothesis": "Rarity ladder up to 1-in-50M plus mutations plus possible rebirth multipliers", "tag": "RETENTION_HYPOTHESIS", "confidence": "MEDIUM", "source_ids": ["SRC-011", "SRC-012"] }
+      ],
+      "return_triggers": [
+        { "hypothesis": "Seasonal event (page title carried [🎃EVENT]) may drive return visits", "tag": "RETENTION_HYPOTHESIS", "confidence": "LOW", "source_ids": ["SRC-009"] }
+      ],
+      "monotony_risk": [
+        { "hypothesis": "Exploration-only loop with no observed combat/PvP/social verbs", "tag": "RETENTION_HYPOTHESIS", "confidence": "LOW", "source_ids": ["SRC-009"] }
+      ],
+      "frustration_risk": [
+        { "hypothesis": "Missing a timed egg or losing a race for spawn to another player", "tag": "RETENTION_HYPOTHESIS", "confidence": "LOW", "source_ids": ["SRC-013"] }
+      ]
+    }
+  },
+  "cross_game_note": "Break and Steal an Egg and Steal An Egg both create tension through theft risk; Ride A Pet appears to create tension through time/spawn competition instead. This asymmetry is the most promising comparative angle for update design — but it rests on partial third-party data and must be confirmed by observation before use."
+}
