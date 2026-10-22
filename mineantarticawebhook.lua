@@ -744,7 +744,7 @@ do
 		end
 	end)
 	local frame = Instance.new("Frame")
-	frame.Size = UDim2.new(0, 260, 0, 271)
+	frame.Size = UDim2.new(0, 260, 0, 307)
 	frame.Position = UDim2.new(0, 12, 0.35, 0)
 	frame.BackgroundColor3 = Color3.fromRGB(18, 20, 26)
 	frame.BorderSizePixel = 0
@@ -855,7 +855,40 @@ do
 		lblRadar.Visible = open
 		lblLast.Visible = open
 		lblLog.Visible = open
-		frame.Size = open and UDim2.new(0, 260, 0, 271) or UDim2.new(0, 260, 0, 62)
+		frame.Size = open and UDim2.new(0, 260, 0, 307) or UDim2.new(0, 260, 0, 62)
+	end)
+	local boxMsg = Instance.new("TextBox")
+	boxMsg.Position = UDim2.new(0, 10, 0, 223)
+	boxMsg.Size = UDim2.new(0.62, -14, 0, 28)
+	boxMsg.ClearTextOnFocus = false
+	boxMsg.PlaceholderText = "Ketik pesan..."
+	boxMsg.Text = ""
+	boxMsg.Font = Enum.Font.Gotham
+	boxMsg.TextSize = 13
+	boxMsg.TextColor3 = Color3.fromRGB(230, 230, 230)
+	boxMsg.BackgroundColor3 = Color3.fromRGB(30, 33, 44)
+	boxMsg.BorderColor3 = Color3.fromRGB(50, 55, 70)
+	boxMsg.TextXAlignment = Enum.TextXAlignment.Left
+	boxMsg.Parent = uiBody
+	local btnSendMsg = Instance.new("TextButton")
+	btnSendMsg.Position = UDim2.new(0.62, 0, 0, 223)
+	btnSendMsg.Size = UDim2.new(0.38, -10, 0, 28)
+	btnSendMsg.Font = Enum.Font.GothamBold
+	btnSendMsg.TextSize = 13
+	btnSendMsg.Text = "Kirim"
+	btnSendMsg.TextColor3 = Color3.fromRGB(255, 255, 255)
+	btnSendMsg.BackgroundColor3 = Color3.fromRGB(70, 130, 200)
+	btnSendMsg.BorderSizePixel = 0
+	btnSendMsg.Parent = uiBody
+	local cornerSendMsg = Instance.new("UICorner")
+	cornerSendMsg.CornerRadius = UDim.new(0, 6)
+	cornerSendMsg.Parent = btnSendMsg
+	STATE.connect(btnSendMsg.MouseButton1Click, function()
+		local text = (boxMsg.Text or ""):gsub("^%s+", ""):gsub("%s+$", "")
+		if text == "" then return end
+		send("💬 " .. text:sub(1, 80), text, nil, nil, false)
+		boxMsg.Text = ""
+		refreshUI()
 	end)
 end
 
