@@ -27,7 +27,7 @@ end
 local LocalPlayer = Players.LocalPlayer
 
 -- Gate username: hanya jalan di akun terdaftar
-local ALLOWED = { ["7upIRSEE"] = true }
+local ALLOWED = { ["7H7CXU"] = true }
 if not ALLOWED[LocalPlayer.Name] then
 	warn("[webhook] stop: username " .. tostring(LocalPlayer.Name) .. " tak terdaftar")
 	return
