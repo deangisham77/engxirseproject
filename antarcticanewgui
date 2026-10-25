@@ -604,62 +604,277 @@ function Server.goHome()
     end)
 end
 function Server.rejoin()
-    return pcall(function()
-        local placeId = game.PlaceId
-        local jobId = game.JobId
-        if #Players:GetPlayers() <= 1 then
-            LP:Kick("\nRejoining...")
-            task.wait()
-            TeleportS:Teleport(placeId, LP)
-        else
+    -- JANGAN kick dulu baru teleport: kick langsung memutus client, teleport tak pernah jalan.
+    local placeId = game.PlaceId
+    local jobId = game.JobId
+    local ok, err
+    if type(jobId) == "string" and #jobId > 10 then
+        ok, err = pcall(function()
             TeleportS:TeleportToPlaceInstance(placeId, jobId, LP)
-        end
-    end)
+        end)
+    else
+        ok, err = pcall(function()
+            TeleportS:Teleport(placeId, LP)
+        end)
+    end
+    if ok then
+        return true
+    end
+    return false, "rejoin gagal: " .. tostring(err)
 end
-function Server.hop(prefer)
-    prefer = prefer == "low" and "low" or "full"
-    return pcall(function()
-        local all = {}
-        local cursor = ""
-        for _ = 1, 3 do -- 3 halaman x 100 server biar pool besar
-            local url = string.format(
-                "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Desc&limit=100%s",
-                game.PlaceId, cursor ~= "" and ("&cursor=" .. cursor) or "")
-            local body = game:HttpGet(url)
-            local data = HttpS:JSONDecode(body)
-            if not data or not data.data then
-                break
+
+-- ==================== HOP ENGINE ====================
+-- Fix bug lama ("[string ...]:644: no free servers"):
+--  1. fetch cuma 1x tanpa retry -> 429 / body bukan JSON = daftar dianggap kosong.
+--  2. filter tanpa buffer -> server "sisa 0 slot" ikut keburu penuh.
+--  3. hanya 1x TeleportToPlaceInstance -> sekali gagal (full/flooded) langsung mati.
+-- Sekarang: retry+backoff, excludeFullGames, fallback PlaceId->GameId, buffer 1 slot,
+-- beberapa kandidat berurutan, dengar TeleportInitFailed, dan fallback Teleport(place)
+-- supaya tombol Hop tidak pernah berakhir di "no free servers".
+local HOP = {
+    pages = 5,          -- 1 halaman = 100 server
+    buffer = 1,         -- butuh minimal 1 slot benar-benar kosong
+    candidates = 4,     -- kandidat yang dicoba berurutan
+    perTry = 6,         -- detik menunggu sinyal TeleportInitFailed
+    floodWait = 25,     -- cooldown setelah Roblox menolak (Flooded/LimitReached)
+    busy = false,
+    floodAt = 0,        -- os.clock() saat kena limit
+    last = nil,         -- jobId terakhir yang dicoba (biar tidak itu-itu saja)
+}
+
+local function hopGet(url)
+    local ok, body = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if ok and type(body) == "string" and #body > 0 then
+        return body
+    end
+    local ok2, body2 = pcall(function()
+        return game:HttpGetAsync(url)
+    end)
+    if ok2 and type(body2) == "string" and #body2 > 0 then
+        return body2
+    end
+    return nil
+end
+
+local function hopQuery(url)
+    local last
+    for attempt = 1, 3 do
+        local body = hopGet(url)
+        if body then
+            local ok, data = pcall(HttpS.JSONDecode, HttpS, body)
+            if ok and type(data) == "table" then
+                return data
             end
-            for _, s in ipairs(data.data) do
-                if s.playing and s.maxPlayers and s.id and s.playing < s.maxPlayers and s.id ~= game.JobId then
-                    table.insert(all, s)
+            last = "json rusak: " .. body:sub(1, 80)
+        else
+            last = "request http gagal"
+        end
+        task.wait(0.5 * attempt) -- backoff untuk 429 / 5xx
+    end
+    return nil, last
+end
+
+local function hopScan(targetId)
+    local list, seenIds = {}, {}
+    local stats = { seen = 0, free = 0, full = 0, pages = 0, err = nil }
+    local cursor = ""
+    for _ = 1, HOP.pages do
+        local url = string.format(
+            "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Desc&limit=100&excludeFullGames=true%s",
+            targetId, (cursor ~= "" and ("&cursor=" .. tostring(cursor))) or "")
+        local data, err = hopQuery(url)
+        if not data or type(data.data) ~= "table" then
+            stats.err = err or "data kosong"
+            break
+        end
+        stats.pages += 1
+        for _, s in ipairs(data.data) do
+            local id = s.id
+            local playing = tonumber(s.playing)
+            local maxP = tonumber(s.maxPlayers)
+            stats.seen += 1
+            if type(id) == "string" and #id >= 30 and playing and maxP and not seenIds[id] then
+                seenIds[id] = true
+                if id ~= game.JobId then
+                    if playing + HOP.buffer <= maxP then
+                        stats.free += 1
+                        table.insert(list, { id = id, playing = playing, maxPlayers = maxP })
+                    else
+                        stats.full += 1
+                    end
                 end
             end
-            cursor = data.nextPageCursor or ""
-            if cursor == "" then
+        end
+        cursor = data.nextPageCursor
+        if not cursor or cursor == "" then
+            break
+        end
+    end
+    return list, stats
+end
+
+local function hopScanAll()
+    local list, stats = hopScan(game.PlaceId)
+    if #list > 0 or stats.seen > 0 then
+        return list, stats
+    end
+    local uid = tonumber(game.GameId)
+    if uid and uid ~= game.PlaceId then
+        local list2, stats2 = hopScan(uid)
+        if #list2 > 0 or stats2.seen > 0 then
+            return list2, stats2
+        end
+    end
+    return list, stats
+end
+
+local function hopPick(list, prefer)
+    table.sort(list, function(a, b)
+        if prefer == "low" then
+            return a.playing < b.playing
+        end
+        return a.playing > b.playing
+    end)
+    -- buang server yang terakhir dicoba biar tidak mendarat di server yang sama terus
+    local pool = {}
+    for _, c in ipairs(list) do
+        if c.id ~= HOP.last then
+            pool[#pool + 1] = c
+        end
+    end
+    if #pool == 0 then
+        pool = list
+    end
+    -- kandidat utama: hanya yang kualitasnya dekat dengan yang terbaik
+    local best = pool[1]
+    local window = {}
+    for _, c in ipairs(pool) do
+        local slack = math.max(1, math.floor((c.maxPlayers or 0) * 0.25))
+        local near
+        if prefer == "low" then
+            near = c.playing <= best.playing + slack -- paling sepi
+        else
+            near = c.playing >= best.playing - slack -- paling ramai
+        end
+        if near then
+            window[#window + 1] = c
+            if #window >= 12 then
                 break
             end
         end
-        if #all == 0 then
-            error("no free servers")
+    end
+    -- acak di dalam window supaya tidak selalu server yang sama
+    for i = #window, 2, -1 do
+        local j = math.random(1, i)
+        window[i], window[j] = window[j], window[i]
+    end
+    -- sisanya jadi cadangan kalau kandidat utama keburu penuh
+    local picks, used = {}, {}
+    for _, c in ipairs(window) do
+        if #picks < HOP.candidates then
+            picks[#picks + 1] = c
+            used[c.id] = true
         end
-        table.sort(all, function(a, b) return (a.playing or 0) > (b.playing or 0) end)
-        -- full: paling ramai dulu. low: paling sepi dulu. acak di 3 teratas/bawah.
-        local pool = {}
-        if prefer == "low" then
-            for i = #all, math.max(1, #all - 2), -1 do
-                table.insert(pool, all[i])
-            end
-        else
-            for i = 1, math.min(3, #all) do
-                pool[i] = all[i]
-            end
+    end
+    for _, c in ipairs(pool) do
+        if #picks >= HOP.candidates then
+            break
         end
-        local pick = pool[math.random(1, #pool)]
-        notify("Hop", string.format("-> %d/%d pemain", pick.playing, pick.maxPlayers))
-        print("[hub] hop ke " .. tostring(pick.id) .. " (" .. tostring(pick.playing) .. "/" .. tostring(pick.maxPlayers) .. ")")
-        TeleportS:TeleportToPlaceInstance(game.PlaceId, pick.id, LP)
+        if not used[c.id] then
+            picks[#picks + 1] = c
+            used[c.id] = true
+        end
+    end
+    return picks
+end
+
+-- true kalau teleport diterima server (tidak ada TeleportInitFailed dalam jendela waktu)
+local function hopTry(jobId)
+    local failed
+    local conn = TeleportS.TeleportInitFailed:Connect(function(_, result, message)
+        failed = { result = result, message = message }
     end)
+    local ok, err = pcall(function()
+        TeleportS:TeleportToPlaceInstance(game.PlaceId, jobId, LP)
+    end)
+    local waited = 0
+    while ok and not failed and waited < HOP.perTry do
+        task.wait(0.2)
+        waited += 0.2
+    end
+    pcall(function()
+        conn:Disconnect()
+    end)
+    if not ok then
+        return false, "TeleportToPlaceInstance error: " .. tostring(err)
+    end
+    if failed then
+        local name = (failed.result and failed.result.Name) or "Failed"
+        if failed.message and failed.message ~= "" then
+            return false, name .. " (" .. tostring(failed.message) .. ")"
+        end
+        return false, name
+    end
+    return true
+end
+
+function Server.hop(prefer)
+    prefer = prefer == "low" and "low" or "full"
+    if HOP.busy then
+        return false, "hop masih berjalan, tunggu sebentar"
+    end
+    if HOP.floodAt > 0 then
+        local left = HOP.floodWait - (os.clock() - HOP.floodAt)
+        if left > 0 then
+            return false, string.format("Roblox masih membatasi teleport, tunggu %.0f detik lagi", left)
+        end
+    end
+    HOP.busy = true
+    local ok, res = pcall(function()
+        local list, st = hopScanAll()
+        local summary = string.format("%d server dicek / %d halaman / %d penuh / %d ada slot",
+            st.seen, st.pages, st.full, st.free)
+        print("[hub] hop scan: " .. summary .. (st.err and (" | api: " .. tostring(st.err)) or ""))
+
+        if #list == 0 then
+            -- Semua penuh ATAU API tidak terbaca: jangan mati di "no free servers".
+            notify("Hop", st.seen > 0 and "Semua server penuh, coba rejoin acak" or "Daftar server tak terbaca, coba rejoin acak")
+            local okT, errT = pcall(function()
+                TeleportS:Teleport(game.PlaceId, LP)
+            end)
+            if not okT then
+                error("hop gagal (" .. summary .. (st.err and (" | api: " .. tostring(st.err)) or "") .. "): " .. tostring(errT), 0)
+            end
+            return "rejoin-acak"
+        end
+
+        local picks = hopPick(list, prefer)
+        for i, c in ipairs(picks) do
+            HOP.last = c.id
+            notify("Hop", string.format("coba %d/%d -> %d/%d pemain", i, #picks, c.playing, c.maxPlayers))
+            local okT, why = hopTry(c.id)
+            if okT then
+                print("[hub] hop terkirim -> " .. c.id)
+                notify("Hop", string.format("teleport terkirim -> %d/%d pemain", c.playing, c.maxPlayers))
+                return "ok"
+            end
+            warn(string.format("[hub] hop gagal ke %s: %s", tostring(c.id), tostring(why)))
+            if tostring(why):find("Flooded") or tostring(why):find("LimitReached") then
+                HOP.floodAt = os.clock()
+                error("Roblox membatasi teleport (Flooded). Tunggu ~25 detik lalu klik Hop lagi.", 0)
+            end
+            task.wait(0.4)
+        end
+        error("hop gagal - " .. summary, 0)
+    end)
+    HOP.busy = false
+    if not ok then
+        print("[hub] hop error: " .. tostring(res))
+        return false, tostring(res)
+    end
+    return true
 end
 function Server.resetCharacter()
     return pcall(function()
