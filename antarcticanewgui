@@ -1,9 +1,10 @@
 -- ============================================================================
--- Antarctica Hub v2 - Airflow UI Edition
+-- Antarctica Hub v2 - Ouro UI Edition
 -- Game   : Mine Antarctica (PlaceId 138686218420016)
 -- Fitur  : Vacuum pickup (instant fire) + Auto Sell + Auto Dig 360 deg + ESP +
 --          Monitor + Shop + Boulder/Rune/Storm + Movement + Server Actions
--- UI     : Airflow  https://raw.githubusercontent.com/joustingmatch/-3/main/Source.luau
+-- UI     : Ouro UI (lokal, gaya Ouroboros) - https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/ouro-ui
+--          Airflow (joustingmatch/-3) sudah 404, jadi library diganti milik sendiri.
 -- Gaya   : Ouroboros (professional, rapi, tab-based, status row, config persist)
 -- Debug  : getgenv()._ANT_HUB_DBG()   | Unload: getgenv()._ANT_HUB_UNLOAD()
 -- Catatan: pick-up TIDAK lagi "hold E" - prompt langsung ditembak
@@ -28,8 +29,15 @@ end)
 getgenv()._AntHubWin = nil
 
 -- -------------------------------------------------------------------- library
-local AIRFLOW_URL = "https://raw.githubusercontent.com/joustingmatch/-3/main/Source.luau"
-local Airflow = loadstring(game:HttpGet(AIRFLOW_URL))()
+-- Library GUI sendiri (Ouro UI): pengganti Airflow yang repo-nya sudah 404.
+-- File terpisah di host yang sama dengan script ini, tanpa dependensi luar.
+local OURO_URL = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/ouro-ui"
+local okLib, Ouro = pcall(function()
+    return loadstring(game:HttpGet(OURO_URL))()
+end)
+if not okLib or type(Ouro) ~= "table" or not Ouro.CreateWindow then
+    error("[Antarctica] gagal memuat Ouro UI (" .. OURO_URL .. "): " .. tostring(Ouro), 0)
+end
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -305,7 +313,7 @@ local function effLuck(m)
     return 0
 end
 
--- notify lewat Airflow (dipakai sebelum Window jadi punya fallback print)
+-- notify lewat Ouro (dipakai sebelum Window jadi punya fallback print)
 local notify
 do
     notify = function(title, desc)
@@ -1248,10 +1256,10 @@ local function resetCfg()
     end
 end
 
--- ==================== UI (AIRFLOW) ====================
+-- ==================== UI (OURO) ====================
 getgenv()._ANT_HUB = { cfg = Cfg, stat = Stat, tune = TUNE, effLuck = effLuck }
 
-local Window = Airflow:CreateWindow({
+local Window = Ouro:CreateWindow({
     Name = "Antarctica Hub",
     LoadingSubtitle = "Mine Antarctica - vacuum / dig / sell",
     Icon = "gem",
@@ -1271,7 +1279,7 @@ local Window = Airflow:CreateWindow({
                 Icon = "scroll-text",
                 Entries = {
                     { Title = "v2.0", Tag = "Latest", Changes = {
-                        "GUI baru: Airflow (gaya Ouroboros, tab + groupbox + status row).",
+                        "GUI baru: Ouro UI (lokal, gaya Ouroboros: tab + groupbox + status row).",
                         "Pickup tidak lagi hold-E: prompt ditembak langsung (fireproximityprompt).",
                         "Config persist otomatis per-Flag (autoload).",
                     } },
@@ -1359,7 +1367,7 @@ tgVacuum = GBVac:CreateToggle({
         logPush("vacuum " .. (on and "ON" or "OFF"))
     end,
 })
--- Airflow Keybind ignores `Flag`; it persists through OnChanged/Default only.
+-- Ouro Keybind ignores `Flag`; it persists through OnChanged/Default only.
 -- Callback = the bound key was pressed. OnChanged = the binding was rebound.
 VacuumKeyControl = GBVac:CreateKeybind({
     Name = "Vacuum key", Default = "P",
@@ -3060,6 +3068,6 @@ pcall(function()
     end
 end)
 
-logPush("[OK] Antarctica Hub v2 (Airflow) loaded - instant pickup, no hold.")
+logPush("[OK] Antarctica Hub v2 (Ouro) loaded - instant pickup, no hold.")
 H.status = "Idle: hub siap. Nyalakan Vacuum / Auto Dig."
-return "AntarcticaHub OK v2 (Airflow)"
+return "AntarcticaHub OK v2 (Ouro)"
