@@ -1,5 +1,5 @@
 --============================================================================
--- Ouro UI v1.0.5 - library GUI mandiri (gaya Ouroboros)
+-- Ouro UI v1.0.6 - library GUI mandiri (gaya Ouroboros)
 -- Antarctica Hub / Keng Hub
 --
 -- Kenapa ada: library lama (Airflow, repo joustingmatch/-3) sudah 404 sehingga
@@ -43,6 +43,20 @@
 --   * judul/subjudul menyusut agar tidak menabrak tombol minimize/close;
 --   * pil tetap bisa digeser dan bayangan tetap disembunyikan saat minimize.
 --
+-- v1.0.6 (arsitektur ulang, berhenti mengulang bug bayangan):
+--   * jendela + bayangan sekarang hidup dalam SATU rig (OuroRig):
+--       gui -> rig -> { OuroShadow (isi 1:1), OuroWindow }
+--     yang digeser hanya rig, dan bayangan mengisi rig 1:1. Jadi posisi
+--     bayangan itu URUSAN LAYOUT, bukan sinkronisasi manual -> mustahil
+--     tertinggal saat jendela digeser;
+--   * dua lapis bayangan (yang tampak seperti "plat" gelap) diganti satu
+--     lapisan tipis 14px yang selalu rapat ke jendela;
+--   * minimize: jendela melipat jadi pil 320x48 berkapsul, rig ikut mengecil
+--     (348x76) dan posisinya digeser setengah selisih lebar agar sudut
+--     kiri-atas tidak melompat;
+--   * versi tampil di header konten ("Ouro 1.0.6") + footer + console,
+--     supaya build yang benar-benar jalan bisa dicek langsung.
+--
 -- API (kompatibel 1:1 dengan pemakaian hub):
 --   Ouro:CreateWindow{...}
 --   Window:CreateTab{Name, Icon, Desc}
@@ -61,7 +75,7 @@ local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
 local Ouro = {}
-Ouro.Version = "1.0.5"
+Ouro.Version = "1.0.6"
 
 --============================================================================
 -- TEMA
@@ -215,9 +229,9 @@ local function shade(color, factor)
 end
 
 -- drag helper (dipakai topbar)
---   extra: Instance lain yang WAJIB ikut bergeser dengan delta yang sama
---          (mis. shadow1/shadow2 di belakang jendela). Tanpa ini jendela
---          bergeser sendirian dan bayangannya tertinggal di tempat lama.
+--   extra: Instance lain yang ikut bergeser dengan delta yang sama. Jendela
+--          utama sekarang memakai rig (bayangan jadi anak rig), jadi daftar ini
+--          hanya untuk pemakaian khusus; tetap dipertahankan agar kompatibel.
 local function makeDraggable(handle, target, clampTo, extra)
     local dragging, dragStart, startPos = false, nil, nil
     local extraStart = {}
@@ -1023,26 +1037,36 @@ local function buildWindow(options)
     end)
 
     -- ------------------------------------------------------------- container
-    local shadow1 = new("Frame", {
-        BackgroundColor3 = Theme.shadow,
-        BackgroundTransparency = 0.65,
+    -- STRUKTUR (penting, jangan diubah tanpa alasan kuat):
+    --   gui
+    --    |- rig        (transparan, ukuran = jendela + 2*SHADOW_PAD) <-- HANYA ini yang digeser
+    --    |   |- shadow (mengisi rig 1:1 -> selalu menempel di jendela)
+    --    |   |- container (jendela asli, di tengah rig)
+    -- Karena bayangan adalah anak rig yang mengisi rig 1:1, posisinya TIDAK
+    -- mungkin tertinggal saat jendela digeser atau berubah ukuran: itu urusan
+    -- layout, bukan sinkronisasi manual. Ini menghilangkan bug "bayangan tidak
+    -- ikut geser" untuk selamanya.
+    local SHADOW_PAD = 14
+    local rig = new("Frame", {
+        Name = "OuroRig",
+        BackgroundTransparency = 1,
         BorderSizePixel = 0,
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.fromScale(0.5, 0.5),
-        Size = UDim2.fromOffset(winW + 26, winH + 26),
+        Size = UDim2.fromOffset(winW + SHADOW_PAD * 2, winH + SHADOW_PAD * 2),
         ZIndex = 1,
     }, gui)
-    corner(shadow1, 24)
-    local shadow2 = new("Frame", {
+    local shadow = new("Frame", {
+        Name = "OuroShadow",
         BackgroundColor3 = Theme.shadow,
-        BackgroundTransparency = 0.5,
+        BackgroundTransparency = 0.55,
         BorderSizePixel = 0,
         AnchorPoint = Vector2.new(0.5, 0.5),
         Position = UDim2.fromScale(0.5, 0.5),
-        Size = UDim2.fromOffset(winW + 10, winH + 10),
-        ZIndex = 2,
-    }, gui)
-    corner(shadow2, 18)
+        Size = UDim2.fromScale(1, 1),
+        ZIndex = 1,
+    }, rig)
+    corner(shadow, 20)
 
     local container = new("Frame", {
         Name = "OuroWindow",
@@ -1052,11 +1076,12 @@ local function buildWindow(options)
         Position = UDim2.fromScale(0.5, 0.5),
         Size = UDim2.fromOffset(winW, winH),
         ClipsDescendants = true,
-        ZIndex = 3,
-    }, gui)
+        ZIndex = 2,
+    }, rig)
     local containerCorner = corner(container, 14)
     stroke(container, Theme.stroke, 1, 0.55)
     Lib.Root = container
+    Lib.Rig = rig
 
     -- popup layer (dropdown dsb)
     local popupLayer = new("Frame", {
@@ -1082,8 +1107,8 @@ local function buildWindow(options)
         Size = UDim2.new(1, 0, 0, 1),
         ZIndex = 5,
     }, top)
-    -- topbar bisa digeser; shadow1/shadow2 ikut supaya bayangan tidak tertinggal
-    makeDraggable(top, container, nil, { shadow1, shadow2 })
+    -- topbar bisa digeser; yang digeser adalah RIG (bayangan + jendela sekaligus)
+    makeDraggable(top, rig, nil)
 
     local logoBox = new("Frame", {
         BackgroundColor3 = Theme.accent,
@@ -1329,6 +1354,17 @@ local function buildWindow(options)
         Size = UDim2.new(1, 0, 0, 1),
         ZIndex = 5,
     }, header)
+    -- penanda versi: supaya kelihatan langsung build mana yang benar-benar jalan
+    label(header, {
+        Name = "OuroVersion",
+        Text = "Ouro " .. tostring(Ouro.Version),
+        TextSize = 10,
+        TextColor3 = Theme.dim,
+        TextXAlignment = Enum.TextXAlignment.Right,
+        Position = UDim2.new(0, 0, 0, 13),
+        Size = UDim2.new(1, -16, 0, 12),
+        ZIndex = 6,
+    })
 
     local pageHost = new("Frame", {
         BackgroundTransparency = 1,
@@ -2224,16 +2260,17 @@ local function buildWindow(options)
     end
 
     -- --------------------------------------------------------------- minimize
-    -- Gaya Ouroboros: minimize bikin jendela "melipat" jadi PIL kecil (logo +
-    -- nama + tombol) yang tetap menempel di sudut kiri-atas posisi jendela.
-    --   * lebar menyusut ke pillW, tinggi tinggal topH;
-    --   * posisi digeser setengah selisih lebar supaya sudut kiri-atas TIDAK
-    --     melompat (jendela terlihat melipat, bukan mengecil ke tengah);
-    --   * dua lapis bayangan disembunyikan total (kalau tidak, pil tipis itu
-    --     berdiri di atas "plat" gelap 786x546 -> kelihatan tidak menyatu);
-    --   * topbar tetap bisa digeser dan bayangan ikut bergeser (makeDraggable).
+    -- Minimize ala Ouroboros: jendela "melipat" jadi PIL kecil (logo + nama +
+    -- tombol) yang tetap menempel di sudut kiri-atas jendela semula.
+    --   * ukuran jendela: pillW x topH, sudut jadi kapsul (radius = topH/2);
+    --   * RIG ikut dikecilkan (pillW + 2*SHADOW_PAD) dan posisinya digeser
+    --     setengah selisih lebar, jadi sudut kiri-atas jendela tidak melompat
+    --     dan bayangan tetap menempel rapi (dia anak rig yang mengisi rig 1:1);
+    --   * judul/subjudul menyusut supaya tidak menabrak tombol minimize/close;
+    --   * tetap bisa digeser karena drag memindahkan rig.
     local minimized = false
     local pillW = math.min(winW, 320)
+    local minShift = (winW - pillW) / 2
     local function applyMinimize(state)
         minimized = state
         content.Visible = not state
@@ -2245,9 +2282,8 @@ local function buildWindow(options)
 
         local w = state and pillW or winW
         local h = state and topH or winH
-        local shift = (winW - pillW) / 2
-        local baseX = container.Position
-        local dx = state and -shift or shift
+        local basePos = rig.Position
+        local dx = state and -minShift or minShift
 
         -- sudut: saat minimize jadi kapsul (radius = tinggi/2)
         pcall(function()
@@ -2260,46 +2296,34 @@ local function buildWindow(options)
         tween(titleLabel, 0.18, { Size = UDim2.new(0, nameW, 0, 14) }, Enum.EasingStyle.Quint)
         tween(subLabel, 0.18, { Size = UDim2.new(0, subW, 0, 12) }, Enum.EasingStyle.Quint)
 
-        tween(container, 0.18, {
-            Size = UDim2.fromOffset(w, h),
-            Position = UDim2.new(baseX.X.Scale, baseX.X.Offset + dx, baseX.Y.Scale, baseX.Y.Offset),
+        tween(container, 0.18, { Size = UDim2.fromOffset(w, h) }, Enum.EasingStyle.Quint)
+        tween(rig, 0.18, {
+            Size = UDim2.fromOffset(w + SHADOW_PAD * 2, h + SHADOW_PAD * 2),
+            Position = UDim2.new(basePos.X.Scale, basePos.X.Offset + dx, basePos.Y.Scale, basePos.Y.Offset),
         }, Enum.EasingStyle.Quint)
 
-        -- ukuran bayangan: saat minimize dibikin rapat, saat normal kembali lebar
-        local pad1 = state and 8 or 26
-        local pad2 = state and 4 or 10
-        local shW = state and pillW or winW
-        tween(shadow1, 0.18, { Size = UDim2.fromOffset(shW + pad1, h + pad1) }, Enum.EasingStyle.Quint)
-        tween(shadow2, 0.18, { Size = UDim2.fromOffset(shW + pad2, h + pad2) }, Enum.EasingStyle.Quint)
-        -- kunci utama: sembunyikan bayangan saat minimize (deterministik, tidak
-        -- bergantung pada tween yang mungkin diabaikan executor tertentu)
-        shadow1.Visible = not state
-        shadow2.Visible = not state
         if minBtn.Icon and minBtn.AltIcon then
             minBtn.Icon.Visible = not state
             minBtn.AltIcon.Visible = state
         end
-        -- jaring pengaman kalau tween tidak jalan: paksa ukuran setelah 0.3s
+        -- jaring pengaman kalau tween diabaikan executor: paksa ukuran setelah 0.3s
         -- (posisi hanya dipaksa kalau user belum sempat menggeser jendela)
         task.delay(0.3, function()
             if minimized ~= state then
                 return
             end
             pcall(function()
-                if shadow1 and shadow1.Parent then
-                    shadow1.Size = UDim2.fromOffset(shW + pad1, h + pad1)
-                end
-                if shadow2 and shadow2.Parent then
-                    shadow2.Size = UDim2.fromOffset(shW + pad2, h + pad2)
-                end
                 if container and container.Parent then
                     container.Size = UDim2.fromOffset(w, h)
-                    local cur = container.Position
-                    if math.abs(cur.X.Offset - baseX.X.Offset) < 0.5
-                        and math.abs(cur.Y.Offset - baseX.Y.Offset) < 0.5 then
-                        container.Position = UDim2.new(
-                            baseX.X.Scale, baseX.X.Offset + dx,
-                            baseX.Y.Scale, baseX.Y.Offset
+                end
+                if rig and rig.Parent then
+                    rig.Size = UDim2.fromOffset(w + SHADOW_PAD * 2, h + SHADOW_PAD * 2)
+                    local cur = rig.Position
+                    if math.abs(cur.X.Offset - basePos.X.Offset) < 0.5
+                        and math.abs(cur.Y.Offset - basePos.Y.Offset) < 0.5 then
+                        rig.Position = UDim2.new(
+                            basePos.X.Scale, basePos.X.Offset + dx,
+                            basePos.Y.Scale, basePos.Y.Offset
                         )
                     end
                 end

@@ -1,0 +1,3087 @@
+-- ============================================================================
+-- Antarctica Hub v2 - Ouro UI Edition
+-- Game   : Mine Antarctica (PlaceId 138686218420016)
+-- Fitur  : Vacuum pickup (instant fire) + Auto Sell + Auto Dig 360 deg + ESP +
+--          Monitor + Shop + Boulder/Rune/Storm + Movement + Server Actions
+-- UI     : Ouro UI (lokal, gaya Ouroboros) - https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/ouro-ui-106
+--          Airflow (joustingmatch/-3) sudah 404, jadi library diganti milik sendiri.
+-- Gaya   : Ouroboros (professional, rapi, tab-based, status row, config persist)
+-- Debug  : getgenv()._ANT_HUB_DBG()   | Unload: getgenv()._ANT_HUB_UNLOAD()
+-- Catatan: pick-up TIDAK lagi "hold E" - prompt langsung ditembak
+--          (fireproximityprompt, HoldDuration=0) jadi crystal masuk seketika.
+-- ============================================================================
+
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+-- ---------------------------------------------------------------- unload lama
+if getgenv()._ANT_HUB_UNLOAD then
+    pcall(getgenv()._ANT_HUB_UNLOAD)
+    getgenv()._ANT_HUB_UNLOAD = nil
+end
+pcall(function()
+    local oldWin = getgenv()._AntHubWin
+    if oldWin and oldWin.Destroy then
+        oldWin:Destroy()
+    end
+end)
+getgenv()._AntHubWin = nil
+
+-- -------------------------------------------------------------------- library
+-- Library GUI sendiri (Ouro UI): pengganti Airflow yang repo-nya sudah 404.
+-- File terpisah di host yang sama dengan script ini, tanpa dependensi luar.
+-- URL memakai nama file ber-versi supaya tidak pernah kena cache lama GitHub
+-- (raw.githubusercontent bisa menyajikan file lama sampai ~5 menit).
+local OURO_BASE = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/"
+local OURO_FILES = { "ouro-ui-106", "ouro-ui" }
+local Ouro, OURO_URL
+for _, fname in ipairs(OURO_FILES) do
+    local url = OURO_BASE .. fname
+    local okTry, res = pcall(function()
+        return loadstring(game:HttpGet(url))()
+    end)
+    if okTry and type(res) == "table" and res.CreateWindow then
+        Ouro, OURO_URL = res, url
+        break
+    end
+end
+if type(Ouro) ~= "table" or not Ouro.CreateWindow then
+    error("[Antarctica] gagal memuat Ouro UI dari " .. OURO_BASE .. " (" .. table.concat(OURO_FILES, " / ") .. ")", 0)
+end
+pcall(function()
+    print("[Antarctica] UI: Ouro " .. tostring(Ouro.Version) .. " (" .. tostring(OURO_URL) .. ")")
+end)
+
+local Players = game:GetService("Players")
+local RS = game:GetService("ReplicatedStorage")
+local UIS = game:GetService("UserInputService")
+local RunS = game:GetService("RunService")
+local TeleportS = game:GetService("TeleportService")
+local HttpS = game:GetService("HttpService")
+local LP = Players.LocalPlayer
+
+-- ==================== REMOTES & DATA (lazy) ====================
+-- Satu remote hilang saat update game tak lagi matikan seluruh script.
+-- Pola: R("Folder","Name") -> RemoteEvent/nil; D("Name") -> ModuleScript table/nil.
+local _rcache, _dcache = {}, {}
+local function R(folder, name)
+    local k = folder .. "/" .. name
+    if _rcache[k] == nil then
+        local ok, v = pcall(function()
+            local f = RS:FindFirstChild(folder)
+            return f and f:FindFirstChild(name)
+        end)
+        _rcache[k] = (ok and v) or false
+    end
+    return _rcache[k] or nil
+end
+local function D(name)
+    if _dcache[name] == nil then
+        local ok, v = pcall(function()
+            local m = RS:FindFirstChild(name)
+            return m and require(m)
+        end)
+        _dcache[name] = (ok and v) or false
+    end
+    return _dcache[name] or nil
+end
+
+-- ---------------------------------------------------------------------------
+-- IMPORTANT: never WaitForChild() at top level. A missing/renamed folder would
+-- block for up to 30s and the executor looks like it "cannot run".
+-- These are resolved lazily and cached, with a background retry.
+local _wcache = {}
+local _get = function(nm)
+    local v = _wcache[nm]
+    if v == nil then
+        v = workspace:FindFirstChild(nm)
+        if v then _wcache[nm] = v end
+    end
+    return v
+end
+-- Accessors: selalu ambil ulang dari cache (folder bisa muncul belakangan).
+-- Folder diambil lewat getSG()/getDG()/getBD()/getPR()/getDR() agar tidak ada
+-- variabel lokal basi saat loop berjalan.
+local function getSG() return _get("SpawnedGems") end
+local function getDG() return _get("DroppedGems") end
+local function getBD() return _get("Boulders") end
+local function getPR() return _get("PlotRunes") end
+local function getDR() return _get("DroppedRunes") end
+
+-- background resolver: ambil folder begitu muncul, tanpa memblokir startup
+task.spawn(function()
+    for _ = 1, 60 do
+        local missing = false
+        for _, nm in ipairs({ "SpawnedGems", "DroppedGems", "Boulders", "PlotRunes", "DroppedRunes" }) do
+            if _wcache[nm] == nil then
+                local f = workspace:FindFirstChild(nm)
+                if f then _wcache[nm] = f else missing = true end
+            end
+        end
+        if not missing then break end
+        task.wait(1)
+    end
+end)
+
+local RARITY_LIST = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }
+local RUNE_LIST = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" }
+local RARITY_RANK = { Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Exotic = 7, Zenith = 8 }
+local RARITY_HEX = { Common = "#CD945C", Uncommon = "#5FDC69", Rare = "#469BFF", Epic = "#B45FFF", Legendary = "#FFAA2D", Mythic = "#FF4646", Exotic = "#FFD84A", Zenith = "#6EEBFF" }
+local RARITY_C3 = {
+    Common = Color3.fromRGB(205, 148, 92), Uncommon = Color3.fromRGB(95, 220, 105),
+    Rare = Color3.fromRGB(70, 155, 255), Epic = Color3.fromRGB(180, 95, 255),
+    Legendary = Color3.fromRGB(255, 170, 45), Mythic = Color3.fromRGB(255, 70, 70),
+    Exotic = Color3.fromRGB(255, 216, 74), Zenith = Color3.fromRGB(110, 235, 255),
+}
+
+-- mult luck per mutasi (WeatherData.List id + BoulderMutations id; nama cuaca sbg fallback)
+-- rumus resmi: totalLuckPercent = Luck attr x x mult (WeatherLuckService)
+local MUT_LUCK_MULT = {
+    Rain = 2, Blizzard = 4, AcidRain = 3, Thunder = 5, Starfall = 6, Lucky = 5, Molten = 7, Aurora = 8, Bloodborne = 2,
+    Mossy = 2, Charged = 3, Gilded = 4, Rimed = 5, Nocturnal = 6, Hexed = 8,
+    Drenched = 2, Frozen = 4, Poisoned = 3, Thundered = 5, Starstruck = 6,
+}
+
+local Cfg = {
+    -- farm
+    vacuum = false, teleport = false, autoSell = false, sellPct = 100,
+    minRarity = 1, monRar = { "Mythic" }, monSort = "Value",
+    dig = false, digRadius = 8, drill = false, slam = false,
+    -- shop
+    upWarmth = false, upCarry = false, reserve = 0,
+    bombSel = { "ClassicBomb" }, autoBomb = false,
+    radarSel = { "BoulderRadar" }, autoRadar = false,
+    pickSel = 9,
+    -- movement + gfx
+    fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32,
+    antiAfk = false, antiRagdoll = false, antiLag = false, noRender = false,
+    -- esp
+    esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" },
+    espBoulder = true, espGeode = false,
+    -- boulder + rune
+    autoBoulder = false, autoRune = false,
+    runeSel = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" },
+    runeMonSel = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" },
+    autoStorm = false,
+}
+local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false, skipPick = {} }
+
+-- angka tuning satu tempat (jarak server: prompt ~15-17, dig <12)
+local TUNE = {
+    pickupRange = 20,   -- fallback bila MaxActivationDistance prompt tak terbaca (stud)
+    tpLift = 4,         -- melayang di atas mesh (stud)
+    settleWait = 0.7,   -- tunggu replikasi posisi server pasca-TP (detik)
+    retryS = 3,         -- jeda coba ulang per crystal (detik)
+    tickS = 0.4,        -- interval loop vacuum (detik)
+    sellTpWait = 1.5, sellWait = 1, -- tunggu sell (detik)
+    monEveryS = 5, monTickS = 1,    -- refresh monitor (detik)
+    tpStep = 25, tpInstant = 60, tpStepWait = 0.1, -- teleport stepped (stud, stud, detik)
+    promptRange = 1000, promptRestore = 0.3,        -- fire prompt (stud, detik)
+    digDirs = 8,        -- auto dig 360 deg (jumlah arah)
+    bombTick = 3,       -- interval coba auto buy bomb (detik)
+    boulderTick = 0.6, runeTick = 1,
+    targetSlack = 15,   -- toleransi ukur jarak client vs server (stud)
+    espCap = 150, monSlots = 10,
+    pruneEveryS = 600,
+}
+
+-- ==================== HELPERS ====================
+local function getHRP()
+    local c = LP.Character
+    return c and c:FindFirstChild("HumanoidRootPart")
+end
+
+-- posisi klaim: part prompt (server cek jarak ke situ, BUKAN pivot model yg ngaco)
+local function claimPos(m, pr)
+    local pp = pr and pr.Parent
+    if pp and pp:IsA("BasePart") then
+        return pp.Position
+    end
+    local mesh = m:FindFirstChild("Mesh_0", true)
+    if mesh then
+        return mesh.Position
+    end
+    local ok, piv = pcall(function() return m:GetPivot().Position end)
+    if ok then
+        return piv
+    end
+    return nil
+end
+
+local function tpTo(h, cf)
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local goal = cf.Position
+    local dist = (h.Position - goal).Magnitude
+    if dist <= TUNE.tpInstant then
+        pcall(function()
+            h.AssemblyLinearVelocity = Vector3.zero
+            h.AssemblyAngularVelocity = Vector3.zero
+            char:PivotTo(cf)
+        end)
+        return
+    end
+    -- stepped tanpa anchor (anchor memicu hukuman server). PivotTo + Freefall.
+    local start = h.Position
+    local steps = math.ceil(dist / TUNE.tpStep)
+    for i = 1, steps do
+        if not h.Parent then
+            return
+        end
+        pcall(function()
+            if hum then
+                hum:ChangeState(Enum.HumanoidStateType.Freefall)
+            end
+            h.AssemblyLinearVelocity = Vector3.zero
+            h.AssemblyAngularVelocity = Vector3.zero
+            char:PivotTo(CFrame.new(start:Lerp(goal, i / steps)))
+        end)
+        task.wait(TUNE.tpStepWait)
+    end
+    pcall(function()
+        char:PivotTo(CFrame.new(goal))
+        h.AssemblyLinearVelocity = Vector3.zero
+    end)
+end
+
+local function countBag()
+    local n = 0
+    local bp = LP:FindFirstChild("Backpack")
+    if bp then
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") and t:GetAttribute("BagId") ~= nil then
+                n += 1
+            end
+        end
+    end
+    local c = LP.Character
+    if c then
+        for _, t in ipairs(c:GetChildren()) do
+            if t:IsA("Tool") and t:GetAttribute("BagId") ~= nil then
+                n += 1
+            end
+        end
+    end
+    return n
+end
+
+-- persen tas: kg tool / atribut CarryWeight (cara game hitung bar tas)
+local function bagPct()
+    local used = 0
+    local function scan(container)
+        if not container then
+            return
+        end
+        for _, t in ipairs(container:GetChildren()) do
+            if t:IsA("Tool") and t:GetAttribute("BagId") ~= nil then
+                used += tonumber(t:GetAttribute("Kg")) or 0
+            end
+        end
+    end
+    scan(LP:FindFirstChild("Backpack"))
+    scan(LP.Character)
+    local cap = tonumber(LP:GetAttribute("CarryWeight")) or 0
+    if cap <= 0 then
+        return 0
+    end
+    return used / cap * 100
+end
+
+local function fmtMoney(n)
+    n = tonumber(n) or 0
+    if n >= 1e9 then
+        return string.format("$%.1fB", n / 1e9)
+    end
+    if n >= 1e6 then
+        return string.format("$%.1fM", n / 1e6)
+    end
+    if n >= 1e3 then
+        return string.format("$%.1fK", n / 1e3)
+    end
+    return "$" .. tostring(math.floor(n))
+end
+
+local function effLuck(m)
+    -- model world: attr Luck langsung; tool tas: hitung via GemData (tak ada attr Luck)
+    local base = tonumber(m:GetAttribute("Luck"))
+    if base ~= nil then
+        local muts = m:GetAttribute("Mutations")
+        if type(muts) ~= "string" or muts == "" then
+            return base
+        end
+        local mult = 1
+        for id in string.gmatch(tostring(muts), "[^,]+") do
+            mult *= (MUT_LUCK_MULT[id] or 1)
+        end
+        return base * mult
+    end
+    local ok, v = pcall(function()
+        local _gd = D("GemData")
+        if not _gd then error("no GemData") end
+        return _gd.effectiveLuck(m:GetAttribute("Rarity") or "Common", tonumber(m:GetAttribute("Kg")) or 0, m:GetAttribute("Mutations"))
+    end)
+    if ok and type(v) == "number" then
+        return v
+    end
+    return 0
+end
+
+-- notify lewat Ouro (dipakai sebelum Window jadi punya fallback print)
+local notify
+do
+    notify = function(title, desc)
+        pcall(function()
+            if getgenv()._AntHubWin then
+                getgenv()._AntHubWin:Notify({ Title = tostring(title), Content = tostring(desc), Duration = 5 })
+            end
+        end)
+    end
+end
+
+-- ==================== INSTANT PROMPT PICKUP ====================
+-- Inti permintaan: JANGAN hold. Prompt ditembak langsung -> crystal masuk seketika.
+-- Urutan: fireproximityprompt (executor) dulu; fallback InputHoldBegin/End (hold 0).
+local function firePrompt(pr)
+    if not pr or not pr.Parent then
+        return false
+    end
+    local saved = {
+        hold = pr.HoldDuration,
+        sight = pr.RequiresLineOfSight,
+        enabled = pr.Enabled,
+        range = pr.MaxActivationDistance,
+    }
+    pcall(function()
+        pr.HoldDuration = 0            -- tidak ada hold bar
+        pr.RequiresLineOfSight = false
+        pr.Enabled = true
+        pr.MaxActivationDistance = TUNE.promptRange
+    end)
+    local ok = false
+    if fireproximityprompt then
+        ok = pcall(fireproximityprompt, pr)
+    end
+    if not ok then
+        ok = pcall(function()
+            pr:InputHoldBegin()
+            pr:InputHoldEnd()
+        end)
+    end
+    task.delay(TUNE.promptRestore, function()
+        if pr.Parent then
+            pcall(function()
+                pr.HoldDuration = saved.hold
+                pr.RequiresLineOfSight = saved.sight
+                pr.Enabled = saved.enabled
+                pr.MaxActivationDistance = saved.range
+            end)
+        end
+    end)
+    return ok
+end
+
+-- prompt pertama di model (crystal/boulder/rune polanya sama)
+local function promptOf(m)
+    for _, d in ipairs(m:GetDescendants()) do
+        if d:IsA("ProximityPrompt") then
+            return d
+        end
+    end
+    return nil
+end
+
+-- batas fire = MaxActivationDistance prompt itu sendiri (server cek ini)
+local function promptRange(pr)
+    local r = TUNE.pickupRange
+    pcall(function()
+        if pr and pr.Parent then
+            r = tonumber(pr.MaxActivationDistance) or r
+        end
+    end)
+    return r
+end
+
+local function runePos(m)
+    local rm = m:FindFirstChild("RuneMesh", true)
+    if rm then
+        return rm.Position
+    end
+    return claimPos(m)
+end
+
+-- isi slot monitor generik (rows: {m, pos, name, ...}, fmt(i, r) -> teks)
+local function fillSlots(slots, rows, fmt)
+    for i = 1, TUNE.monSlots do
+        local slot = slots[i]
+        local r = rows[i]
+        if r and r.m.Parent then
+            slot.target = r.m
+            slot.pos = r.pos
+            slot.name = r.name
+            local txt = fmt(i, r)
+            pcall(function()
+                slot.btn:SetText(txt)
+                slot.btn:SetVisible(true)
+            end)
+        else
+            slot.target = nil
+            pcall(function() slot.btn:SetVisible(false) end)
+        end
+    end
+end
+
+-- ==================== ESP ====================
+local espMarks = {}
+local function espClear()
+    for m, e in pairs(espMarks) do
+        pcall(function() e.hl:Destroy() end)
+        pcall(function() e.gui:Destroy() end)
+        espMarks[m] = nil
+    end
+end
+
+-- geode core: match nama (tak ada atribut Core di model)
+local function isGeode(m)
+    local nm = tostring(m:GetAttribute("GemName") or m.Name or ""):lower()
+    return nm:find("geode") ~= nil or nm:find("core") ~= nil
+end
+
+local function espRefresh()
+    if not Cfg.esp and not Cfg.espBoulder and not Cfg.espGeode then
+        espClear()
+        return
+    end
+    local want = {}
+    if Cfg.esp then
+        for _, r in ipairs(Cfg.espRar) do
+            want[r] = true
+        end
+    end
+    for m, e in pairs(espMarks) do
+        if not m.Parent or (not e.b and not e.g and (not Cfg.esp or not want[m:GetAttribute("Rarity")]))
+            or (e.b and not Cfg.espBoulder) or (e.g and not Cfg.espGeode) then
+            pcall(function() e.hl:Destroy() end)
+            pcall(function() e.gui:Destroy() end)
+            espMarks[m] = nil
+        end
+    end
+    local h = getHRP()
+    local myPos = h and h.Position or Vector3.zero
+    local cand = {}
+    local function scan(folder)
+        if not folder then return end
+        for _, m in ipairs(folder:GetChildren()) do
+            if Cfg.esp and want[m:GetAttribute("Rarity")] and not espMarks[m] then
+                local mesh = m:FindFirstChild("Mesh_0", true)
+                if mesh then
+                    table.insert(cand, { m = m, mesh = mesh, d = (mesh.Position - myPos).Magnitude })
+                end
+            end
+        end
+    end
+    if Cfg.esp then
+        scan(getSG())
+        scan(getDG())
+    end
+    -- boulder: toggle sendiri (tak punya rarity); label = DisplayName else BoulderId
+    if Cfg.espBoulder and getBD() then
+        for _, m in ipairs(getBD():GetChildren()) do
+            if not espMarks[m] then
+                local mesh = m:FindFirstChild("Mesh_0", true) or m:FindFirstChildWhichIsA("BasePart", true)
+                if mesh then
+                    table.insert(cand, { m = m, mesh = mesh, d = (mesh.Position - myPos).Magnitude,
+                        bid = m:GetAttribute("DisplayName") or m:GetAttribute("BoulderId") or m.Name })
+                end
+            end
+        end
+    end
+    -- geode: match nama (Geode/Core), xray magenta-kuning, toggle sendiri
+    if Cfg.espGeode then
+        local function scanGeode(folder)
+            if not folder then return end
+            for _, m in ipairs(folder:GetChildren()) do
+                if not espMarks[m] and isGeode(m) then
+                    local mesh = m:FindFirstChild("Mesh_0", true) or m:FindFirstChildWhichIsA("BasePart", true)
+                    if mesh then
+                        table.insert(cand, { m = m, mesh = mesh, d = (mesh.Position - myPos).Magnitude, geo = true })
+                    end
+                end
+            end
+        end
+        scanGeode(getSG())
+        scanGeode(getDG())
+    end
+    table.sort(cand, function(a, b) return a.d < b.d end)
+    local marked = 0
+    for _ in pairs(espMarks) do
+        marked += 1
+    end
+    for _, c in ipairs(cand) do
+        if marked >= TUNE.espCap then
+            break
+        end
+        local isBoulder = c.bid ~= nil
+        local isGeo = c.geo == true
+        local col = RARITY_C3[c.m:GetAttribute("Rarity")] or Color3.new(1, 1, 1)
+        if isBoulder then
+            col = Color3.fromRGB(255, 80, 0) -- boulder: oranye neon mencolok
+        elseif isGeo then
+            col = Color3.fromRGB(255, 0, 255) -- geode: magenta xray
+        end
+        local hl = Instance.new("Highlight")
+        hl.Name = "ANT_ESP"
+        hl.Adornee = c.m
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.FillColor = col
+        hl.OutlineColor = isGeo and Color3.fromRGB(255, 255, 0) or (isBoulder and Color3.new(1, 1, 1) or col)
+        hl.FillTransparency = (isBoulder or isGeo) and 0.25 or 0.5
+        hl.OutlineTransparency = 0
+        hl.Parent = c.m
+        local bb = Instance.new("BillboardGui")
+        bb.Name = "ANT_ESPGUI"
+        bb.Adornee = c.mesh
+        bb.AlwaysOnTop = true
+        bb.Size = isBoulder and UDim2.fromOffset(260, 56) or UDim2.fromOffset(200, 40)
+        bb.StudsOffsetWorldSpace = isBoulder and Vector3.new(0, 4.5, 0) or Vector3.new(0, 3, 0)
+        bb.MaxDistance = isBoulder and 3000 or 1500
+        bb.Parent = c.m
+        local lb = Instance.new("TextLabel")
+        lb.BackgroundTransparency = isBoulder and 0.35 or 1
+        lb.BackgroundColor3 = isBoulder and Color3.fromRGB(30, 15, 0) or Color3.new(0, 0, 0)
+        if isBoulder then
+            local cr = Instance.new("UICorner")
+            cr.CornerRadius = UDim.new(0, 6)
+            cr.Parent = lb
+            local stroke = Instance.new("UIStroke")
+            stroke.Color = Color3.fromRGB(255, 180, 60)
+            stroke.Thickness = 1.5
+            stroke.Parent = lb
+        end
+        lb.Size = UDim2.fromScale(1, 1)
+        lb.Font = Enum.Font.GothamBlack
+        lb.TextSize = isBoulder and 16 or 14
+        lb.TextStrokeTransparency = isBoulder and 0.15 or 0.3
+        lb.TextStrokeColor3 = Color3.new(0, 0, 0)
+        lb.TextColor3 = Color3.new(1, 1, 1)
+        lb.RichText = true
+        lb.TextYAlignment = Enum.TextYAlignment.Center
+        local rar = c.m:GetAttribute("Rarity") or "Common"
+        local luck = effLuck(c.m)
+        if isBoulder then
+            lb.Text = string.format("[B] %s\n%.0fm", tostring(c.bid), c.d)
+        elseif isGeo then
+            lb.Text = string.format("[G] %s\n%s  +%.1f%%\n%.0fm",
+                c.m:GetAttribute("GemName") or c.m.Name,
+                fmtMoney(tonumber(c.m:GetAttribute("Value")) or 0), luck, c.d)
+        else
+            lb.Text = string.format('<font color="%s">[%s]</font> %s\n%s  +%.1f%%',
+                RARITY_HEX[rar] or "#FFFFFF", rar:sub(1, 1),
+                c.m:GetAttribute("GemName") or c.m.Name,
+                fmtMoney(tonumber(c.m:GetAttribute("Value")) or 0), luck)
+        end
+        lb.Parent = bb
+        espMarks[c.m] = { hl = hl, gui = bb, b = isBoulder, g = isGeo }
+        marked += 1
+    end
+end
+
+-- ==================== SERVER ACTIONS ====================
+local Server = {}
+function Server.playerNames()
+    local names = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LP then
+            table.insert(names, p.Name)
+        end
+    end
+    table.sort(names)
+    if #names == 0 then
+        table.insert(names, "(none)")
+    end
+    return names
+end
+function Server.teleportTo(name)
+    if not name or name == "" or name == "(none)" then
+        return false, "no player"
+    end
+    local p = Players:FindFirstChild(name)
+    if not p or not p.Character then
+        return false, "not found"
+    end
+    local t = p.Character:FindFirstChild("HumanoidRootPart") or p.Character:FindFirstChild("Head")
+    if not t then
+        return false, "no hrp"
+    end
+    local h = getHRP()
+    if not h then
+        return false, "no hrp (kamu)"
+    end
+    tpTo(h, CFrame.new(t.Position + Vector3.new(0, 4, 0)))
+    return true
+end
+function Server.goHome()
+    return pcall(function()
+        RS:WaitForChild("BaseRemotes"):WaitForChild("TeleportHome"):FireServer()
+    end)
+end
+function Server.rejoin()
+    -- JANGAN kick dulu baru teleport: kick langsung memutus client, teleport tak pernah jalan.
+    local placeId = game.PlaceId
+    local jobId = game.JobId
+    local ok, err
+    if type(jobId) == "string" and #jobId > 10 then
+        ok, err = pcall(function()
+            TeleportS:TeleportToPlaceInstance(placeId, jobId, LP)
+        end)
+    else
+        ok, err = pcall(function()
+            TeleportS:Teleport(placeId, LP)
+        end)
+    end
+    if ok then
+        return true
+    end
+    return false, "rejoin gagal: " .. tostring(err)
+end
+
+-- ==================== HOP ENGINE ====================
+-- Fix bug lama ("[string ...]:644: no free servers"):
+--  1. fetch cuma 1x tanpa retry -> 429 / body bukan JSON = daftar dianggap kosong.
+--  2. filter tanpa buffer -> server "sisa 0 slot" ikut keburu penuh.
+--  3. hanya 1x TeleportToPlaceInstance -> sekali gagal (full/flooded) langsung mati.
+-- Sekarang: retry+backoff, excludeFullGames, fallback PlaceId->GameId, buffer 1 slot,
+-- beberapa kandidat berurutan, dengar TeleportInitFailed, dan fallback Teleport(place)
+-- supaya tombol Hop tidak pernah berakhir di "no free servers".
+local HOP = {
+    pages = 5,          -- 1 halaman = 100 server
+    buffer = 1,         -- butuh minimal 1 slot benar-benar kosong
+    candidates = 4,     -- kandidat yang dicoba berurutan
+    perTry = 6,         -- detik menunggu sinyal TeleportInitFailed
+    floodWait = 25,     -- cooldown setelah Roblox menolak (Flooded/LimitReached)
+    busy = false,
+    floodAt = 0,        -- os.clock() saat kena limit
+    last = nil,         -- jobId terakhir yang dicoba (biar tidak itu-itu saja)
+}
+
+local function hopGet(url)
+    local ok, body = pcall(function()
+        return game:HttpGet(url)
+    end)
+    if ok and type(body) == "string" and #body > 0 then
+        return body
+    end
+    local ok2, body2 = pcall(function()
+        return game:HttpGetAsync(url)
+    end)
+    if ok2 and type(body2) == "string" and #body2 > 0 then
+        return body2
+    end
+    return nil
+end
+
+local function hopQuery(url)
+    local last
+    for attempt = 1, 3 do
+        local body = hopGet(url)
+        if body then
+            local ok, data = pcall(HttpS.JSONDecode, HttpS, body)
+            if ok and type(data) == "table" then
+                return data
+            end
+            last = "json rusak: " .. body:sub(1, 80)
+        else
+            last = "request http gagal"
+        end
+        task.wait(0.5 * attempt) -- backoff untuk 429 / 5xx
+    end
+    return nil, last
+end
+
+local function hopScan(targetId)
+    local list, seenIds = {}, {}
+    local stats = { seen = 0, free = 0, full = 0, pages = 0, err = nil }
+    local cursor = ""
+    for _ = 1, HOP.pages do
+        local url = string.format(
+            "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Desc&limit=100&excludeFullGames=true%s",
+            targetId, (cursor ~= "" and ("&cursor=" .. tostring(cursor))) or "")
+        local data, err = hopQuery(url)
+        if not data or type(data.data) ~= "table" then
+            stats.err = err or "data kosong"
+            break
+        end
+        stats.pages += 1
+        for _, s in ipairs(data.data) do
+            local id = s.id
+            local playing = tonumber(s.playing)
+            local maxP = tonumber(s.maxPlayers)
+            stats.seen += 1
+            if type(id) == "string" and #id >= 30 and playing and maxP and not seenIds[id] then
+                seenIds[id] = true
+                if id ~= game.JobId then
+                    if playing + HOP.buffer <= maxP then
+                        stats.free += 1
+                        table.insert(list, { id = id, playing = playing, maxPlayers = maxP })
+                    else
+                        stats.full += 1
+                    end
+                end
+            end
+        end
+        cursor = data.nextPageCursor
+        if not cursor or cursor == "" then
+            break
+        end
+    end
+    return list, stats
+end
+
+local function hopScanAll()
+    local list, stats = hopScan(game.PlaceId)
+    if #list > 0 or stats.seen > 0 then
+        return list, stats
+    end
+    local uid = tonumber(game.GameId)
+    if uid and uid ~= game.PlaceId then
+        local list2, stats2 = hopScan(uid)
+        if #list2 > 0 or stats2.seen > 0 then
+            return list2, stats2
+        end
+    end
+    return list, stats
+end
+
+local function hopPick(list, prefer)
+    table.sort(list, function(a, b)
+        if prefer == "low" then
+            return a.playing < b.playing
+        end
+        return a.playing > b.playing
+    end)
+    -- buang server yang terakhir dicoba biar tidak mendarat di server yang sama terus
+    local pool = {}
+    for _, c in ipairs(list) do
+        if c.id ~= HOP.last then
+            pool[#pool + 1] = c
+        end
+    end
+    if #pool == 0 then
+        pool = list
+    end
+    -- kandidat utama: hanya yang kualitasnya dekat dengan yang terbaik
+    local best = pool[1]
+    local window = {}
+    for _, c in ipairs(pool) do
+        local slack = math.max(1, math.floor((c.maxPlayers or 0) * 0.25))
+        local near
+        if prefer == "low" then
+            near = c.playing <= best.playing + slack -- paling sepi
+        else
+            near = c.playing >= best.playing - slack -- paling ramai
+        end
+        if near then
+            window[#window + 1] = c
+            if #window >= 12 then
+                break
+            end
+        end
+    end
+    -- acak di dalam window supaya tidak selalu server yang sama
+    for i = #window, 2, -1 do
+        local j = math.random(1, i)
+        window[i], window[j] = window[j], window[i]
+    end
+    -- sisanya jadi cadangan kalau kandidat utama keburu penuh
+    local picks, used = {}, {}
+    for _, c in ipairs(window) do
+        if #picks < HOP.candidates then
+            picks[#picks + 1] = c
+            used[c.id] = true
+        end
+    end
+    for _, c in ipairs(pool) do
+        if #picks >= HOP.candidates then
+            break
+        end
+        if not used[c.id] then
+            picks[#picks + 1] = c
+            used[c.id] = true
+        end
+    end
+    return picks
+end
+
+-- true kalau teleport diterima server (tidak ada TeleportInitFailed dalam jendela waktu)
+local function hopTry(jobId)
+    local failed
+    local conn = TeleportS.TeleportInitFailed:Connect(function(_, result, message)
+        failed = { result = result, message = message }
+    end)
+    local ok, err = pcall(function()
+        TeleportS:TeleportToPlaceInstance(game.PlaceId, jobId, LP)
+    end)
+    local waited = 0
+    while ok and not failed and waited < HOP.perTry do
+        task.wait(0.2)
+        waited += 0.2
+    end
+    pcall(function()
+        conn:Disconnect()
+    end)
+    if not ok then
+        return false, "TeleportToPlaceInstance error: " .. tostring(err)
+    end
+    if failed then
+        local name = (failed.result and failed.result.Name) or "Failed"
+        if failed.message and failed.message ~= "" then
+            return false, name .. " (" .. tostring(failed.message) .. ")"
+        end
+        return false, name
+    end
+    return true
+end
+
+function Server.hop(prefer)
+    prefer = prefer == "low" and "low" or "full"
+    if HOP.busy then
+        return false, "hop masih berjalan, tunggu sebentar"
+    end
+    if HOP.floodAt > 0 then
+        local left = HOP.floodWait - (os.clock() - HOP.floodAt)
+        if left > 0 then
+            return false, string.format("Roblox masih membatasi teleport, tunggu %.0f detik lagi", left)
+        end
+    end
+    HOP.busy = true
+    local ok, res = pcall(function()
+        local list, st = hopScanAll()
+        local summary = string.format("%d server dicek / %d halaman / %d penuh / %d ada slot",
+            st.seen, st.pages, st.full, st.free)
+        print("[hub] hop scan: " .. summary .. (st.err and (" | api: " .. tostring(st.err)) or ""))
+
+        if #list == 0 then
+            -- Semua penuh ATAU API tidak terbaca: jangan mati di "no free servers".
+            notify("Hop", st.seen > 0 and "Semua server penuh, coba rejoin acak" or "Daftar server tak terbaca, coba rejoin acak")
+            local okT, errT = pcall(function()
+                TeleportS:Teleport(game.PlaceId, LP)
+            end)
+            if not okT then
+                error("hop gagal (" .. summary .. (st.err and (" | api: " .. tostring(st.err)) or "") .. "): " .. tostring(errT), 0)
+            end
+            return "rejoin-acak"
+        end
+
+        local picks = hopPick(list, prefer)
+        for i, c in ipairs(picks) do
+            HOP.last = c.id
+            notify("Hop", string.format("coba %d/%d -> %d/%d pemain", i, #picks, c.playing, c.maxPlayers))
+            local okT, why = hopTry(c.id)
+            if okT then
+                print("[hub] hop terkirim -> " .. c.id)
+                notify("Hop", string.format("teleport terkirim -> %d/%d pemain", c.playing, c.maxPlayers))
+                return "ok"
+            end
+            warn(string.format("[hub] hop gagal ke %s: %s", tostring(c.id), tostring(why)))
+            if tostring(why):find("Flooded") or tostring(why):find("LimitReached") then
+                HOP.floodAt = os.clock()
+                error("Roblox membatasi teleport (Flooded). Tunggu ~25 detik lalu klik Hop lagi.", 0)
+            end
+            task.wait(0.4)
+        end
+        error("hop gagal - " .. summary, 0)
+    end)
+    HOP.busy = false
+    if not ok then
+        print("[hub] hop error: " .. tostring(res))
+        return false, tostring(res)
+    end
+    return true
+end
+function Server.resetCharacter()
+    return pcall(function()
+        local char = LP.Character
+        local hum = char and char:FindFirstChildWhichIsA("Humanoid")
+        if hum then
+            hum:ChangeState(Enum.HumanoidStateType.Dead)
+        elseif char then
+            char:BreakJoints()
+        else
+            error("no character")
+        end
+    end)
+end
+-- refresh ala IY: respawn via void lalu balik ke posisi semula
+function Server.refresh()
+    local char = LP.Character
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if not root then
+        return false, "no hrp"
+    end
+    local pos = root.CFrame
+    local camPos = workspace.CurrentCamera.CFrame
+    local ok, err = Server.resetCharacter()
+    if not ok then
+        return false, err
+    end
+    task.spawn(function()
+        local nc = LP.CharacterAdded:Wait()
+        local hum = nc:WaitForChild("Humanoid", 10)
+        if hum then
+            local nhrp = nc:WaitForChild("HumanoidRootPart", 10)
+            if nhrp then
+                task.wait(0.2)
+                pcall(function()
+                    nhrp.CFrame = pos
+                    workspace.CurrentCamera.CFrame = camPos
+                end)
+            end
+        end
+    end)
+    return true
+end
+function Server.peak()
+    local h = getHRP()
+    if not h then
+        return false, "no hrp"
+    end
+    local rp = RaycastParams.new()
+    rp.FilterType = Enum.RaycastFilterType.Include
+    rp.FilterDescendantsInstances = { workspace.Terrain }
+    local cx, cz = h.Position.X, h.Position.Z
+    local top = h.Position.Y + 1500
+    local bestPos, bestY
+    local x = cx - 400
+    while x <= cx + 400 do
+        local z = cz - 400
+        while z <= cz + 400 do
+            local hit = workspace:Raycast(Vector3.new(x, top, z), Vector3.new(0, -4000, 0), rp)
+            if hit and (not bestY or hit.Position.Y > bestY) then
+                bestY = hit.Position.Y
+                bestPos = hit.Position
+            end
+            z += 100
+        end
+        x += 100
+    end
+    if not bestPos then
+        return false, "no peak"
+    end
+    tpTo(h, CFrame.new(bestPos + Vector3.new(0, 6, 0)))
+    return true, "Y=" .. math.floor(bestY)
+end
+
+-- ==================== SHOP ====================
+local function buyPickaxe(idx, manual)
+    local _pd = D("PickaxeData")
+    local info = _pd and _pd[idx]
+    if not info then
+        return false
+    end
+    if Stat.skipPick[idx] and not manual then
+        return false
+    end
+    local coins = LP.leaderstats.Coins.Value
+    if coins - tonumber(info.price or 0) < Cfg.reserve then
+        return false
+    end
+    local _bb = R("ShopRemotes", "BuyPickaxe")
+    if not _bb then return false end
+    _bb:FireServer(idx, "cash")
+    task.wait(2)
+    if LP.leaderstats.Coins.Value < coins then
+        pcall(function() R("ShopRemotes", "EquipPickaxe"):FireServer(idx) end)
+        Stat.skipPick[idx] = nil
+        notify("Pickaxe", "Beli + equip: " .. info.name)
+        print("[hub] beli pickaxe " .. info.name)
+        return true
+    end
+    if not manual then
+        Stat.skipPick[idx] = true
+    end
+    return false
+end
+
+local function bombPrice(id)
+    local _bd = D("BombData")
+    local b = _bd and _bd.ById and _bd.ById[id]
+    return b and tonumber(b.price) or nil
+end
+
+local function buyBombs()
+    -- coba terus: tanpa blacklist permanen (gagal = coba lagi tick berikut)
+    local sel = {}
+    for _, id in ipairs(Cfg.bombSel) do
+        local price = bombPrice(id)
+        if price then
+            table.insert(sel, { id = id, price = price })
+        end
+    end
+    table.sort(sel, function(a, b) return a.price < b.price end)
+    for _, b in ipairs(sel) do
+        local coins = LP.leaderstats.Coins.Value
+        if coins - b.price >= Cfg.reserve then
+            local _bb = R("BombRemotes", "BuyBomb")
+            if not _bb then return false end
+            _bb:FireServer(b.id, "cash")
+            task.wait(2)
+            if LP.leaderstats.Coins.Value < coins then
+                notify("Bomb", "Beli: " .. b.id)
+                print("[hub] beli bomb " .. b.id)
+                return true
+            end
+        end
+    end
+    return false
+end
+
+local function radarPrice(id)
+    local _rd = D("RadarData")
+    local b = _rd and _rd.ById and _rd.ById[id]
+    return b and tonumber(b.price) or nil
+end
+
+local function buyRadars()
+    -- mirror buyBombs: termurah dulu, verifikasi coins berkurang
+    local sel = {}
+    for _, id in ipairs(Cfg.radarSel) do
+        local price = radarPrice(id)
+        if price then
+            table.insert(sel, { id = id, price = price })
+        end
+    end
+    table.sort(sel, function(a, b) return a.price < b.price end)
+    for _, b in ipairs(sel) do
+        local coins = LP.leaderstats.Coins.Value
+        if coins - b.price >= Cfg.reserve then
+            local _rb = R("RadarRemotes", "BuyRadar")
+            if not _rb then return false end
+            _rb:FireServer(b.id) -- radar: 1 arg (bomb: 2 arg + "cash")
+            task.wait(2)
+            if LP.leaderstats.Coins.Value < coins then
+                notify("Radar", "Beli: " .. b.id)
+                print("[hub] beli radar " .. b.id)
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- ==================== MOVEMENT / GFX ====================
+local flyConn, flyGui
+local flyUp, flyDn = false, false
+local gfxSaved
+local function setAntiLag(on)
+    local L = game:GetService("Lighting")
+    if on then
+        if not gfxSaved then
+            gfxSaved = { shadows = L.GlobalShadows, decor = workspace.Terrain.Decoration, fx = {} }
+            for _, f in ipairs(L:GetChildren()) do
+                if f:IsA("PostEffect") then
+                    gfxSaved.fx[f] = f.Enabled
+                end
+            end
+        end
+        L.GlobalShadows = false
+        pcall(function() workspace.Terrain.Decoration = false end)
+        for _, f in ipairs(L:GetChildren()) do
+            if f:IsA("PostEffect") then
+                f.Enabled = false
+            end
+        end
+    elseif gfxSaved then
+        L.GlobalShadows = gfxSaved.shadows
+        pcall(function() workspace.Terrain.Decoration = gfxSaved.decor end)
+        for f, en in pairs(gfxSaved.fx) do
+            if f.Parent then
+                f.Enabled = en
+            end
+        end
+        gfxSaved = nil
+    end
+end
+
+local function setNoRender(on)
+    pcall(function()
+        RunS:Set3dRenderingEnabled(not on)
+    end)
+end
+
+local function stopFly()
+    if flyConn then
+        pcall(function() flyConn:Disconnect() end)
+        flyConn = nil
+    end
+    if flyGui then
+        pcall(function() flyGui:Destroy() end)
+        flyGui = nil
+    end
+    flyUp, flyDn = false, false
+    local char = LP.Character
+    local h0 = char and char:FindFirstChild("HumanoidRootPart")
+    if h0 then
+        pcall(function()
+            h0.AssemblyLinearVelocity = Vector3.zero
+            h0.AssemblyAngularVelocity = Vector3.zero
+            h0.CanCollide = true
+        end)
+    end
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.PlatformStand = false
+    end
+end
+
+-- tombol UP/DN di HP (mouse/keyboard tetap jalan)
+local function flyButtons()
+    if not UIS.TouchEnabled then
+        return
+    end
+    local pg = LP:FindFirstChild("PlayerGui")
+    if not pg or flyGui then
+        return
+    end
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "ANT_Fly"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    local function mk(txt, x)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.fromOffset(64, 64)
+        b.Position = UDim2.new(1, x, 1, -160)
+        b.AnchorPoint = Vector2.new(1, 1)
+        b.BackgroundColor3 = Color3.fromRGB(20, 20, 26)
+        b.BackgroundTransparency = 0.3
+        b.TextColor3 = Color3.new(1, 1, 1)
+        b.Font = Enum.Font.GothamBlack
+        b.TextSize = 28
+        b.Text = txt
+        b.AutoButtonColor = true
+        b.Parent = gui
+        return b
+    end
+    local up = mk("UP", -84)
+    local dn = mk("DN", -12)
+    up.MouseButton1Down:Connect(function() flyUp = true end)
+    up.MouseButton1Up:Connect(function() flyUp = false end)
+    up.MouseLeave:Connect(function() flyUp = false end)
+    dn.MouseButton1Down:Connect(function() flyDn = true end)
+    dn.MouseButton1Up:Connect(function() flyDn = false end)
+    dn.MouseLeave:Connect(function() flyDn = false end)
+    gui.Parent = pg
+    flyGui = gui
+end
+
+local function restoreCollide()
+    local char = LP.Character
+    if char then
+        for _, p in ipairs(char:GetDescendants()) do
+            if p:IsA("BasePart") then
+                p.CanCollide = true
+            end
+        end
+    end
+end
+
+local alive = true
+local RL_STATE = rawget(getgenv(), "STATE")
+if typeof(RL_STATE) ~= "table" then
+    RL_STATE = nil
+end
+
+local function setRagdoll(on)
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        pcall(function()
+            hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, on)
+            hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, on)
+            hum:SetStateEnabled(Enum.HumanoidStateType.Physics, on)
+        end)
+    end
+end
+
+local noclipConn
+local afkConn
+local afkIdleHook
+local function killAntiIdle()
+    pcall(function()
+        local ps = LP:FindFirstChild("PlayerScripts")
+        local s = ps and ps:FindFirstChild("AntiIdleClient")
+        if s then
+            s.Disabled = true
+            pcall(function() s:Destroy() end)
+            print("[hub] AntiIdleClient dibunuh")
+        end
+    end)
+end
+local function afkPulse(why)
+    pcall(function()
+        local vu = game:GetService("VirtualUser")
+        vu:CaptureController()
+        vu:ClickButton2(Vector2.new())
+    end)
+    -- gerak mikro farm-aman: lompat di tempat (XZ tetap), skip saat fly
+    pcall(function()
+        if Cfg.fly then
+            return
+        end
+        local char = LP.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum and hum.Health > 0 then
+            hum.Jump = true
+        end
+    end)
+    Stat.afkMoveAt = os.clock()
+    print("[hub] anti-afk pulse (" .. tostring(why or "?") .. ")")
+end
+local function setAfk(on)
+    -- lapis 1 (game): AntiIdleClient dibunuh saat script start (bukan saat toggle).
+    -- lapis 2 (engine): toggle ON -> Idled hook VU + pulse berkala VU+jump mikro.
+    if on and not afkConn then
+        killAntiIdle()
+        pcall(function()
+            if not afkIdleHook then
+                afkIdleHook = true
+                LP.Idled:Connect(function()
+                    if not Cfg.antiAfk then
+                        return
+                    end
+                    afkPulse("idled")
+                end)
+            end
+        end)
+        afkConn = true
+        print("[hub] anti-afk ON (VU + jump mikro)")
+    elseif not on and afkConn then
+        afkConn = nil
+        print("[hub] anti-afk OFF")
+    end
+end
+
+-- reset semua toggle boolean (satu sumber: tambah toggle baru cukup di sini)
+local function resetCfg()
+    alive = false
+    for k, v in pairs(Cfg) do
+        if type(v) == "boolean" then
+            Cfg[k] = false
+        end
+    end
+end
+
+-- ==================== UI (OURO) ====================
+getgenv()._ANT_HUB = { cfg = Cfg, stat = Stat, tune = TUNE, effLuck = effLuck }
+
+local Window = Ouro:CreateWindow({
+    Name = "Antarctica Hub",
+    LoadingSubtitle = "Mine Antarctica - vacuum / dig / sell",
+    Icon = "gem",
+    ToggleUIKeybind = "RightShift",
+    Size = UDim2.fromOffset(760, 520),
+    Density = "Comfortable",
+    ConfigurationSaving = { Enabled = true, FolderName = "AntarcticaHub", FileName = "autoload" },
+    Home = {
+        Name = "Home",
+        Desc = "Vacuum-only | no hold-E | instant prompt pickup",
+        Icon = "house",
+        OverviewName = "Overview",
+        Stats = { "FPS", "Ping", "Executor", "Game", "Players", "Uptime", "Memory" },
+        Pages = {
+            {
+                Name = "Changelog",
+                Icon = "scroll-text",
+                Entries = {
+                    { Title = "v2.0", Tag = "Latest", Changes = {
+                        "GUI baru: Ouro UI (lokal, gaya Ouroboros: tab + groupbox + status row).",
+                        "Pickup tidak lagi hold-E: prompt ditembak langsung (fireproximityprompt).",
+                        "Config persist otomatis per-Flag (autoload).",
+                    } },
+                    { Title = "v1.9", Changes = { "Vacuum, auto sell, auto dig 360 deg, ESP, monitor, boulder/rune/storm." } },
+                },
+            },
+            {
+                Name = "Guide",
+                Icon = "book-open",
+                Content = "Vacuum: hanya freed/dropped crystal (bukan milik orang).\n"
+                    .. "Auto Dig 360 deg: butuh pickaxe terpasang (auto-equip dari tas).\n"
+                    .. "Teleport toggle = pakai teleport stepped; matikan bila ingin aman.\n"
+                    .. "Auto Sell: teleport ke sell point, jual semua, balik ke posisi awal.\n"
+                    .. "Storm: wajib di plot (TeleportPlot), otomatis balik ke posisi semula.",
+            },
+        },
+    },
+})
+getgenv()._AntHubWin = Window
+
+-- ---------------------------------------------------------------- tab & box
+local TabMain = Window:CreateTab({ Name = "Main", Icon = "gem", Desc = "Vacuum + sell" })
+local TabBR = Window:CreateTab({ Name = "Boulder", Icon = "mountain", Desc = "Boulder + rune + storm" })
+local TabShop = Window:CreateTab({ Name = "Shop", Icon = "shopping-cart", Desc = "Auto upgrade" })
+local TabMisc = Window:CreateTab({ Name = "Misc", Icon = "rocket", Desc = "Movement + graphic" })
+local TabServer = Window:CreateTab({ Name = "Server", Icon = "server", Desc = "Players + hop" })
+local TabSetting = Window:CreateTab({ Name = "Setting", Icon = "settings", Desc = "UI + config" })
+
+-- ------------------------------- MAIN / kiri: Vacuum, Dig, Sell, ESP
+local GBVac = TabMain:CreateGroupbox({ Name = "Vacuum", Side = "Left" })
+local GBDig = TabMain:CreateGroupbox({ Name = "Auto Dig 360 deg", Side = "Left" })
+local GBSell = TabMain:CreateGroupbox({ Name = "Auto Sell", Side = "Left" })
+local GBEsp = TabMain:CreateGroupbox({ Name = "ESP", Side = "Left" })
+
+-- ------------------------------- MAIN / kanan: status + monitor
+local GBStat = TabMain:CreateGroupbox({ Name = "Status", Side = "Right" })
+local GBMon = TabMain:CreateGroupbox({ Name = "Monitor Top 10", Side = "Right" })
+local GBLog = TabMain:CreateGroupbox({ Name = "Log", Side = "Right" })
+
+-- status helper: narasi selalu terisi (WHY idle + counter)
+local H = {}
+H.status = "Idle: hub siap. Nyalakan Vacuum / Auto Dig."
+H.target = "-"
+H.bagText = "-"
+H.espText = "0"
+H.monText = "0"
+local function logPush(msg)
+    pcall(function()
+        if GBStat._log then
+            GBStat._log:Push(os.date("%H:%M:%S ") .. tostring(msg))
+        end
+    end)
+    print("[hub] " .. tostring(msg))
+end
+GBStat._log = GBLog:CreateLog({ MaxEntries = 120, MaxRows = 7, EmptyText = "log ready" })
+local LogObj = GBStat._log
+
+GBStat:CreateStatus({ Name = "State", Style = "Row", Pin = true, Update = function() return tostring(H.status) end, UpdateRate = 0.4 })
+GBStat:CreateStatus({ Name = "Target", Style = "Row", Update = function() return tostring(H.target) end, UpdateRate = 0.5 })
+GBStat:CreateStatus({ Name = "Bag", Style = "Bar", Max = 100, Update = function() return bagPct(), 100 end, UpdateRate = 0.5 })
+GBStat:CreateStatus({ Name = "Bag detail", Style = "Row", Update = function() return tostring(H.bagText) end, UpdateRate = 0.5 })
+GBStat:CreateStatus({ Name = "Coins", Style = "Row", Update = function()
+    local ok, v = pcall(function() return LP.leaderstats.Coins.Value end)
+    return ok and fmtMoney(v) or "-"
+end, UpdateRate = 0.5 })
+GBStat:CreateStatus({ Name = "ESP marks", Style = "Row", Update = function()
+    if H.espText == "rec" then
+        local n = 0
+        for _ in pairs(espMarks) do n += 1 end
+        H.espText = tostring(n)
+    end
+    return H.espText
+end, UpdateRate = 1 })
+GBStat:CreateStatus({ Name = "Crystals", Style = "Row", Update = function() return tostring(H.monText) end, UpdateRate = 1 })
+GBStat:CreateLabel({ Text = "Prompt ditembak langsung - tidak perlu hold E." })
+
+-- ------------------------------- Vacuum controls
+local tgVacuum, tgTeleport, tgMinRarity
+tgVacuum = GBVac:CreateToggle({
+    Name = "Auto vacuum (no dig)", Tooltip = "Ambil crystal freed/dropped: tembak proximity prompt langsung (instant).",
+    CurrentValue = false, Flag = "ANT_Vacuum",
+    Callback = function(on)
+        Cfg.vacuum = on and true or false
+        H.status = on and "Vacuum: mulai, cari target..." or "Idle: vacuum OFF."
+        logPush("vacuum " .. (on and "ON" or "OFF"))
+    end,
+})
+-- Ouro Keybind ignores `Flag`; it persists through OnChanged/Default only.
+-- Callback = the bound key was pressed. OnChanged = the binding was rebound.
+VacuumKeyControl = GBVac:CreateKeybind({
+    Name = "Vacuum key", Default = "P",
+    Callback = function()
+        if tgVacuum then
+            tgVacuum:Set(not tgVacuum:Get())
+        end
+    end,
+    OnChanged = function(key)
+        Cfg.vacuumKey = key
+    end,
+})
+tgTeleport = GBVac:CreateToggle({
+    Name = "Teleport to freed (max radius)", Tooltip = "Teleport stepped ke crystal di luar jangkauan prompt.",
+    CurrentValue = false, Flag = "ANT_Teleport",
+    Callback = function(on) Cfg.teleport = on and true or false end,
+})
+tgMinRarity = GBVac:CreateDropdown({
+    Name = "Min rarity", Options = RARITY_LIST, CurrentOption = "Common", Flag = "ANT_MinRarity",
+    Callback = function(v)
+        if type(v) == "table" then v = v[1] end
+        Cfg.minRarity = RARITY_RANK[v] or 1
+    end,
+})
+GBVac:CreateDivider()
+GBVac:CreateParagraph({ Title = "Instant pickup", Content = "fireproximityprompt + HoldDuration=0. Tidak ada hold bar, tidak ada InputHoldBegin delay." })
+
+-- ------------------------------- Dig controls
+local tgDig, tgDrill, tgSlam
+tgDig = GBDig:CreateToggle({
+    Name = "Auto dig 360 deg (glacier)", CurrentValue = false, Flag = "ANT_AutoDig",
+    Callback = function(on)
+        Cfg.dig = on and true or false
+        if on and Cfg.drill and tgDrill then tgDrill:Set(false) end
+        Stat.digNoPick = false
+        logPush("autodig " .. (on and ("ON r=" .. Cfg.digRadius) or "OFF"))
+    end,
+})
+tgDrill = GBDig:CreateToggle({
+    Name = "Auto drill 360 deg (matikan dig)", CurrentValue = false, Flag = "ANT_AutoDrill",
+    Callback = function(on)
+        Cfg.drill = on and true or false
+        if on and Cfg.dig and tgDig then tgDig:Set(false) end
+        logPush("autodrill " .. (on and "ON" or "OFF"))
+    end,
+})
+tgSlam = GBDig:CreateToggle({
+    Name = "Auto void slam (tiap ready)", CurrentValue = false, Flag = "ANT_AutoSlam",
+    Callback = function(on) Cfg.slam = on and true or false end,
+})
+GBDig:CreateSlider({
+    Name = "Dig radius", Range = { 6, 20 }, Increment = 1, Suffix = "st",
+    CurrentValue = 8, Flag = "ANT_DigRadius",
+    Callback = function(v) Cfg.digRadius = math.clamp(math.floor(tonumber(v) or 8), 6, 20) end,
+})
+GBDig:CreateLabel({ Text = "Auto-equip pickaxe/drill dari tas bila belum terpasang." })
+
+-- ------------------------------- Sell controls
+local tgAutoSell
+tgAutoSell = GBSell:CreateToggle({
+    Name = "Sell", CurrentValue = false, Flag = "ANT_AutoSell",
+    Callback = function(on) Cfg.autoSell = on and true or false end,
+})
+GBSell:CreateSlider({
+    Name = "Sell at", Range = { 50, 100 }, Increment = 1, Suffix = "%",
+    CurrentValue = 100, Flag = "ANT_SellPct",
+    Callback = function(v) Cfg.sellPct = math.clamp(math.floor(tonumber(v) or 100), 50, 100) end,
+})
+GBSell:CreateButton({ Name = "Sell Now", Icon = "banknote", Callback = function()
+    Stat.sellNow = true
+end })
+GBSell:CreateButton({ Name = "Count bag", Icon = "package", Callback = function()
+    logPush("bag: " .. tostring(countBag()) .. " item, " .. string.format("%.1f%%", bagPct()))
+end })
+
+-- ------------------------------- ESP controls
+GBEsp:CreateToggle({ Name = "ESP crystal", CurrentValue = false, Flag = "ANT_Esp",
+    Callback = function(on)
+        Cfg.esp = on and true or false
+        if not on then
+            for m, e in pairs(espMarks) do
+                if not e.b and not e.g then
+                    pcall(function() e.hl:Destroy() end)
+                    pcall(function() e.gui:Destroy() end)
+                    espMarks[m] = nil
+                end
+            end
+            if not Cfg.espBoulder and not Cfg.espGeode then espClear() end
+        end
+        H.espText = "rec"
+    end })
+GBEsp:CreateToggle({ Name = "ESP boulder", CurrentValue = true, Flag = "ANT_EspBoulder",
+    Callback = function(on)
+        Cfg.espBoulder = on and true or false
+        if not on then
+            for m, e in pairs(espMarks) do
+                if e.b then
+                    pcall(function() e.hl:Destroy() end)
+                    pcall(function() e.gui:Destroy() end)
+                    espMarks[m] = nil
+                end
+            end
+        end
+        H.espText = "rec"
+    end })
+GBEsp:CreateToggle({ Name = "ESP geode core", CurrentValue = false, Flag = "ANT_EspGeode",
+    Callback = function(on)
+        Cfg.espGeode = on and true or false
+        if not on then
+            for m, e in pairs(espMarks) do
+                if e.g then
+                    pcall(function() e.hl:Destroy() end)
+                    pcall(function() e.gui:Destroy() end)
+                    espMarks[m] = nil
+                end
+            end
+        end
+        H.espText = "rec"
+    end })
+GBEsp:CreateDropdown({
+    Name = "Rarity filter", Options = RARITY_LIST, Multi = true, Default = RARITY_LIST,
+    Flag = "ANT_EspRar", Searchable = true,
+    Callback = function(v)
+        local list = {}
+        if type(v) == "table" then
+            for _, name in ipairs(v) do table.insert(list, tostring(name)) end
+        elseif type(v) == "string" then
+            list = { v }
+        end
+        if #list == 0 then list = { "Common" } end
+        Cfg.espRar = list
+        H.espText = "rec"
+    end,
+})
+
+-- ------------------------------- Monitor slot teleport (generik)
+local function brSlots(box, n, tag)
+    local slots = {}
+    for i = 1, n do
+        local idx = i
+        local btn = box:CreateButton({ Name = "-", Callback = function()
+            local s = slots[idx]
+            local h = getHRP()
+            if s.target and s.target.Parent and s.pos and h then
+                local ok, err = pcall(function()
+                    tpTo(h, CFrame.new(s.pos + Vector3.new(0, TUNE.tpLift, 0)))
+                end)
+                if ok then
+                    logPush("tp ke " .. tostring(s.name))
+                else
+                    notify(tag, "TP gagal: " .. tostring(err):sub(1, 60))
+                end
+            else
+                notify(tag, "Target sudah hilang.")
+            end
+        end })
+        btn:SetVisible(false)
+        slots[i] = { btn = btn, target = nil, pos = nil, name = "-" }
+    end
+    return slots
+end
+
+local MonSlots = brSlots(GBMon, TUNE.monSlots, "Monitor")
+GBMon:CreateDropdown({
+    Name = "Monitor rarity", Options = RARITY_LIST, Multi = true, Default = { "Mythic" },
+    Flag = "ANT_MonRarity", Searchable = true,
+    Callback = function(v)
+        local list = {}
+        if type(v) == "table" then
+            for _, name in ipairs(v) do
+                if RARITY_RANK[tostring(name)] then table.insert(list, tostring(name)) end
+            end
+        elseif type(v) == "string" and RARITY_RANK[v] then
+            list = { v }
+        end
+        Cfg.monRar = list
+        Stat.monRefresh = true
+    end,
+})
+GBMon:CreateDropdown({
+    Name = "Sort by", Options = { "Value", "Luck" }, CurrentOption = "Value", Flag = "ANT_MonSort",
+    Callback = function(v)
+        if type(v) == "table" then v = v[1] end
+        Cfg.monSort = tostring(v or "Value")
+        Stat.monRefresh = true
+    end,
+})
+GBMon:CreateButtonRow({
+    Buttons = {
+        { Name = "Refresh", Callback = function() Stat.monRefresh = true end },
+        { Name = "All", Callback = function()
+            Cfg.monRar = { table.unpack(RARITY_LIST) }
+            Stat.monRefresh = true
+        end },
+        { Name = "Clear", Callback = function()
+            Cfg.monRar = {}
+            Stat.monRefresh = true
+        end },
+    },
+})
+
+-- ==================== BOULDER TAB ====================
+local GBBoulder = TabBR:CreateGroupbox({ Name = "Boulder Top 10", Side = "Left" })
+local GBRune = TabBR:CreateGroupbox({ Name = "Rune", Side = "Right" })
+local GBBrInfo = TabBR:CreateGroupbox({ Name = "Info", Side = "Right" })
+
+local tgAutoBoulder = GBBoulder:CreateToggle({
+    Name = "Auto mine boulder", CurrentValue = false, Flag = "ANT_AutoBoulder",
+    Callback = function(on) Cfg.autoBoulder = on and true or false end,
+})
+GBBoulder:CreateButton({ Name = "Refresh", Icon = "refresh-cw", Callback = function() Stat.monRefresh = true end })
+local BoulderSlots = brSlots(GBBoulder, TUNE.monSlots, "Boulder")
+
+local tgAutoRune = GBRune:CreateToggle({
+    Name = "Auto pickup rune", CurrentValue = false, Flag = "ANT_AutoRune",
+    Callback = function(on) Cfg.autoRune = on and true or false end,
+})
+GBRune:CreateDropdown({
+    Name = "Pickup filter", Options = RUNE_LIST, Multi = true, Default = RUNE_LIST,
+    Flag = "ANT_RuneSel", Searchable = true,
+    Callback = function(v)
+        local list = {}
+        if type(v) == "table" then
+            for _, name in ipairs(v) do table.insert(list, tostring(name)) end
+        elseif type(v) == "string" then
+            list = { v }
+        end
+        Cfg.runeSel = list
+    end,
+})
+GBRune:CreateDropdown({
+    Name = "Monitor filter", Options = RUNE_LIST, Multi = true, Default = RUNE_LIST,
+    Flag = "ANT_RuneMonSel", Searchable = true,
+    Callback = function(v)
+        local list = {}
+        if type(v) == "table" then
+            for _, name in ipairs(v) do table.insert(list, tostring(name)) end
+        elseif type(v) == "string" then
+            list = { v }
+        end
+        Cfg.runeMonSel = list
+        Stat.monRefresh = true
+    end,
+})
+GBRune:CreateDivider()
+local tgAutoStorm = GBRune:CreateToggle({
+    Name = "Auto storm (cuaca event)", CurrentValue = false, Flag = "ANT_AutoStorm",
+    Callback = function(on) Cfg.autoStorm = on and true or false end,
+})
+GBRune:CreateButtonRow({
+    Buttons = {
+        { Name = "Place Storm", Callback = function() Stat.stormManual = "place" end },
+        { Name = "Pickup Storm", Callback = function() Stat.stormManual = "take" end },
+    },
+})
+local StormLabel = GBRune:CreateLabel({ Text = "Storm: -" })
+local RuneSlots = brSlots(GBRune, TUNE.monSlots, "Rune")
+
+GBBrInfo:CreateParagraph({ Title = "Boulder", Content = "Dipukul lewat proximity prompt berulang (HP besar). Prompt ditembak langsung, tanpa hold." })
+GBBrInfo:CreateParagraph({ Title = "Rune", Content = "DroppedRunes bebas diambil; PlotRunes milik orang lain dilewati (runemu sendiri dipakai Auto Storm)." })
+GBBrInfo:CreateParagraph({ Title = "Storm", Content = "Place saat cuaca event, ambil kembali saat NormalWeather. Wajib di plot, lalu balik ke posisi semula." })
+
+-- ==================== SHOP TAB ====================
+local GBUpgrade = TabShop:CreateGroupbox({ Name = "Auto Upgrade", Side = "Left" })
+local GBPick = TabShop:CreateGroupbox({ Name = "Pickaxe", Side = "Left" })
+local GBBomb = TabShop:CreateGroupbox({ Name = "Bomb", Side = "Left" })
+local GBRadar = TabShop:CreateGroupbox({ Name = "Radar", Side = "Left" })
+local GBShopInfo = TabShop:CreateGroupbox({ Name = "Info", Side = "Right" })
+
+GBUpgrade:CreateToggle({ Name = "Warmth", CurrentValue = false, Flag = "ANT_UpWarmth",
+    Callback = function(on) Cfg.upWarmth = on and true or false end })
+GBUpgrade:CreateToggle({ Name = "Carry", CurrentValue = false, Flag = "ANT_UpCarry",
+    Callback = function(on) Cfg.upCarry = on and true or false end })
+GBUpgrade:CreateSlider({
+    Name = "Simpan coins", Range = { 0, 10000000 }, Increment = 10000, CurrentValue = 0, Flag = "ANT_Reserve",
+    Callback = function(v) Cfg.reserve = math.floor(tonumber(v) or 0) end,
+})
+local UpgLabel = GBUpgrade:CreateLabel({ Text = "upgrade: -" })
+
+-- pickaxe list
+local pickNames, pickFirst = {}, nil
+do
+    local _pdl = D("PickaxeData")
+    if _pdl then
+        for i, v in ipairs(_pdl) do
+            local label = string.format("%d. %s (%s)", i, v.name, fmtMoney(v.price))
+            pickNames[i] = label
+            pickFirst = pickFirst or label
+        end
+    end
+    if #pickNames == 0 then pickNames = { "9" } pickFirst = "9" end
+end
+GBPick:CreateDropdown({
+    Name = "Pickaxe", Options = pickNames, CurrentOption = pickFirst, Searchable = true, Flag = "ANT_PickList",
+    Callback = function(v)
+        if type(v) == "table" then v = v[1] end
+        local _pd = D("PickaxeData")
+        local n = (_pd and #_pd) or 21
+        if type(v) == "number" then
+            Cfg.pickSel = math.clamp(math.floor(v + 0), 1, n)
+        else
+            Cfg.pickSel = math.clamp(tonumber(tostring(v):match("^(%d+)")) or 9, 1, n)
+        end
+    end,
+})
+GBPick:CreateButton({ Name = "Buy", Icon = "credit-card", Callback = function() buyPickaxe(Cfg.pickSel, true) end })
+GBPick:CreateButton({ Name = "Equip", Icon = "hammer", Callback = function()
+    pcall(function() R("ShopRemotes", "EquipPickaxe"):FireServer(Cfg.pickSel) end)
+    logPush("equip pickaxe " .. tostring(Cfg.pickSel))
+end })
+
+-- bomb list
+local bombIds = {}
+do
+    local _bdl = D("BombData")
+    if _bdl and _bdl.List then
+        for _, v in ipairs(_bdl.List) do
+            table.insert(bombIds, string.format("%s (%s)", v.id, fmtMoney(v.price)))
+        end
+    end
+    if #bombIds == 0 then bombIds = { "ClassicBomb" } end
+end
+GBBomb:CreateDropdown({
+    Name = "Bomb", Options = bombIds, Multi = true, Default = { bombIds[1] },
+    Flag = "ANT_BombSel", Searchable = true,
+    Callback = function(v)
+        local list = {}
+        local function put(s)
+            local id = tostring(s):match("^(%S+)")
+            if id then table.insert(list, id) end
+        end
+        if type(v) == "table" then
+            for _, s in ipairs(v) do put(s) end
+        elseif type(v) == "string" then
+            put(v)
+        end
+        Cfg.bombSel = list
+    end,
+})
+GBBomb:CreateToggle({ Name = "Auto buy", CurrentValue = false, Flag = "ANT_AutoBomb",
+    Callback = function(on) Cfg.autoBomb = on and true or false end })
+GBBomb:CreateButton({ Name = "Buy Now", Icon = "shopping-bag", Callback = function() buyBombs() end })
+
+-- radar list
+local radarIds = {}
+do
+    local _rdl = D("RadarData")
+    if _rdl and _rdl.List then
+        for _, v in ipairs(_rdl.List) do
+            table.insert(radarIds, string.format("%s (%s)", v.id, fmtMoney(v.price)))
+        end
+    end
+    if #radarIds == 0 then radarIds = { "BoulderRadar" } end
+end
+GBRadar:CreateDropdown({
+    Name = "Radar", Options = radarIds, Multi = true, Default = { radarIds[1] },
+    Flag = "ANT_RadarSel", Searchable = true,
+    Callback = function(v)
+        local list = {}
+        local function put(s)
+            local id = tostring(s):match("^(%S+)")
+            if id then table.insert(list, id) end
+        end
+        if type(v) == "table" then
+            for _, s in ipairs(v) do put(s) end
+        elseif type(v) == "string" then
+            put(v)
+        end
+        Cfg.radarSel = list
+    end,
+})
+GBRadar:CreateToggle({ Name = "Auto buy", CurrentValue = false, Flag = "ANT_AutoRadar",
+    Callback = function(on) Cfg.autoRadar = on and true or false end })
+GBRadar:CreateButton({ Name = "Buy Now", Icon = "shopping-bag", Callback = function() buyRadars() end })
+
+GBShopInfo:CreateParagraph({ Title = "Reserve", Content = "Sisa coins yang tidak boleh dibelanjakan. Semua auto-buy menghormati angka ini." })
+GBShopInfo:CreateParagraph({ Title = "Warmth / Carry", Content = "Ambil step upgrade terbesar yang masih kebeli (10/50/100 warmth, 1/5/10 carry) tiap 10 detik." })
+
+-- ==================== MISC TAB ====================
+local GBMove = TabMisc:CreateGroupbox({ Name = "Movement", Side = "Left" })
+local GBGfx = TabMisc:CreateGroupbox({ Name = "Graphic", Side = "Left" })
+local GBMiscInfo = TabMisc:CreateGroupbox({ Name = "Info", Side = "Right" })
+
+GBMove:CreateToggle({ Name = "Fly (joystick/analog + UPDN)", CurrentValue = false, Flag = "ANT_Fly",
+    Tooltip = "CFrame-step: replikasi milik sendiri, fisika nol, tanpa rubberband.",
+    Callback = function(on) Cfg.fly = on and true or false end })
+GBMove:CreateSlider({
+    Name = "Fly speed", Range = { 10, 150 }, Increment = 1, CurrentValue = 50, Flag = "ANT_FlySpeed",
+    Callback = function(v) Cfg.flySpeed = math.clamp(math.floor(tonumber(v) or 50), 10, 150) end,
+})
+GBMove:CreateToggle({ Name = "NoClip", CurrentValue = false, Flag = "ANT_Noclip",
+    Callback = function(on)
+        Cfg.noclip = on and true or false
+        if not on then restoreCollide() end
+    end })
+GBMove:CreateToggle({ Name = "Anti-AFK", CurrentValue = false, Flag = "ANT_AntiAfk",
+    Callback = function(on) Cfg.antiAfk = on and true or false setAfk(on) end })
+GBMove:CreateToggle({ Name = "Anti ragdoll", CurrentValue = false, Flag = "ANT_AntiRagdoll",
+    Callback = function(on)
+        Cfg.antiRagdoll = on and true or false
+        if not on then setRagdoll(true) end
+    end })
+GBMove:CreateToggle({ Name = "Speed booster", CurrentValue = false, Flag = "ANT_Speed",
+    Callback = function(on)
+        Cfg.speed = on and true or false
+        if not on then
+            local char = LP.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if hum then hum.WalkSpeed = 16 end
+        end
+    end })
+GBMove:CreateSlider({
+    Name = "Speed value (risiko kick)", Range = { 16, 120 }, Increment = 1, CurrentValue = 32, Flag = "ANT_SpeedVal",
+    Callback = function(v) Cfg.speedVal = math.clamp(math.floor(tonumber(v) or 32), 16, 120) end,
+})
+
+GBGfx:CreateToggle({ Name = "Anti lag", CurrentValue = false, Flag = "ANT_AntiLag",
+    Callback = function(on) Cfg.antiLag = on and true or false setAntiLag(on) end })
+GBGfx:CreateToggle({ Name = "No render (layar hitam, farm jalan)", CurrentValue = false, Flag = "ANT_NoRender",
+    Callback = function(on) Cfg.noRender = on and true or false setNoRender(on) end })
+
+GBMiscInfo:CreateParagraph({ Title = "Fly", Content = "Horizontal: MoveDirection (WASD / joystick). Vertikal: Space / LeftControl atau tombol UPDN di HP." })
+GBMiscInfo:CreateParagraph({ Title = "Speed", Content = "Mengubah WalkSpeed - berisiko kick di game dengan deteksi kecepatan. Pakai dengan hati-hati." })
+
+-- ==================== SERVER TAB ====================
+local GBSrvPlayers = TabServer:CreateGroupbox({ Name = "Players", Side = "Left" })
+local GBSrvAct = TabServer:CreateGroupbox({ Name = "Server Actions", Side = "Right" })
+local GBSrvMet = TabServer:CreateGroupbox({ Name = "Meteor", Side = "Left" })
+
+local PlayerListDropdown
+PlayerListDropdown = GBSrvPlayers:CreateDropdown({
+    Name = "Player", Options = Server.playerNames(), CurrentOption = "(none)", Searchable = true, Flag = "ANT_ServerPlayer",
+})
+GBSrvPlayers:CreateButton({ Name = "Refresh Players", Icon = "refresh-cw", Callback = function()
+    local vals = Server.playerNames()
+    pcall(function()
+        PlayerListDropdown:SetOptions(vals)
+    end)
+    notify("Players", tostring(#vals) .. " terdaftar")
+end })
+GBSrvPlayers:CreateButton({ Name = "Teleport to Player", Icon = "map-pin", Callback = function()
+    local name = (type(PlayerListDropdown:Get()) == "table") and PlayerListDropdown:Get()[1] or PlayerListDropdown:Get()
+    local ok, err = Server.teleportTo(name)
+    notify("TP Player", ok and ("-> " .. tostring(name)) or tostring(err))
+end })
+
+GBSrvAct:CreateButton({ Name = "Rejoin", Icon = "log-out", Callback = function()
+    local ok, err = Server.rejoin()
+    if not ok then notify("Rejoin", tostring(err)) end
+end })
+GBSrvAct:CreateButtonRow({
+    Buttons = {
+        { Name = "Hop (full)", Callback = function()
+            local ok, err = Server.hop("full")
+            if not ok then notify("Hop", tostring(err)) end
+        end },
+        { Name = "Hop (sepi)", Callback = function()
+            local ok, err = Server.hop("low")
+            if not ok then notify("Hop", tostring(err)) end
+        end },
+    },
+})
+GBSrvAct:CreateDivider()
+GBSrvAct:CreateButton({ Name = "Go Home", Icon = "house", Callback = function()
+    local ok, err = Server.goHome()
+    notify("Go Home", ok and "OK" or tostring(err))
+end })
+GBSrvAct:CreateButton({ Name = "Teleport Peak", Icon = "mountain-snow", Callback = function()
+    local ok, msg = Server.peak()
+    notify(ok and "Peak" or "Peak gagal", tostring(msg))
+end })
+GBSrvAct:CreateButtonRow({
+    Buttons = {
+        { Name = "Reset Character", Callback = function()
+            local ok, err = Server.resetCharacter()
+            if not ok then notify("Reset", tostring(err)) end
+        end },
+        { Name = "Refresh (posisi balik)", Callback = function()
+            local ok, err = Server.refresh()
+            notify("Refresh", ok and "Respawn..." or tostring(err))
+        end },
+    },
+})
+GBSrvAct:CreateKeybind({ Name = "Refresh key", Default = "R", Callback = function()
+    local ok, err = Server.refresh()
+    notify("Refresh", ok and "Respawn..." or tostring(err))
+end })
+
+local MeteorLabel = GBSrvMet:CreateStatus({
+    Name = "Meteor", Style = "Row", Pin = true,
+    Update = function()
+        local okA, active = pcall(function() return R("MeteorRemotes", "Active").Value end)
+        if not okA or not active then
+            return "- (tidak ada event)"
+        end
+        local okP, pos = pcall(function() return R("MeteorRemotes", "ImpactPos").Value end)
+        local h = getHRP()
+        local ph = ""
+        pcall(function() ph = tostring(R("MeteorRemotes", "Phase").Value) end)
+        if okP and pos and h then
+            local d = math.floor((h.Position - pos).Magnitude)
+            if d < 12 then
+                return string.format("[%s] HERE!", ph)
+            end
+            return string.format("[%s] %dm", ph, d)
+        end
+        return "[" .. tostring(ph) .. "] aktif"
+    end,
+    UpdateRate = 1,
+})
+GBSrvMet:CreateButton({ Name = "Teleport to Impact", Icon = "crosshair", Callback = function()
+    local h = getHRP()
+    if not h then
+        notify("Meteor", "No HRP.")
+        return
+    end
+    local okA, active = pcall(function() return R("MeteorRemotes", "Active").Value end)
+    local okP, pos = pcall(function() return R("MeteorRemotes", "ImpactPos").Value end)
+    if not okA or not active then
+        notify("Meteor", "Tak ada event aktif.")
+        return
+    end
+    if not okP or not pos then
+        notify("Meteor", "ImpactPos tak terbaca.")
+        return
+    end
+    local ok, err = pcall(function()
+        tpTo(h, CFrame.new(pos + Vector3.new(0, TUNE.tpLift, 0)))
+    end)
+    if ok then
+        logPush("tp meteor " .. tostring(pos))
+    else
+        notify("Meteor", "TP gagal: " .. tostring(err):sub(1, 60))
+    end
+end })
+
+-- ==================== SETTING TAB ====================
+TabSetting:CreateConfigManager({ Side = "Left" })
+TabSetting:CreateThemeManager({ Side = "Right" })
+local GBSet = TabSetting:CreateGroupbox({ Name = "Menu", Side = "Left" })
+GBSet:CreateSlider({
+    Name = "UI scale", Range = { 60, 150 }, Increment = 5, Suffix = "%", CurrentValue = 100, Flag = "ANT_Dpi",
+    Callback = function(v) pcall(function() Window:SetUIScale(math.clamp((tonumber(v) or 100) / 100, 0.6, 1.5)) end) end,
+})
+GBSet:CreateButton({ Name = "Unload Hub", Icon = "power", Confirm = true, Callback = function()
+    if getgenv()._ANT_HUB_UNLOAD then
+        pcall(getgenv()._ANT_HUB_UNLOAD)
+        getgenv()._ANT_HUB_UNLOAD = nil
+    end
+end })
+
+-- config dimuat setelah semua kontrol (Flag) terdaftar
+pcall(function() Window:LoadAutoload() end)
+
+-- ==================== UNLOAD ====================
+local function fullUnload()
+    resetCfg()
+    pcall(stopFly)
+    pcall(restoreCollide)
+    pcall(setRagdoll, true)
+    pcall(setAfk, false)
+    pcall(setAntiLag, false)
+    pcall(setNoRender, false)
+    pcall(espClear)
+    pcall(function()
+        local char = LP.Character
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = 16 end
+    end)
+    pcall(function()
+        if getgenv()._AntHubWin and getgenv()._AntHubWin.Destroy then
+            getgenv()._AntHubWin:Destroy()
+        end
+    end)
+    getgenv()._AntHubWin = nil
+    print("[hub] unloaded")
+end
+getgenv()._ANT_HUB_UNLOAD = fullUnload
+if RL_STATE then
+    RL_STATE.onCleanup(function()
+        resetCfg()
+        pcall(stopFly)
+        pcall(restoreCollide)
+        pcall(setRagdoll, true)
+        pcall(setAfk, false)
+        pcall(setAntiLag, false)
+        pcall(setNoRender, false)
+        pcall(espClear)
+        pcall(function()
+            if getgenv()._AntHubWin and getgenv()._AntHubWin.Destroy then
+                getgenv()._AntHubWin:Destroy()
+            end
+        end)
+    end)
+end
+
+getgenv()._ANT_HUB_DBG = function()
+    local n = 0
+    for _ in pairs(espMarks) do n += 1 end
+    return string.format(
+        "vacuum=%s teleport=%s autoSell=%s dig=%s drill=%s r=%d minRar=%d monRar=%s monSort=%s esp=%d tick=%ds lalu=%s",
+        tostring(Cfg.vacuum), tostring(Cfg.teleport), tostring(Cfg.autoSell),
+        tostring(Cfg.dig), tostring(Cfg.drill), Cfg.digRadius,
+        Cfg.minRarity, table.concat(Cfg.monRar, "+"), tostring(Cfg.monSort), n,
+        math.floor(os.clock() - (Stat.lastTick or 0)), tostring(Stat.lastTarget or "-"))
+end
+
+-- ==================== LOOPS ====================
+local function doSell()
+    local h = getHRP()
+    if not h then
+        return
+    end
+    if countBag() <= 0 then
+        Stat.sellNow = false
+        return
+    end
+    Stat.selling = true
+    local back = h.CFrame
+    pcall(function() R("BackpackRemotes", "TeleportSell"):FireServer() end)
+    task.wait(TUNE.sellTpWait)
+    pcall(function() R("GemRemotes", "RequestSell"):FireServer("All") end)
+    task.wait(TUNE.sellWait)
+    tpTo(h, back)
+    Stat.sellNow = false
+    Stat.selling = false
+    local c = tostring(LP.leaderstats.Coins.Value)
+    logPush("sold, coins=" .. c)
+    notify("Sold", "Coins: " .. c)
+end
+
+-- cache UpgradeState server (level + harga)
+local Upg = {}
+local _upgEv = R("UpgradeRemotes", "UpgradeState")
+local function hookUpgrade()
+    if not _upgEv then return end
+    _upgEv.OnClientEvent:Connect(function(p)
+        if type(p) == "table" then
+            Upg = p
+        end
+    end)
+end
+if RL_STATE then
+    if _upgEv then
+        RL_STATE.connect(_upgEv.OnClientEvent, function(p)
+            if type(p) == "table" then
+                Upg = p
+            end
+        end)
+    end
+else
+    hookUpgrade()
+end
+
+-- meteor: notif saat event mulai
+local _metEv = R("MeteorRemotes", "Active")
+local function hookMeteor()
+    if not _metEv then return end
+    _metEv.Changed:Connect(function(v)
+        if v then
+            notify("Meteor", "Incoming! TP dari tab Server.")
+            logPush("meteor incoming")
+        else
+            logPush("meteor end")
+        end
+    end)
+end
+if RL_STATE then
+    if _metEv then
+        RL_STATE.connect(_metEv.Changed, function(v)
+            if v then
+                notify("Meteor", "Incoming! TP dari tab Server.")
+                logPush("meteor incoming")
+            else
+                logPush("meteor end")
+            end
+        end)
+    end
+else
+    hookMeteor()
+end
+
+local WARM_STEPS = { 10, 50, 100 }
+local CARRY_STEPS = { 1, 5, 10 }
+
+local function biggestStep(prices, steps, coins)
+    local idx
+    for i = 1, #steps do
+        local price = tonumber(prices and prices[i]) or 0
+        if price > 0 and coins >= price then
+            idx = i
+        end
+    end
+    return idx
+end
+
+local function doUpgrade()
+    local coins = LP.leaderstats.Coins.Value
+    local budget = coins - Cfg.reserve
+    if budget <= 0 then
+        return
+    end
+    for _, kind in ipairs({ "warmth", "carry" }) do
+        local on = (kind == "warmth" and Cfg.upWarmth) or (kind == "carry" and Cfg.upCarry)
+        if on then
+            local lvl = tonumber(Upg[kind]) or 0
+            local maxN = tonumber(Upg[kind == "warmth" and "maxWarmthN" or "maxCarryN"]) or 0
+            if maxN <= 0 or lvl < maxN then
+                local prices = Upg[kind .. "Prices"]
+                local steps = kind == "warmth" and WARM_STEPS or CARRY_STEPS
+                local idx = biggestStep(prices, steps, budget)
+                if idx then
+                    local _bu = R("UpgradeRemotes", "BuyUpgrade")
+                    if _bu then _bu:FireServer(kind, steps[idx]) end
+                    logPush("buy " .. kind .. " +" .. steps[idx])
+                    return
+                end
+            end
+        end
+    end
+end
+
+local function upgradeLabel()
+    local w = Upg.warmth and ("W" .. Upg.warmth) or "W?"
+    local c = Upg.carry and ("C" .. Upg.carry) or "C?"
+    local eq = tonumber(LP:GetAttribute("EquippedPickaxe")) or 0
+    local _pd = D("PickaxeData")
+    local pn = (_pd and _pd[eq] and _pd[eq].name) or "?"
+    pcall(function() UpgLabel:Set(string.format("upgrade: %s %s | %s", w, c, pn)) end)
+end
+
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if (Cfg.upWarmth or Cfg.upCarry) and not Stat.selling then
+                doUpgrade()
+                upgradeLabel()
+            end
+        end)
+        if not ok then
+            warn("[hub] upgrade " .. tostring(err))
+        end
+        task.wait(10)
+    end
+end)
+
+-- auto buy bomb: loop sendiri tiap bombTick, coba terus sampai sukses / toggle mati
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if Cfg.autoBomb and not Stat.selling then
+                buyBombs()
+            end
+        end)
+        if not ok then
+            warn("[hub] bomb " .. tostring(err))
+        end
+        task.wait(TUNE.bombTick)
+    end
+end)
+
+-- auto buy radar: mirror bomb (beli 1 per tick, termurah dulu)
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if Cfg.autoRadar and not Stat.selling then
+                buyRadars()
+            end
+        end)
+        if not ok then
+            warn("[hub] radar " .. tostring(err))
+        end
+        task.wait(TUNE.bombTick)
+    end
+end)
+
+-- fly + noclip + speed + anti-afk + anti-ragdoll manager
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        task.wait(0.2)
+        if not alive or (RL_STATE and not RL_STATE.alive()) then
+            break
+        end
+        local wantFly = Cfg.fly
+        local hasFly = flyConn ~= nil
+        if wantFly and not hasFly then
+            local char = LP.Character
+            local h = char and char:FindFirstChild("HumanoidRootPart")
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if h and hum then
+                hum.PlatformStand = true
+                pcall(function()
+                    h.CanCollide = false
+                    h.AssemblyLinearVelocity = Vector3.zero
+                    h.AssemblyAngularVelocity = Vector3.zero
+                end)
+                flyButtons()
+                flyConn = RunS.Heartbeat:Connect(function(dt)
+                    if not Cfg.fly then
+                        return
+                    end
+                    local char2 = LP.Character
+                    local h2 = char2 and char2:FindFirstChild("HumanoidRootPart")
+                    local hum2 = char2 and char2:FindFirstChildOfClass("Humanoid")
+                    if not h2 then
+                        return
+                    end
+                    local cam = workspace.CurrentCamera
+                    local move = Vector3.zero
+                    if hum2 then
+                        local md = hum2.MoveDirection
+                        move = Vector3.new(md.X, 0, md.Z)
+                        if move.Magnitude > 1 then
+                            move = move.Unit
+                        end
+                    end
+                    if UIS:IsKeyDown(Enum.KeyCode.Space) or flyUp then
+                        move += Vector3.new(0, 1, 0)
+                    end
+                    if UIS:IsKeyDown(Enum.KeyCode.LeftControl) or flyDn then
+                        move -= Vector3.new(0, 1, 0)
+                    end
+                    if dt > 0.1 then
+                        dt = 0.1
+                    end
+                    pcall(function()
+                        h2.AssemblyLinearVelocity = Vector3.zero
+                        h2.AssemblyAngularVelocity = Vector3.zero
+                        h2.CanCollide = false
+                    end)
+                    if move.Magnitude > 0 then
+                        local step = move.Unit * Cfg.flySpeed * dt
+                        local lv = cam.CFrame.LookVector
+                        local yaw = math.atan2(-lv.X, -lv.Z)
+                        h2.CFrame = CFrame.new(h2.Position + step) * CFrame.Angles(0, yaw, 0)
+                    end
+                end)
+            end
+        elseif not wantFly and hasFly then
+            stopFly()
+        end
+        if Cfg.noclip then
+            if not noclipConn then
+                noclipConn = RunS.Stepped:Connect(function()
+                    if not Cfg.noclip then
+                        return
+                    end
+                    local char = LP.Character
+                    if char then
+                        for _, p in ipairs(char:GetDescendants()) do
+                            if p:IsA("BasePart") and p.CanCollide then
+                                p.CanCollide = false
+                            end
+                        end
+                    end
+                end)
+            end
+        elseif noclipConn then
+            pcall(function() noclipConn:Disconnect() end)
+            noclipConn = nil
+            restoreCollide()
+        end
+        if Cfg.speed then
+            local char = LP.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if hum and hum.WalkSpeed ~= Cfg.speedVal then
+                hum.WalkSpeed = Cfg.speedVal
+            end
+        end
+        if Cfg.antiRagdoll then
+            setRagdoll(false)
+            local char = LP.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                local st = hum:GetState()
+                if st == Enum.HumanoidStateType.Ragdoll
+                    or st == Enum.HumanoidStateType.FallingDown
+                    or st == Enum.HumanoidStateType.Physics then
+                    pcall(function() hum:ChangeState(Enum.HumanoidStateType.GettingUp) end)
+                end
+            end
+        end
+        setAfk(Cfg.antiAfk)
+        if Cfg.antiAfk and os.clock() - (Stat.afkMoveAt or 0) > 840 then
+            afkPulse("14min")
+        end
+        if os.clock() - (Stat.afkKillAt or 0) > 5 then
+            Stat.afkKillAt = os.clock()
+            local ps = LP:FindFirstChild("PlayerScripts")
+            if ps and ps:FindFirstChild("AntiIdleClient") then
+                killAntiIdle()
+            end
+        end
+    end
+    stopFly()
+    if noclipConn then
+        pcall(function() noclipConn:Disconnect() end)
+        noclipConn = nil
+    end
+    setAfk(false)
+    restoreCollide()
+end)
+
+-- ------------------------------- monitors
+local function refreshBoulderMonitor()
+    local h = getHRP()
+    local myPos = h and h.Position or Vector3.zero
+    local rows = {}
+    if getBD() and getBD().Parent then
+        for _, m in ipairs(getBD():GetChildren()) do
+            local mesh = m:FindFirstChild("Mesh_0", true) or m:FindFirstChildWhichIsA("BasePart", true)
+            if mesh then
+                table.insert(rows, {
+                    m = m,
+                    name = tostring(m:GetAttribute("DisplayName") or m:GetAttribute("BoulderId") or m.Name),
+                    d = (mesh.Position - myPos).Magnitude,
+                    pos = mesh.Position,
+                })
+            end
+        end
+    end
+    table.sort(rows, function(a, b) return a.d < b.d end)
+    fillSlots(BoulderSlots, rows, function(i, r)
+        return string.format("%d. [B] %s  %.0fm", i, r.name, r.d)
+    end)
+end
+
+local function refreshRuneMonitor()
+    if not getPR() or not getPR().Parent then
+        _wcache["PlotRunes"] = workspace:FindFirstChild("PlotRunes")
+    end
+    if not getDR() or not getDR().Parent then
+        _wcache["DroppedRunes"] = workspace:FindFirstChild("DroppedRunes")
+    end
+    local h = getHRP()
+    local myPos = h and h.Position or Vector3.zero
+    local rows = {}
+    local want = {}
+    for _, r in ipairs(Cfg.runeMonSel) do
+        want[r] = true
+    end
+    if getDR() then
+        for _, m in ipairs(getDR():GetDescendants()) do
+            if m:IsA("Model") then
+                local rid = m:GetAttribute("RuneId")
+                if rid and want[rid] then
+                    local pos = runePos(m)
+                    if pos then
+                        table.insert(rows, {
+                            m = m,
+                            name = tostring(rid) .. " x" .. tostring(m:GetAttribute("Merged") or 1),
+                            d = (pos - myPos).Magnitude,
+                            pos = pos,
+                        })
+                    end
+                end
+            end
+        end
+    end
+    table.sort(rows, function(a, b) return a.d < b.d end)
+    fillSlots(RuneSlots, rows, function(i, r)
+        return string.format("%d. [R] %s  %.0fm", i, r.name, r.d)
+    end)
+end
+
+local function refreshMonitor()
+    local h = getHRP()
+    local myPos = h and h.Position or Vector3.zero
+    local rows = {}
+    local want = {}
+    for _, r in ipairs(Cfg.monRar) do
+        want[r] = true
+    end
+    local function scan(folder)
+        if not folder then return end
+        for _, m in ipairs(folder:GetChildren()) do
+            if want[m:GetAttribute("Rarity")] then
+                local pos = claimPos(m)
+                if pos then
+                    table.insert(rows, {
+                        m = m,
+                        name = m:GetAttribute("GemName") or m.Name,
+                        d = (pos - myPos).Magnitude,
+                        pos = pos,
+                        value = tonumber(m:GetAttribute("Value")) or 0,
+                        luck = effLuck(m),
+                        kg = tonumber(m:GetAttribute("Kg")) or 0,
+                    })
+                end
+            end
+        end
+    end
+    scan(getSG())
+    scan(getDG())
+    if Cfg.monSort == "Luck" then
+        table.sort(rows, function(a, b) return a.luck > b.luck end)
+    else
+        table.sort(rows, function(a, b) return a.value > b.value end)
+    end
+    H.monText = tostring(#rows)
+    fillSlots(MonSlots, rows, function(i, r)
+        local rar = r.m:GetAttribute("Rarity") or "Common"
+        local badge = rar:sub(1, 1)
+        local kg = r.kg >= 1000 and string.format("%.2ft", r.kg / 1000) or string.format("%.1fkg", r.kg)
+        return string.format("%d. [%s] %s  %s  +%.1f%%  %s  %.0fm", i, badge,
+            r.m:GetAttribute("GemName") or r.m.Name, fmtMoney(r.value), r.luck, kg, r.d)
+    end)
+end
+
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if Stat.monRefresh or os.clock() - (Stat.monAt or 0) > TUNE.monEveryS then
+                Stat.monAt = os.clock()
+                Stat.monRefresh = false
+                refreshMonitor()
+                refreshBoulderMonitor()
+                refreshRuneMonitor()
+                espRefresh()
+                if os.clock() - (Stat.pruneAt or 0) > TUNE.pruneEveryS then
+                    Stat.pruneAt = os.clock()
+                    for uid, t in pairs(Stat.tryAt) do
+                        if os.clock() - t > TUNE.retryS * 10 then
+                            Stat.tryAt[uid] = nil
+                        end
+                    end
+                end
+            end
+            H.bagText = string.format("%d item  %.1f%%", countBag(), bagPct())
+        end)
+        if not ok then
+            warn("[hub] monitor " .. tostring(err))
+        end
+        task.wait(TUNE.monTickS)
+    end
+end)
+
+-- ------------------------------- vacuum loop (instant prompt)
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            Stat.lastTick = os.clock()
+            local h = getHRP()
+            if not h then
+                return
+            end
+            if Stat.sellNow or (Cfg.autoSell and not Stat.selling
+                and (LP:GetAttribute("BagFull") == true or bagPct() >= Cfg.sellPct)) then
+                doSell()
+                return
+            end
+            if Stat.selling or not Cfg.vacuum then
+                return
+            end
+            local myPos = h.Position
+            local cand = {}
+            local function consider(m, w)
+                if (RARITY_RANK[m:GetAttribute("Rarity")] or 1) < Cfg.minRarity then
+                    return
+                end
+                local pr = promptOf(m)
+                if pr then
+                    local pos = claimPos(m, pr)
+                    if pos then
+                        local d = (pos - myPos).Magnitude
+                        table.insert(cand, { m = m, d = d, pr = pr, pos = pos, score = d * (w or 1), range = promptRange(pr) })
+                    end
+                end
+            end
+            -- drop bisa despawn: bobot jarak 0.8x
+            if getDG() then
+                for _, m in ipairs(getDG():GetChildren()) do
+                    consider(m, 0.8)
+                end
+            end
+            if getSG() then
+                for _, m in ipairs(getSG():GetChildren()) do
+                    if m:GetAttribute("Freed") then
+                        consider(m, 1)
+                    end
+                end
+            end
+            if #cand == 0 then
+                if Stat.basePos then
+                    tpTo(h, Stat.basePos)
+                    Stat.basePos = nil
+                end
+                H.target = "-"
+                if not Stat.swept then
+                    Stat.swept = true
+                    logPush("tak ada freed, standby")
+                end
+                return
+            end
+            -- urut skor: yg dalam jangkauan + tak cooldown ditembak dulu
+            table.sort(cand, function(a, b) return a.score < b.score end)
+            local best = cand[1]
+            local now = os.clock()
+            local pick = nil
+            for _, c in ipairs(cand) do
+                local uid = c.m:GetAttribute("Uid") or c.m.Name
+                if now - (Stat.tryAt[uid] or 0) >= TUNE.retryS and c.d <= c.range + TUNE.targetSlack then
+                    pick = c
+                    break
+                end
+            end
+            if not pick then
+                local uid = best.m:GetAttribute("Uid") or best.m.Name
+                if now - (Stat.tryAt[uid] or 0) < TUNE.retryS then
+                    return
+                end
+                pick = best
+            end
+            best = pick
+            local bestD, bestP, bestPos = best.d, best.pr, best.pos
+            Stat.swept = false
+            Stat.lastTarget = best.m.Name .. " " .. math.floor(bestD) .. "st"
+            H.target = string.format("%s  %.0fst  (range %.0f)", tostring(best.m:GetAttribute("GemName") or best.m.Name), bestD, best.range)
+            if os.clock() - (Stat.lastBeat or 0) > 30 then
+                Stat.lastBeat = os.clock()
+                logPush("kerja: " .. Stat.lastTarget)
+            end
+            local uid = best.m:GetAttribute("Uid") or best.m.Name
+            if bestD > best.range - 2 then
+                if not Cfg.teleport then
+                    -- tanpa teleport tetap coba: titik ukur client bisa meleset dari server
+                    Stat.tryAt[uid] = os.clock()
+                    if firePrompt(bestP) then
+                        H.status = "Pickup (instant): " .. tostring(best.m.Name)
+                    end
+                    return
+                end
+                if not Stat.basePos then
+                    Stat.basePos = h.CFrame
+                end
+                local tp = (bestPos or best.m:GetPivot().Position) + Vector3.new(0, TUNE.tpLift, 0)
+                tpTo(h, CFrame.new(tp))
+                task.wait(TUNE.settleWait)
+                if best.m.Parent == nil then
+                    return
+                end
+            end
+            Stat.tryAt[uid] = os.clock()
+            if firePrompt(bestP) then
+                H.status = "Pickup (instant): " .. tostring(best.m.Name)
+            else
+                H.status = "Pickup gagal (prompt tertutup): " .. tostring(best.m.Name)
+            end
+        end)
+        if not ok then
+            warn("[hub] " .. tostring(err))
+        end
+        task.wait(TUNE.tickS)
+    end
+end)
+
+-- ------------------------------- auto dig 360 deg
+local digRay = RaycastParams.new()
+digRay.FilterType = Enum.RaycastFilterType.Include
+digRay.FilterDescendantsInstances = { workspace.Terrain }
+
+local function equippedPickaxe()
+    local c = LP.Character
+    if c then
+        for _, t in ipairs(c:GetChildren()) do
+            if t:IsA("Tool") and t:GetAttribute("Cooldown") ~= nil then
+                return t
+            end
+        end
+    end
+    return nil
+end
+
+local function ensurePickaxe()
+    if equippedPickaxe() then
+        return true
+    end
+    local bp = LP:FindFirstChild("Backpack")
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if bp and hum then
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") and t:GetAttribute("Cooldown") ~= nil then
+                pcall(function() hum:EquipTool(t) end)
+                task.wait(0.3)
+                if equippedPickaxe() ~= nil then
+                    Stat.digEquipWait = os.clock() + 1
+                    return true
+                end
+                return false
+            end
+        end
+    end
+    return false
+end
+
+local function equippedDrill()
+    local c = LP.Character
+    if c then
+        for _, t in ipairs(c:GetChildren()) do
+            if t:IsA("Tool") and t:FindFirstChild("DrillEvent") then
+                return t
+            end
+        end
+    end
+    return nil
+end
+
+-- speed factor gabungan: Haste x potion x gamepass
+local function digSpeedDiv()
+    local div = math.max(tonumber(LP:GetAttribute("RuneHaste")) or 1, 1)
+    if (tonumber(LP:GetAttribute("PotionMining")) or 0) > 0 then
+        div *= 2
+    elseif (tonumber(LP:GetAttribute("MiningPotionUntil")) or 0) > os.clock() then
+        div *= 2
+    end
+    if LP:GetAttribute("Pass_FastDig2x") == true then
+        div *= 2
+    end
+    return div
+end
+
+local function ensureDrill()
+    if equippedDrill() then
+        return true
+    end
+    local bp = LP:FindFirstChild("Backpack")
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if bp and hum then
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") and t:FindFirstChild("DrillEvent") then
+                pcall(function() hum:EquipTool(t) end)
+                task.wait(0.3)
+                if equippedDrill() ~= nil then
+                    return true
+                end
+                return false
+            end
+        end
+    end
+    return false
+end
+
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if not Cfg.drill or Stat.selling or Stat.sellNow then
+                return
+            end
+            if LP:GetAttribute("BagFull") == true then
+                return
+            end
+            if LP:GetAttribute("IsMiningGem") then
+                return
+            end
+            local h = getHRP()
+            if not h then
+                return
+            end
+            if not ensureDrill() then
+                if not Stat.drillNoTool then
+                    Stat.drillNoTool = true
+                    notify("Drill", "Equip Plasma Drill dulu.")
+                end
+                return
+            end
+            Stat.drillNoTool = false
+            Stat.digStep = ((Stat.digStep or 0) + 1) % TUNE.digDirs
+            local a = math.rad(Stat.digStep * (360 / TUNE.digDirs))
+            local center = h.Position
+            local target = center + Vector3.new(math.cos(a), 0, math.sin(a)) * Cfg.digRadius
+            local hit = workspace:Raycast(target + Vector3.new(0, 30, 0), Vector3.new(0, -120, 0), digRay)
+            if hit then
+                if (hit.Position - center).Magnitude > Cfg.digRadius + 4 then
+                    return
+                end
+                local dr = equippedDrill()
+                local dev = dr and dr:FindFirstChild("DrillEvent")
+                local tip = dr and dr:FindFirstChild("Tip", true)
+                if dev and tip and tip:IsA("BasePart") then
+                    local tp = tip.Position
+                    pcall(function()
+                        dev:FireServer("dig", tp, (hit.Position - tp).Unit)
+                    end)
+                end
+                pcall(function() R("DigRemotes", "DigRequest"):FireServer(hit.Position) end)
+                Stat.lastDig = { step = Stat.digStep, pos = hit.Position }
+                if os.clock() - (Stat.lastDigBeat or 0) > 30 then
+                    Stat.lastDigBeat = os.clock()
+                    logPush("drill 360 deg r=" .. Cfg.digRadius)
+                end
+            end
+        end)
+        if not ok then
+            warn("[hub] drill " .. tostring(err))
+        end
+        local cd = 0.22
+        local dr = equippedDrill()
+        if dr then
+            cd = (tonumber(dr:GetAttribute("DigCooldown")) or 0.22) / digSpeedDiv()
+        end
+        task.wait(math.max(cd + 0.02, 0.08))
+    end
+end)
+
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if not Cfg.dig or Stat.selling or Stat.sellNow then
+                return
+            end
+            if LP:GetAttribute("BagFull") == true then
+                return
+            end
+            if LP:GetAttribute("IsMiningGem") then
+                return
+            end
+            local h = getHRP()
+            if not h then
+                return
+            end
+            if not ensurePickaxe() then
+                if not Stat.digNoPick then
+                    Stat.digNoPick = true
+                    notify("Dig", "Tak ada pickaxe di tas.")
+                end
+                return
+            end
+            Stat.digNoPick = false
+            if os.clock() < (Stat.digEquipWait or 0) then
+                return
+            end
+            Stat.digStep = ((Stat.digStep or 0) + 1) % TUNE.digDirs
+            local a = math.rad(Stat.digStep * (360 / TUNE.digDirs))
+            local center = h.Position
+            local target = center + Vector3.new(math.cos(a), 0, math.sin(a)) * Cfg.digRadius
+            local hit = workspace:Raycast(target + Vector3.new(0, 30, 0), Vector3.new(0, -120, 0), digRay)
+            if hit then
+                if (hit.Position - center).Magnitude > Cfg.digRadius + 4 then
+                    return
+                end
+                pcall(function() R("DigRemotes", "DigRequest"):FireServer(hit.Position) end)
+                Stat.lastDig = { step = Stat.digStep, pos = hit.Position }
+                if os.clock() - (Stat.lastDigBeat or 0) > 30 then
+                    Stat.lastDigBeat = os.clock()
+                    logPush("dig 360 deg r=" .. Cfg.digRadius)
+                end
+            end
+        end)
+        if not ok then
+            warn("[hub] dig " .. tostring(err))
+        end
+        local cd = 0.45
+        local pk = equippedPickaxe()
+        if pk then
+            cd = (tonumber(pk:GetAttribute("Cooldown")) or 0.45) / digSpeedDiv()
+        end
+        task.wait(math.max(cd + 0.02, 0.08))
+    end
+end)
+
+-- auto void slam: fire Shatter + LookVector kamera tiap ScytheReadyAt lewat
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if not Cfg.slam or Stat.selling or Stat.sellNow then
+                return
+            end
+            local ch = LP.Character
+            local tool = ch and ch:FindFirstChildOfClass("Tool")
+            if not tool or not tool:FindFirstChild("ScytheEvent") then
+                if not Stat.slamNoTool then
+                    Stat.slamNoTool = true
+                    notify("Slam", "Equip Void Hammer dulu.")
+                end
+                return
+            end
+            Stat.slamNoTool = false
+            local rt = tonumber(LP:GetAttribute("ScytheReadyAt")) or 0
+            if workspace:GetServerTimeNow() < rt then
+                return
+            end
+            local cam = workspace.CurrentCamera
+            local lv = (cam and cam.CFrame.LookVector) or Vector3.new(0, 0, -1)
+            local sh = R("ScytheRemotes", "Shatter")
+            if not sh then
+                return
+            end
+            sh:FireServer(lv)
+            logPush("void slam fired")
+        end)
+        if not ok then
+            warn("[hub] slam " .. tostring(err))
+        end
+        task.wait(2)
+    end
+end)
+
+-- auto mine boulder: fire prompt berulang (HP besar, perlu banyak hit)
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if not Cfg.autoBoulder or Stat.selling then
+                return
+            end
+            local h = getHRP()
+            if not h then
+                return
+            end
+            local myPos = h.Position
+            local best, bestD, bestP = nil, math.huge, nil
+            if getBD() and getBD().Parent then
+                for _, m in ipairs(getBD():GetChildren()) do
+                    local pr = promptOf(m)
+                    if pr then
+                        local pos = claimPos(m, pr)
+                        if pos then
+                            local d = (pos - myPos).Magnitude
+                            if d < bestD then
+                                best, bestD, bestP = m, d, pr
+                            end
+                        end
+                    end
+                end
+            end
+            if not best then
+                return
+            end
+            local range = promptRange(bestP)
+            if bestD > range - 2 then
+                if not Cfg.teleport then
+                    return
+                end
+                local pos = claimPos(best, bestP)
+                if pos then
+                    tpTo(h, CFrame.new(pos + Vector3.new(0, TUNE.tpLift, 0)))
+                    task.wait(TUNE.settleWait)
+                    if best.Parent == nil then
+                        return
+                    end
+                end
+            end
+            firePrompt(bestP)
+            if os.clock() - (Stat.lastBoulderBeat or 0) > 30 then
+                Stat.lastBoulderBeat = os.clock()
+                logPush("mine boulder " .. best.Name .. " d=" .. math.floor(bestD))
+            end
+        end)
+        if not ok then
+            warn("[hub] boulder " .. tostring(err))
+        end
+        task.wait(TUNE.boulderTick)
+    end
+end)
+
+-- auto pickup rune: DroppedRunes (bebas); PlotRunes dikecualikan (milik autoStorm)
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            if not Cfg.autoRune or Stat.selling then
+                return
+            end
+            if not getPR() or not getPR().Parent then
+                _wcache["PlotRunes"] = workspace:FindFirstChild("PlotRunes")
+            end
+            if not getDR() or not getDR().Parent then
+                _wcache["DroppedRunes"] = workspace:FindFirstChild("DroppedRunes")
+            end
+            local h = getHRP()
+            if not h then
+                return
+            end
+            local myPos = h.Position
+            local best, bestD, bestP = nil, math.huge, nil
+            local want = {}
+            for _, r in ipairs(Cfg.runeSel) do
+                want[r] = true
+            end
+            if getDR() then
+                for _, m in ipairs(getDR():GetDescendants()) do
+                    if m:IsA("Model") then
+                        local rid = m:GetAttribute("RuneId")
+                        if rid and want[rid] then
+                            local pr = promptOf(m)
+                            if pr and pr.Enabled then
+                                local pos = runePos(m)
+                                if pos then
+                                    local d = (pos - myPos).Magnitude
+                                    if d < bestD then
+                                        best, bestD, bestP = m, d, pr
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            if not best then
+                return
+            end
+            local uid = "rune_" .. tostring(best:GetDebugId())
+            if os.clock() - (Stat.tryAt[uid] or 0) < TUNE.retryS then
+                return
+            end
+            local range = promptRange(bestP)
+            if bestD > range - 2 then
+                if not Cfg.teleport then
+                    return
+                end
+                local pos = runePos(best)
+                if pos then
+                    tpTo(h, CFrame.new(pos + Vector3.new(0, TUNE.tpLift, 0)))
+                    task.wait(TUNE.settleWait)
+                    if best.Parent == nil then
+                        return
+                    end
+                end
+            end
+            Stat.tryAt[uid] = os.clock()
+            firePrompt(bestP)
+            logPush("pickup rune " .. tostring(best:GetAttribute("RuneId")))
+        end)
+        if not ok then
+            warn("[hub] rune " .. tostring(err))
+        end
+        task.wait(TUNE.runeTick)
+    end
+end)
+
+-- ------------------------------- auto storm
+local function stormPlaced()
+    if not getPR() or not getPR().Parent then
+        _wcache["PlotRunes"] = workspace:FindFirstChild("PlotRunes")
+    end
+    if not getPR() then
+        return false
+    end
+    for _, m in ipairs(getPR():GetDescendants()) do
+        if m:IsA("Model") and m:GetAttribute("RuneId") == "Storm" and m:GetAttribute("OwnerId") == LP.UserId then
+            return true, m
+        end
+    end
+    return false
+end
+
+local function stormTool()
+    local bp = LP:FindFirstChild("Backpack")
+    if bp then
+        for _, t in ipairs(bp:GetChildren()) do
+            if t:IsA("Tool") and t.Name:lower():find("storm") then
+                return t
+            end
+        end
+    end
+    local c = LP.Character
+    if c then
+        for _, t in ipairs(c:GetChildren()) do
+            if t:IsA("Tool") and t.Name:lower():find("storm") then
+                return t
+            end
+        end
+    end
+    return nil
+end
+
+local function stormPlaceOnce()
+    local h = getHRP()
+    if not h then
+        return false, "no hrp"
+    end
+    local st = stormTool()
+    if not st then
+        return false, "tak ada Storm tool"
+    end
+    Stat.stormBack = h.CFrame
+    pcall(function() R("BackpackRemotes", "TeleportPlot"):FireServer() end)
+    task.wait(2)
+    local char = LP.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        local cur = char:FindFirstChildOfClass("Tool")
+        if not cur or not cur.Name:lower():find("storm") then
+            pcall(function() hum:EquipTool(st) end)
+            task.wait(0.8)
+        end
+    end
+    local idx = LP:GetAttribute("PlotIndex") or 0
+    local pp = idx ~= 0 and workspace:FindFirstChild("PlotPlacePart" .. idx)
+    local base = pp and pp.Position or h.Position
+    local gy = base.Y
+    pcall(function()
+        local rp = RaycastParams.new()
+        rp.FilterType = Enum.RaycastFilterType.Include
+        rp.FilterDescendantsInstances = { workspace.Terrain }
+        local hit = workspace:Raycast(Vector3.new(base.X, base.Y + 100, base.Z), Vector3.new(0, -500, 0), rp)
+        if hit then
+            gy = hit.Position.Y
+        end
+    end)
+    pcall(function() R("RuneRemotes", "PlaceRune"):FireServer("Storm", Vector3.new(base.X, gy, base.Z)) end)
+    task.wait(2)
+    local okPlace = stormPlaced()
+    if Stat.stormBack then
+        tpTo(h, Stat.stormBack)
+        Stat.stormBack = nil
+    end
+    return okPlace, okPlace and "placed" or "gagal"
+end
+
+local function stormTakeOnce()
+    local placed, model = stormPlaced()
+    if not placed or not model then
+        return false, "tak ada Storm terpasang"
+    end
+    local h = getHRP()
+    if not h then
+        return false, "no hrp"
+    end
+    Stat.stormBack = Stat.stormBack or h.CFrame
+    local pr = promptOf(model)
+    if pr then
+        local pos = runePos(model)
+        if pos then
+            tpTo(h, CFrame.new(pos + Vector3.new(0, TUNE.tpLift, 0)))
+            task.wait(TUNE.settleWait)
+            if model.Parent ~= nil then
+                firePrompt(pr)
+                task.wait(1)
+            end
+        end
+    end
+    if Stat.stormBack then
+        tpTo(h, Stat.stormBack)
+        Stat.stormBack = nil
+    end
+    return true, "diambil"
+end
+
+task.spawn(function()
+    while alive and (RL_STATE == nil or RL_STATE.alive()) do
+        local ok, err = pcall(function()
+            local man = Stat.stormManual
+            if man then
+                Stat.stormManual = nil
+                local done, msg
+                if man == "place" then
+                    done, msg = stormPlaceOnce()
+                else
+                    done, msg = stormTakeOnce()
+                end
+                notify("Storm", tostring(msg))
+                logPush("storm manual " .. man .. ": " .. tostring(msg))
+                return
+            end
+            if not Cfg.autoStorm or Stat.selling then
+                return
+            end
+            local w = nil
+            pcall(function() w = R("WeatherRemotes", "State").Value end)
+            w = tostring(w or "?")
+            local isEvent = w ~= "NormalWeather" and w ~= "?" and w ~= ""
+            local placed, model = stormPlaced()
+            local txt = w .. (placed and " | Storm ON" or " | -")
+            pcall(function() StormLabel:Set("Storm: " .. txt:sub(1, 80)) end)
+            local h = getHRP()
+            if not h then
+                return
+            end
+            if isEvent and not placed then
+                local done = stormPlaceOnce()
+                if done then
+                    logPush("storm placed (" .. w .. ")")
+                end
+            elseif not isEvent and placed and model then
+                stormTakeOnce()
+                logPush("storm diambil (Normal)")
+            end
+        end)
+        if not ok then
+            warn("[hub] storm " .. tostring(err))
+        end
+        task.wait(5)
+    end
+end)
+
+-- ==================== STARTUP ====================
+killAntiIdle()
+pcall(function()
+    local ps = LP:FindFirstChild("PlayerScripts")
+    if ps then
+        ps.ChildAdded:Connect(function(c)
+            if c.Name == "AntiIdleClient" then
+                task.wait(0.5)
+                killAntiIdle()
+            end
+        end)
+    end
+end)
+
+logPush("[OK] Antarctica Hub v2 (Ouro) loaded - instant pickup, no hold.")
+H.status = "Idle: hub siap. Nyalakan Vacuum / Auto Dig."
+return "AntarcticaHub OK v2 (Ouro)"
