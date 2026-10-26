@@ -18,7 +18,7 @@ pcall(function()
     end
 end)
 
-local repo = "https://raw.githubusercontent.com/joustingmatch/ObsidianUltra/main/"
+local repo = "https://raw.githubusercontent.com/joustingmatch/Alexandria/main/"
 local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
 local ThemeManager, SaveManager
 pcall(function() ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))() end)
@@ -63,15 +63,16 @@ local BD = workspace:WaitForChild("Boulders")
 local PR = workspace:FindFirstChild("PlotRunes") -- cache ulang di refresh (folder rilis belakangan)
 local DR = workspace:FindFirstChild("DroppedRunes")
 
-local RARITY_LIST = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" }
+local RARITY_LIST = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith", "Eternal" }
 local RUNE_LIST = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" }
-local RARITY_RANK = { Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Exotic = 7, Zenith = 8 }
-local RARITY_HEX = { Common = "#CD945C", Uncommon = "#5FDC69", Rare = "#469BFF", Epic = "#B45FFF", Legendary = "#FFAA2D", Mythic = "#FF4646", Exotic = "#FFD84A", Zenith = "#6EEBFF" }
+local RARITY_RANK = { Common = 1, Uncommon = 2, Rare = 3, Epic = 4, Legendary = 5, Mythic = 6, Exotic = 7, Zenith = 8, Eternal = 9 }
+local RARITY_HEX = { Common = "#CD945C", Uncommon = "#5FDC69", Rare = "#469BFF", Epic = "#B45FFF", Legendary = "#FFAA2D", Mythic = "#FF4646", Exotic = "#FFD84A", Zenith = "#6EEBFF", Eternal = "#FF7DE6" }
 local RARITY_C3 = {
     Common = Color3.fromRGB(205, 148, 92), Uncommon = Color3.fromRGB(95, 220, 105),
     Rare = Color3.fromRGB(70, 155, 255), Epic = Color3.fromRGB(180, 95, 255),
     Legendary = Color3.fromRGB(255, 170, 45), Mythic = Color3.fromRGB(255, 70, 70),
     Exotic = Color3.fromRGB(255, 216, 74), Zenith = Color3.fromRGB(110, 235, 255),
+    Eternal = Color3.fromRGB(255, 125, 230),
 }
 -- mult luck per mutasi (WeatherData.List id + BoulderMutations id; nama mutasi cuaca sbg fallback)
 -- rumus resmi: totalLuckPercent = Luck attr x Π mult (WeatherLuckService)
@@ -107,6 +108,7 @@ end
 local Cfg = {
     -- farm
     vacuum = false, teleport = false, autoSell = false, sellPct = 100,
+    vacAggro = false, vacFar = false,
     minRarity = 1, monRar = { "Mythic" }, monSort = "Value",
     dig = false, digRadius = 8, drill = false, slam = false,
     -- shop
@@ -118,13 +120,15 @@ local Cfg = {
     fly = false, flySpeed = 50, noclip = false, speed = false, speedVal = 32,
     antiAfk = false, antiRagdoll = false, antiLag = false, noRender = false,
     -- esp
-    esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith" },
+    esp = false, espRar = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Exotic", "Zenith", "Eternal" },
     espBoulder = true, espGeode = false,
     -- boulder + rune
     autoBoulder = false, autoRune = false,
     runeSel = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" },
     runeMonSel = { "Luck", "Haste", "Storm", "Weight", "Fortune", "Detonation", "Preservation", "Warmth", "Excavator", "Colossus" },
     autoStorm = false,
+    -- jetpack
+    jetpack = false,
 }
 local Stat = { selling = false, basePos = nil, tryAt = {}, swept = false }
 
@@ -343,6 +347,9 @@ local function espClear()
 end
 -- geode core: match nama (tak ada atribut Core di model)
 local function isGeode(m)
+    if m:GetAttribute("IsGeode") == true then
+        return true
+    end
     local nm = tostring(m:GetAttribute("GemName") or m.Name or ""):lower()
     return nm:find("geode") ~= nil or nm:find("core") ~= nil
 end
@@ -387,8 +394,9 @@ local function espRefresh()
             if not espMarks[m] then
                 local mesh = m:FindFirstChild("Mesh_0", true) or m:FindFirstChildWhichIsA("BasePart", true)
                 if mesh then
-                    table.insert(cand, { m = m, mesh = mesh, d = (mesh.Position - myPos).Magnitude,
-                        bid = m:GetAttribute("DisplayName") or m:GetAttribute("BoulderId") or m.Name })
+                    local geo = m:GetAttribute("IsGeode") == true
+                    table.insert(cand, { m = m, mesh = mesh, d = (mesh.Position - myPos).Magnitude, geo = geo and true or nil,
+                        bid = (not geo) and (m:GetAttribute("DisplayName") or m:GetAttribute("BoulderId") or m.Name) or nil })
                 end
             end
         end
@@ -794,6 +802,32 @@ local function setNoRender(on)
     end)
 end
 
+-- jetpack unlimited: paksa FUEL_DRAIN=0 di Config (JetpackClient baca konstanta ini tiap Heartbeat)
+local jpSaved
+local function setJetpackInf(on)
+    local ok = pcall(function()
+        local jp = RS:FindFirstChild("JetpackSystem")
+        local cfg = jp and require(jp:WaitForChild("Config"))
+        if type(cfg) ~= "table" then
+            return
+        end
+        if on then
+            if not jpSaved then
+                jpSaved = { drain = cfg.FUEL_DRAIN, ignite = cfg.MIN_FUEL_TO_IGNITE }
+            end
+            pcall(function() if isreadonly(cfg) then setreadonly(cfg, false) end end)
+            cfg.FUEL_DRAIN = 0
+            cfg.MIN_FUEL_TO_IGNITE = 0
+        elseif jpSaved then
+            cfg.FUEL_DRAIN = jpSaved.drain
+            cfg.MIN_FUEL_TO_IGNITE = jpSaved.ignite
+            jpSaved = nil
+        end
+    end)
+    print("[hub] jetpack unlimited " .. (on and "ON" or "OFF"))
+    return ok
+end
+
 local function stopFly()
     if flyConn then
         pcall(function() flyConn:Disconnect() end)
@@ -903,6 +937,7 @@ getgenv()._ANT_HUB_UNLOAD = function()
     pcall(setAfk, false)
     pcall(setAntiLag, false)
     pcall(setNoRender, false)
+    pcall(setJetpackInf, false)
     pcall(espClear)
     pcall(function()
         local char = LP.Character
@@ -923,6 +958,7 @@ if RL_STATE then
         pcall(setAfk, false)
         pcall(setAntiLag, false)
         pcall(setNoRender, false)
+        pcall(setJetpackInf, false)
         pcall(espClear)
         pcall(function() Library:Unload() end)
     end)
@@ -1157,6 +1193,8 @@ local FarmBox = MainTab:AddGroupbox({ Side = "Left", Name = "Vacuum" })
 FarmBox:AddToggle("Vacuum", { Text = "Auto vacuum (no dig)", Default = false })
     :AddKeyPicker("VacuumKey", { Default = "P", NoUI = false, Text = "Vacuum key" })
 FarmBox:AddToggle("Teleport", { Text = "Teleport ke freed (radius maksimal)", Default = false })
+FarmBox:AddToggle("VacAggro", { Text = "Agresif (multi-pop + cepat)", Default = false })
+FarmBox:AddToggle("VacFar", { Text = "Jangkau jauh (auto-TP)", Default = false })
 FarmBox:AddDropdown("MinRarity", { Text = "Min rarity", Values = RARITY_LIST, Default = 1 })
 
 local DigBox = MainTab:AddGroupbox({ Side = "Left", Name = "Auto Dig 360°" })
@@ -1419,6 +1457,7 @@ MoveBox:AddToggle("AntiAfk", { Text = "Anti-AFK", Default = false })
 MoveBox:AddToggle("AntiRagdoll", { Text = "Anti ragdoll", Default = false })
 MoveBox:AddToggle("Speed", { Text = "Speed booster", Default = false })
 MoveBox:AddSlider("SpeedVal", { Text = "Speed (risiko kick!)", Default = 32, Min = 16, Max = 120, Rounding = 0 })
+MoveBox:AddToggle("JetpackInf", { Text = "Jetpack unlimited", Default = false })
 
 local GfxBox = MiscTab:AddGroupbox({ Side = "Left", Name = "Graphic" })
 GfxBox:AddToggle("AntiLag", { Text = "Anti lag", Default = false })
@@ -1584,6 +1623,8 @@ Options.EspRar:OnChanged(function(v)
     Cfg.espRar = list
 end)
 Toggles.AutoSell:OnChanged(function(v) Cfg.autoSell = v end)
+Toggles.VacAggro:OnChanged(function(v) Cfg.vacAggro = v end)
+Toggles.VacFar:OnChanged(function(v) Cfg.vacFar = v end)
 Options.SellPct:OnChanged(function(v) Cfg.sellPct = math.clamp(math.floor(v), 50, 100) end)
 Toggles.Fly:OnChanged(function(v) Cfg.fly = v end)
 Toggles.UpWarmth:OnChanged(function(v) Cfg.upWarmth = v end)
@@ -1611,7 +1652,7 @@ Options.RadarSel:OnChanged(function(v)
 end)
 Options.PickList:OnChanged(function(v)
     local _pd = D("PickaxeData")
-    local n = (_pd and #_pd) or 21
+    local n = (_pd and #_pd) or 23
     if type(v) == "number" then
         Cfg.pickSel = math.clamp(math.floor(v), 1, n)
     elseif type(v) == "string" then
@@ -1670,6 +1711,10 @@ Toggles.NoRender:OnChanged(function(v)
     Cfg.noRender = v
     setNoRender(v)
 end)
+Toggles.JetpackInf:OnChanged(function(v)
+    Cfg.jetpack = v
+    setJetpackInf(v)
+end)
 Options.FlySpeed:OnChanged(function(v) Cfg.flySpeed = math.clamp(math.floor(v), 10, 150) end)
 Options.DPI:OnChanged(function(v)
     pcall(function() Library:SetDPIScale(math.clamp(math.floor(v), 50, 150)) end)
@@ -1715,7 +1760,7 @@ pcall(function()
     for _, name in ipairs({ "Vacuum", "Teleport", "AutoDig", "AutoDrill", "AutoSlam",
         "AutoSell", "Esp", "EspBoulder", "EspGeode", "AutoBoulder", "AutoRune",
         "AutoStorm", "UpWarmth", "UpCarry", "AutoBomb", "AutoRadar",
-        "Fly", "Noclip", "AntiAfk", "AntiRagdoll", "Speed", "AntiLag", "NoRender" }) do
+        "Fly", "Noclip", "AntiAfk", "AntiRagdoll", "Speed", "AntiLag", "NoRender", "JetpackInf", "VacAggro", "VacFar" }) do
         local t = Toggles[name]
         if t and t.SetValue then
             t:SetValue(t.Value and true or false)
@@ -2130,27 +2175,43 @@ task.spawn(function()
                 end
                 return
             end
-            -- urut skor: yg dalam jangkauan + tak cooldown ditembak dulu (biar 1 target macet tak blokir lain)
+            -- urut skor (terdekat/termurah dulu)
             table.sort(cand, function(a, b) return a.score < b.score end)
-            local best = cand[1]
             local now = os.clock()
-            local pick = nil
+            local retry = Cfg.vacAggro and 1.0 or TUNE.retryS
+            -- agresif: sapu semua yg dalam jangkauan server sekaligus (multi-pop)
+            local ready = {}
             for _, c in ipairs(cand) do
-                local uid = c.m:GetAttribute("Uid") or c.m.Name
-                if now - (Stat.tryAt[uid] or 0) >= TUNE.retryS and c.d <= c.range + TUNE.targetSlack then
-                    pick = c
+                local uid = c.m:GetDebugId()
+                if now - (Stat.tryAt[uid] or 0) >= retry and c.d <= c.range + TUNE.targetSlack then
+                    table.insert(ready, c)
+                end
+            end
+            local maxN = Cfg.vacAggro and 6 or 1
+            local fired = 0
+            for _, c in ipairs(ready) do
+                if fired >= maxN then
                     break
                 end
+                Stat.swept = false
+                Stat.tryAt[c.m:GetDebugId()] = os.clock()
+                firePrompt(c.pr)
+                Stat.lastTarget = c.m.Name .. " " .. math.floor(c.d) .. "st"
+                fired += 1
             end
-            if not pick then
-                -- semua cooldown / jauh: coba yg terdekat biar server yg putuskan (hold E manual pun bisa)
-                local uid = best.m:GetAttribute("Uid") or best.m.Name
-                if now - (Stat.tryAt[uid] or 0) < TUNE.retryS then
-                    return
+            if fired > 0 then
+                if os.clock() - (Stat.lastBeat or 0) > 30 then
+                    Stat.lastBeat = os.clock()
+                    print("[hub] vacuum x" .. fired .. " " .. Stat.lastTarget)
                 end
-                pick = best
+                return
             end
-            best = pick
+            -- tak ada in-range: pakai target terdekat (jauh)
+            local best = cand[1]
+            local uid = best.m:GetDebugId()
+            if now - (Stat.tryAt[uid] or 0) < retry then
+                return
+            end
             local bestD, bestP, bestPos = best.d, best.pr, best.pos
             Stat.swept = false
             Stat.lastTarget = best.m.Name .. " " .. math.floor(bestD) .. "st"
@@ -2158,9 +2219,8 @@ task.spawn(function()
                 Stat.lastBeat = os.clock()
                 print("[hub] kerja: " .. Stat.lastTarget)
             end
-            local uid = best.m:GetAttribute("Uid") or best.m.Name
             if bestD > best.range - 2 then
-                if not Cfg.teleport then
+                if not (Cfg.teleport or Cfg.vacFar) then
                     -- tanpa teleport tetap coba: titik ukur client bisa meleset dari server (model besar)
                     Stat.tryAt[uid] = os.clock()
                     firePrompt(bestP)
@@ -2172,7 +2232,7 @@ task.spawn(function()
                 end
                 local tp = (bestPos or best.m:GetPivot().Position) + Vector3.new(0, TUNE.tpLift, 0)
                 tpTo(h, CFrame.new(tp))
-                task.wait(TUNE.settleWait)
+                task.wait(Cfg.vacAggro and 0.35 or TUNE.settleWait)
                 if best.m.Parent == nil then
                     return
                 end
@@ -2184,7 +2244,7 @@ task.spawn(function()
         if not ok then
             warn("[hub] " .. tostring(err))
         end
-        task.wait(TUNE.tickS)
+        task.wait(Cfg.vacAggro and 0.15 or TUNE.tickS)
     end
 end)
 
@@ -2450,15 +2510,19 @@ task.spawn(function()
             end
             local myPos = h.Position
             local best, bestD, bestP = nil, math.huge, nil
+            local myTier = tonumber(LP:GetAttribute("EquippedPickaxe")) or 0
             if BD and BD.Parent then
                 for _, m in ipairs(BD:GetChildren()) do
-                    local pr = promptOf(m)
-                    if pr then
-                        local pos = claimPos(m, pr)
-                        if pos then
-                            local d = (pos - myPos).Magnitude
-                            if d < bestD then
-                                best, bestD, bestP = m, d, pr
+                    local needTier = tonumber(m:GetAttribute("NeedTier"))
+                    if needTier == nil or needTier <= myTier then
+                        local pr = promptOf(m)
+                        if pr then
+                            local pos = claimPos(m, pr)
+                            if pos then
+                                local d = (pos - myPos).Magnitude
+                                if d < bestD then
+                                    best, bestD, bestP = m, d, pr
+                                end
                             end
                         end
                     end
