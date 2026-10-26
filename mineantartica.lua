@@ -1,7 +1,7 @@
--- Antarctica Hub (ObsidianUltra UI): vacuum pickup + auto sell + auto dig 360°
+-- Antarctica Hub (Alexandria UI): vacuum pickup + auto sell + auto dig 360°
 -- Game: Mine Antarctica | Freed = bebas ambil (tak ada pemilik) | Nempel = wajib dig manual
 -- Cara kerja: DroppedGems prioritas -> Freed, teleport stepped -> fire prompt (hold 0)
--- UI: https://github.com/joustingmatch/ObsidianUltra (fork Obsidian, API kompatibel)
+-- UI: https://github.com/joustingmatch/Alexandria (fork Obsidian, API kompatibel)
 -- Debug: getgenv()._ANT_HUB_DBG() | Unload: getgenv()._ANT_HUB_UNLOAD()
 
 if getgenv()._ANT_HUB_UNLOAD then
@@ -19,10 +19,23 @@ pcall(function()
 end)
 
 local repo = "https://raw.githubusercontent.com/joustingmatch/Alexandria/main/"
-local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
+local function httpGet(url)
+    local ok, r = pcall(function() return game:HttpGet(url) end)
+    if ok and type(r) == "string" and #r > 0 and r:sub(1, 4) ~= "404:" then return r end
+    local rf = (request or http_request or (syn and syn.request) or (getgenv and getgenv().request))
+    if type(rf) == "function" then
+        local ok2, res = pcall(rf, { Url = url, Method = "GET" })
+        if ok2 and res then
+            if type(res) == "string" and #res > 0 then return res end
+            if type(res.Body) == "string" and #res.Body > 0 then return res.Body end
+        end
+    end
+    error("httpGet gagal: " .. tostring(url))
+end
+local Library = loadstring(httpGet(repo .. "Library.lua"))()
 local ThemeManager, SaveManager
-pcall(function() ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))() end)
-pcall(function() SaveManager = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))() end)
+pcall(function() ThemeManager = loadstring(httpGet(repo .. "addons/ThemeManager.lua"))() end)
+pcall(function() SaveManager = loadstring(httpGet(repo .. "addons/SaveManager.lua"))() end)
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
@@ -78,6 +91,7 @@ local RARITY_C3 = {
 -- rumus resmi: totalLuckPercent = Luck attr x Π mult (WeatherLuckService)
 local MUT_LUCK_MULT = {
     Rain = 2, Blizzard = 4, AcidRain = 3, Thunder = 5, Starfall = 6, Lucky = 5, Molten = 7, Aurora = 8, Bloodborne = 2,
+    Meteoric = 8, Clover = 12, Blood = 2, -- update Okt 2026: Meteoric x8, Clover(ladder) x12, mutasi Blood id="Blood"
     Mossy = 2, Charged = 3, Gilded = 4, Rimed = 5, Nocturnal = 6, Hexed = 8,
     Drenched = 2, Frozen = 4, Poisoned = 3, Thundered = 5, Starstruck = 6,
 }
@@ -1243,7 +1257,7 @@ local function brSlots(box, n, tag)
     return slots
 end
 
-local MonitorBox = MainTab:AddGroupbox({ Side = "Left", Name = "Monitor Top 10" })
+local MonitorBox = MainTab:AddGroupbox({ Side = "Right", Name = "Monitor Top 10" })
 MonitorBox:AddDropdown("MonRarity", { Text = "Rarity", Values = RARITY_LIST, Multi = true, Default = { "Mythic" } })
 MonitorBox:AddDropdown("MonSort", { Text = "Sort by", Values = { "Value", "Luck" }, Default = 1 })
 MonitorBox:AddButton({ Text = "Refresh", Func = function()
@@ -1308,7 +1322,7 @@ PickBox:AddButton({ Text = "Equip", Func = function()
     print("[hub] equip pickaxe " .. Cfg.pickSel)
 end })
 
-local BombBox = ShopTab:AddGroupbox({ Side = "Left", Name = "Bomb" })
+local BombBox = ShopTab:AddGroupbox({ Side = "Right", Name = "Bomb" })
 local bombIds = {}
 local bombFirst = nil
 local _bdl = D("BombData")
@@ -1327,7 +1341,7 @@ BombBox:AddButton({ Text = "Buy Now", Func = function()
     buyBombs()
 end })
 
-local RadarBox = ShopTab:AddGroupbox({ Side = "Left", Name = "Radar" })
+local RadarBox = ShopTab:AddGroupbox({ Side = "Right", Name = "Radar" })
 local radarIds = {}
 local radarFirst = nil
 local _rdl = D("RadarData")
