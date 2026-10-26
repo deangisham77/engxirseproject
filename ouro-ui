@@ -1,5 +1,5 @@
 --============================================================================
--- Ouro UI v1.0.1 - library GUI mandiri (gaya Ouroboros)
+-- Ouro UI v1.0.2 - library GUI mandiri (gaya Ouroboros)
 -- Antarctica Hub / Keng Hub
 --
 -- Kenapa ada: library lama (Airflow, repo joustingmatch/-3) sudah 404 sehingga
@@ -13,6 +13,12 @@
 --   * sisa ScreenGui dari eksekusi sebelumnya dibersihkan (tidak menumpuk);
 --   * error saat CreateWindow ditangkap dan ditampilkan sebagai kartu merah di
 --     layar (Ouro.ReportError / Ouro.LastError) supaya penyebabnya kelihatan.
+--
+-- v1.0.2 (akar masalah splash mentok):
+--   * tombol minimize/close dulu menempel field ke Instance (`frame.Hit = ...`).
+--     Di Roblox asli itu error "Hit is not a valid member of Frame", sehingga
+--     buildWindow berhenti SEBELUM splash dijadwalkan hilang -> splash mentok.
+--     Sekarang helper mengembalikan tabel biasa { Frame, Hit, Icon }.
 --
 -- API (kompatibel 1:1 dengan pemakaian hub):
 --   Ouro:CreateWindow{...}
@@ -32,7 +38,7 @@ local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
 local Ouro = {}
-Ouro.Version = "1.0.1"
+Ouro.Version = "1.0.2"
 
 --============================================================================
 -- TEMA
@@ -1105,8 +1111,10 @@ local function buildWindow(options)
             end
         end)
         hit.MouseButton1Click:Connect(cb)
-        b.Hit = hit
-        return b
+        -- PENTING: jangan menempel field baru ke Instance (b.Hit = hit). Di Roblox
+        -- asli itu melempar "Hit is not a valid member of Frame" dan seluruh
+        -- buildWindow berhenti -> splash loading nyangkut. Kembalikan tabel biasa.
+        return { Frame = b, Hit = hit, Icon = ic }
     end
 
     -- ----------------------------------------------------------------- sidebar
