@@ -1,5 +1,5 @@
 --============================================================================
--- Ouro UI v1.0.2 - library GUI mandiri (gaya Ouroboros)
+-- Ouro UI v1.0.3 - library GUI mandiri (gaya Ouroboros)
 -- Antarctica Hub / Keng Hub
 --
 -- Kenapa ada: library lama (Airflow, repo joustingmatch/-3) sudah 404 sehingga
@@ -20,6 +20,13 @@
 --     buildWindow berhenti SEBELUM splash dijadwalkan hilang -> splash mentok.
 --     Sekarang helper mengembalikan tabel biasa { Frame, Hit, Icon }.
 --
+-- v1.0.3 (minimize "tidak menyatu"):
+--   * kedua layer bayangan (shadow1/shadow2) dulu tetap seukuran jendela penuh,
+--     jadi saat minimize bar tipis berdiri di atas kotak gelap besar. Sekarang
+--     bayangan ikut mengecil (ditween) bersama jendela;
+--   * garis pemisah topbar + layer popup disembunyikan saat minimize;
+--   * ikon tombol minimize berganti minus <-> plus.
+--
 -- API (kompatibel 1:1 dengan pemakaian hub):
 --   Ouro:CreateWindow{...}
 --   Window:CreateTab{Name, Icon, Desc}
@@ -38,7 +45,7 @@ local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
 local Ouro = {}
-Ouro.Version = "1.0.2"
+Ouro.Version = "1.0.3"
 
 --============================================================================
 -- TEMA
@@ -332,6 +339,10 @@ local ICONS = {
     },
     minus = {
         { k = "line", x = 0.16, y = 0.45, w = 0.68, h = 0.11 },
+    },
+    plus = {
+        { k = "line", x = 0.16, y = 0.45, w = 0.68, h = 0.11 },
+        { k = "line", x = 0.45, y = 0.16, w = 0.11, h = 0.68 },
     },
     ["log-out"] = {
         { k = "rect", x = 0.06, y = 0.26, w = 0.44, h = 0.48, r = 2 },
@@ -1065,7 +1076,7 @@ local function buildWindow(options)
         ZIndex = 5,
     })
 
-    local function topButton(iconName, xoff, cb, danger)
+    local function topButton(iconName, xoff, cb, danger, altIconName)
         local b = new("Frame", {
             BackgroundColor3 = Theme.row,
             BackgroundTransparency = 1,
@@ -1076,6 +1087,12 @@ local function buildWindow(options)
         }, top)
         corner(b, 7)
         local ic = drawIcon(b, iconName, 12, Theme.sub, 7)
+        -- ikon alternatif (mis. minus -> plus waktu minimize); disembunyikan dulu
+        local icAlt
+        if altIconName then
+            icAlt = drawIcon(b, altIconName, 12, Theme.sub, 7)
+            icAlt.Visible = false
+        end
         local hit = new("TextButton", {
             Text = "",
             BackgroundTransparency = 1,
@@ -1114,7 +1131,7 @@ local function buildWindow(options)
         -- PENTING: jangan menempel field baru ke Instance (b.Hit = hit). Di Roblox
         -- asli itu melempar "Hit is not a valid member of Frame" dan seluruh
         -- buildWindow berhenti -> splash loading nyangkut. Kembalikan tabel biasa.
-        return { Frame = b, Hit = hit, Icon = ic }
+        return { Frame = b, Hit = hit, Icon = ic, AltIcon = icAlt }
     end
 
     -- ----------------------------------------------------------------- sidebar
@@ -1562,7 +1579,7 @@ local function buildWindow(options)
     -- -------------------------------------------------------------- top buttons
     local uiScale = new("UIScale", { Scale = 1 }, container)
 
-    local minBtn = topButton("minus", -74, function() end)
+    local minBtn = topButton("minus", -74, function() end, false, "plus")
     local closeBtn = topButton("x", -44, function() end, true)
 
     -- ------------------------------------------------------------------- home
@@ -2167,16 +2184,30 @@ local function buildWindow(options)
     end
 
     -- --------------------------------------------------------------- minimize
+    -- Waktu minimize, jendela mengecil jadi bar tipis. Bayangan (shadow2) WAJIB
+    -- ikut mengecil, kalau tidak bar-nya berdiri di atas kotak gelap besar dan
+    -- kelihatan "tidak menyatu". Garis pemisah topbar juga disembunyikan supaya
+    -- sudut bawah bar tetap bersih.
     local minimized = false
-    minBtn.Hit.MouseButton1Click:Connect(function()
-        minimized = not minimized
-        content.Visible = not minimized
-        sidebar.Visible = not minimized
-        if minimized then
-            container.Size = UDim2.fromOffset(winW, topH)
-        else
-            container.Size = UDim2.fromOffset(winW, winH)
+    local function applyMinimize(state)
+        minimized = state
+        content.Visible = not state
+        sidebar.Visible = not state
+        pcall(function()
+            popupLayer.Visible = not state
+            topLine.Visible = not state
+        end)
+        local barH = state and topH or winH
+        tween(container, 0.18, { Size = UDim2.fromOffset(winW, barH) }, Enum.EasingStyle.Quint)
+        tween(shadow1, 0.18, { Size = UDim2.fromOffset(winW + 26, barH + 26) }, Enum.EasingStyle.Quint)
+        tween(shadow2, 0.18, { Size = UDim2.fromOffset(winW + 10, barH + 10) }, Enum.EasingStyle.Quint)
+        if minBtn.Icon and minBtn.AltIcon then
+            minBtn.Icon.Visible = not state
+            minBtn.AltIcon.Visible = state
         end
+    end
+    minBtn.Hit.MouseButton1Click:Connect(function()
+        applyMinimize(not minimized)
     end)
     closeBtn.Hit.MouseButton1Click:Connect(function()
         window:Toggle(false)
