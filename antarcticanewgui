@@ -3,7 +3,7 @@
 -- Game   : Mine Antarctica (PlaceId 138686218420016)
 -- Fitur  : Vacuum pickup (instant fire) + Auto Sell + Auto Dig 360 deg + ESP +
 --          Monitor + Shop + Boulder/Rune/Storm + Movement + Server Actions
--- UI     : Ouro UI (lokal, gaya Ouroboros) - https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/ouro-ui
+-- UI     : Ouro UI (lokal, gaya Ouroboros) - https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/ouro-ui-104
 --          Airflow (joustingmatch/-3) sudah 404, jadi library diganti milik sendiri.
 -- Gaya   : Ouroboros (professional, rapi, tab-based, status row, config persist)
 -- Debug  : getgenv()._ANT_HUB_DBG()   | Unload: getgenv()._ANT_HUB_UNLOAD()
@@ -31,13 +31,27 @@ getgenv()._AntHubWin = nil
 -- -------------------------------------------------------------------- library
 -- Library GUI sendiri (Ouro UI): pengganti Airflow yang repo-nya sudah 404.
 -- File terpisah di host yang sama dengan script ini, tanpa dependensi luar.
-local OURO_URL = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/ouro-ui"
-local okLib, Ouro = pcall(function()
-    return loadstring(game:HttpGet(OURO_URL))()
-end)
-if not okLib or type(Ouro) ~= "table" or not Ouro.CreateWindow then
-    error("[Antarctica] gagal memuat Ouro UI (" .. OURO_URL .. "): " .. tostring(Ouro), 0)
+-- URL memakai nama file ber-versi supaya tidak pernah kena cache lama GitHub
+-- (raw.githubusercontent bisa menyajikan file lama sampai ~5 menit).
+local OURO_BASE = "https://raw.githubusercontent.com/deangisham77/engxirseproject/refs/heads/main/"
+local OURO_FILES = { "ouro-ui-104", "ouro-ui" }
+local Ouro, OURO_URL
+for _, fname in ipairs(OURO_FILES) do
+    local url = OURO_BASE .. fname
+    local okTry, res = pcall(function()
+        return loadstring(game:HttpGet(url))()
+    end)
+    if okTry and type(res) == "table" and res.CreateWindow then
+        Ouro, OURO_URL = res, url
+        break
+    end
 end
+if type(Ouro) ~= "table" or not Ouro.CreateWindow then
+    error("[Antarctica] gagal memuat Ouro UI dari " .. OURO_BASE .. " (" .. table.concat(OURO_FILES, " / ") .. ")", 0)
+end
+pcall(function()
+    print("[Antarctica] UI: Ouro " .. tostring(Ouro.Version) .. " (" .. tostring(OURO_URL) .. ")")
+end)
 
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")

@@ -1,5 +1,5 @@
 --============================================================================
--- Ouro UI v1.0.3 - library GUI mandiri (gaya Ouroboros)
+-- Ouro UI v1.0.4 - library GUI mandiri (gaya Ouroboros)
 -- Antarctica Hub / Keng Hub
 --
 -- Kenapa ada: library lama (Airflow, repo joustingmatch/-3) sudah 404 sehingga
@@ -27,6 +27,13 @@
 --   * garis pemisah topbar + layer popup disembunyikan saat minimize;
 --   * ikon tombol minimize berganti minus <-> plus.
 --
+-- v1.0.4 (minimize, tegas):
+--   * saat minimize kedua bayangan DISEMBUNYIKAN total + ukurannya dipaksa rapat
+--     (bar + 8 / + 4) supaya tidak ada sisa "plat" gelap di belakang bar;
+--   * jaring pengaman task.delay(0.3) memaksa ulang ukuran jendela & bayangan
+--     kalau tween diabaikan executor;
+--   * versi dicetak ke console saat library dimuat.
+--
 -- API (kompatibel 1:1 dengan pemakaian hub):
 --   Ouro:CreateWindow{...}
 --   Window:CreateTab{Name, Icon, Desc}
@@ -45,7 +52,7 @@ local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
 local Ouro = {}
-Ouro.Version = "1.0.3"
+Ouro.Version = "1.0.4"
 
 --============================================================================
 -- TEMA
@@ -2184,10 +2191,11 @@ local function buildWindow(options)
     end
 
     -- --------------------------------------------------------------- minimize
-    -- Waktu minimize, jendela mengecil jadi bar tipis. Bayangan (shadow2) WAJIB
-    -- ikut mengecil, kalau tidak bar-nya berdiri di atas kotak gelap besar dan
-    -- kelihatan "tidak menyatu". Garis pemisah topbar juga disembunyikan supaya
-    -- sudut bawah bar tetap bersih.
+    -- Waktu minimize, jendela mengecil jadi bar tipis. Dua lapis bayangan di
+    -- belakang jendela (shadow1 +26px, shadow2 +10px) HARUS ikut hilang, kalau
+    -- tidak bar tipis itu berdiri di atas "plat" gelap besar -> kelihatan tidak
+    -- menyatu. Jadi saat minimize bayangan disembunyikan total, dan ukurannya
+    -- juga dipaksa kecil supaya tidak ada sisa plat saat transisi.
     local minimized = false
     local function applyMinimize(state)
         minimized = state
@@ -2199,12 +2207,37 @@ local function buildWindow(options)
         end)
         local barH = state and topH or winH
         tween(container, 0.18, { Size = UDim2.fromOffset(winW, barH) }, Enum.EasingStyle.Quint)
-        tween(shadow1, 0.18, { Size = UDim2.fromOffset(winW + 26, barH + 26) }, Enum.EasingStyle.Quint)
-        tween(shadow2, 0.18, { Size = UDim2.fromOffset(winW + 10, barH + 10) }, Enum.EasingStyle.Quint)
+        -- ukuran bayangan: saat minimize dibikin rapat (bar + 8 / + 4), saat
+        -- normal kembali ke halo lebar
+        local pad1 = state and 8 or 26
+        local pad2 = state and 4 or 10
+        tween(shadow1, 0.18, { Size = UDim2.fromOffset(winW + pad1, barH + pad1) }, Enum.EasingStyle.Quint)
+        tween(shadow2, 0.18, { Size = UDim2.fromOffset(winW + pad2, barH + pad2) }, Enum.EasingStyle.Quint)
+        -- kunci utama: sembunyikan bayangan saat minimize (deterministik, tidak
+        -- bergantung pada tween yang mungkin diabaikan executor tertentu)
+        shadow1.Visible = not state
+        shadow2.Visible = not state
         if minBtn.Icon and minBtn.AltIcon then
             minBtn.Icon.Visible = not state
             minBtn.AltIcon.Visible = state
         end
+        -- jaring pengaman kalau tween tidak jalan: paksa ukuran setelah 0.3s
+        task.delay(0.3, function()
+            if minimized ~= state then
+                return
+            end
+            pcall(function()
+                if shadow1 and shadow1.Parent then
+                    shadow1.Size = UDim2.fromOffset(winW + pad1, barH + pad1)
+                end
+                if shadow2 and shadow2.Parent then
+                    shadow2.Size = UDim2.fromOffset(winW + pad2, barH + pad2)
+                end
+                if container and container.Parent then
+                    container.Size = UDim2.fromOffset(winW, barH)
+                end
+            end)
+        end)
     end
     minBtn.Hit.MouseButton1Click:Connect(function()
         applyMinimize(not minimized)
@@ -3808,5 +3841,10 @@ end
 function Ouro:GetWindow()
     return Lib.Window
 end
+
+-- tanda versi di console: memudahkan memastikan build mana yang benar-benar jalan
+pcall(function()
+    print("[Ouro UI] v" .. tostring(Ouro.Version) .. " siap dipakai")
+end)
 
 return Ouro
