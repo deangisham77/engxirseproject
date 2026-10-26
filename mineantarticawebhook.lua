@@ -41,6 +41,7 @@ local WPhaseEnd = WeatherRemotes:WaitForChild("PhaseEnd")
 local WNext = WeatherRemotes:WaitForChild("NextEventStart")
 local MActive = MeteorRemotes:WaitForChild("Active")
 local MPhase = MeteorRemotes:WaitForChild("Phase")
+local MEvent = MeteorRemotes:WaitForChild("Event")
 local MImpact = MeteorRemotes:WaitForChild("ImpactPos")
 local MZoneEnd = MeteorRemotes:WaitForChild("ZoneEnd")
 local ShopState = BombRemotes:WaitForChild("ShopState")
@@ -103,6 +104,8 @@ local COLOR = {
 local lastWeather = WState.Value
 local lastMActive = MActive.Value
 local lastMPhase = MPhase.Value
+local lastMeteorGiant = nil -- true=GIANT, false=kecil, nil=belum tahu
+local lastMeteorAt = 0
 local lastStockSig = nil
 local lastStockTotal = nil
 local lastDivine = nil
@@ -264,8 +267,16 @@ local function notifyWeather(state)
 	send("🌦️ Cuaca mulai: " .. tostring(state), weatherDesc(state) .. "\n" .. weatherTimers(), COLOR[state] or 9807270)
 end
 
-local function notifyMeteor(kind)
-	if not once("m:aktif", 900) then
+local function notifyMeteor(kind, giant)
+	if giant == nil then
+		-- Ukuran belum diketahui (misal Active sudah true sebelum script jalan): kirim generik
+		if not once("m:aktif", 900) then
+			return
+		end
+		return send("☄️ " .. kind, "Aktif=`true`", 16746496, nil)
+	end
+	local tag = giant and "giant" or "small"
+	if not once("m:" .. tag, 900) then
 		return
 	end
 	local now = os.time()
@@ -274,7 +285,12 @@ local function notifyMeteor(kind)
 	if ze > now then
 		table.insert(extra, { name = "Zona tutup", value = string.format("<t:%d:R>", ze), inline = true })
 	end
-	send("☄️ " .. kind, "Aktif=`true`", 16746496, extra)
+	if giant then
+		table.insert(extra, { name = "Ukuran", value = "GIANT 2.2x — krater 1.6x", inline = true })
+		return send("☄️ GIANT METEORITE!", "Meteor raksasa jatuh! Skala 2.2x, krater 1.6x.", 2062263, extra)
+	end
+	table.insert(extra, { name = "Ukuran", value = "Kecil (normal)", inline = true })
+	return send("☄️ Meteor kecil", "Meteor normal jatuh.", 16746496, extra)
 end
 
 local function mountainName(id)
@@ -604,12 +620,39 @@ STATE.connect(WState:GetPropertyChangedSignal("Value"), function()
 end)
 
 -- Event: meteor aktif saja (+countdown zona tutup di isi pesan)
+-- Ukuran (giant/kecil) dibaca dari payload MeteorRemotes.Event (a1.giant).
+-- Urutan sinyal: incoming (giant diketahui) -> Active=true. Event hook jalan duluan bila tepat waktu;
+-- fallback di poll paksa Active memakai lastMeteorGiant, generik bila nil.
+STATE.connect(MEvent.OnClientEvent, function(a1)
+	if typeof(a1) ~= "table" then
+		return
+	end
+	if a1.phase == "incoming" or a1.phase == "falling" or a1.phase == "impact" then
+		if a1.giant == true then
+			lastMeteorGiant = true
+		elseif a1.giant == false then
+			lastMeteorGiant = false
+		end
+		lastMeteorAt = os.clock()
+		if a1.phase == "incoming" then
+			notifyMeteor("METEOR JATUH!", lastMeteorGiant)
+		end
+	end
+end)
 STATE.connect(MActive:GetPropertyChangedSignal("Value"), function()
 	local a = MActive.Value
 	if a ~= lastMActive then
 		lastMActive = a
 		if a then
-			notifyMeteor("METEOR JATUH!")
+			-- Event incoming biasanya tiba duluan; toleransi 60 dtk agar tak pakai data basi
+			local giant = nil
+			if os.clock() - lastMeteorAt < 60 then
+				giant = lastMeteorGiant
+			end
+			notifyMeteor("METEOR JATUH!", giant)
+		else
+			-- Meteor selesai: reset agar meteor berikut deteksi ulang
+			lastMeteorGiant = nil
 		end
 	end
 end)
@@ -940,7 +983,13 @@ while STATE.alive() do
 	if MActive.Value ~= lastMActive then
 		lastMActive = MActive.Value
 		if lastMActive then
-			notifyMeteor("METEOR JATUH!")
+			local giant = nil
+			if os.clock() - lastMeteorAt < 60 then
+				giant = lastMeteorGiant
+			end
+			notifyMeteor("METEOR JATUH!", giant)
+		else
+			lastMeteorGiant = nil
 		end
 	end
 	lastMPhase = MPhase.Value
