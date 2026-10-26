@@ -1,11 +1,18 @@
 --============================================================================
--- Ouro UI v1.0 - library GUI mandiri (gaya Ouroboros)
+-- Ouro UI v1.0.1 - library GUI mandiri (gaya Ouroboros)
 -- Antarctica Hub / Keng Hub
 --
 -- Kenapa ada: library lama (Airflow, repo joustingmatch/-3) sudah 404 sehingga
 -- `loadstring(game:HttpGet(...))()` gagal dan seluruh hub tidak bisa jalan.
 -- Library ini TIDAK punya dependensi luar: tidak ada HttpGet, tidak ada asset
 -- id, semua ikon digambar prosedural dari Frame.
+--
+-- v1.0.1 (fix "mentok di splash"):
+--   * penghilang splash didaftarkan TEPAT setelah splash dibuat + watchdog 3s,
+--     jadi error di bagian mana pun tidak bisa lagi membuat splash nyangkut;
+--   * sisa ScreenGui dari eksekusi sebelumnya dibersihkan (tidak menumpuk);
+--   * error saat CreateWindow ditangkap dan ditampilkan sebagai kartu merah di
+--     layar (Ouro.ReportError / Ouro.LastError) supaya penyebabnya kelihatan.
 --
 -- API (kompatibel 1:1 dengan pemakaian hub):
 --   Ouro:CreateWindow{...}
@@ -25,7 +32,7 @@ local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 
 local Ouro = {}
-Ouro.Version = "1.0.0"
+Ouro.Version = "1.0.1"
 
 --============================================================================
 -- TEMA
@@ -95,7 +102,14 @@ local function new(class, props, parent)
     end
     for k, v in pairs(props or {}) do
         if v ~= nil then
-            inst[k] = v
+            -- satu properti yang ditolak Roblox tidak boleh membunuh seluruh UI
+            -- (kalau ditolak, cukup dicatat lewat warn lalu lanjut)
+            local ok = pcall(function()
+                inst[k] = v
+            end)
+            if not ok then
+                warn("[Ouro UI] properti ditolak: " .. tostring(class) .. "." .. tostring(k))
+            end
         end
     end
     if parent then
@@ -767,7 +781,7 @@ end
 --============================================================================
 -- CREATE WINDOW
 --============================================================================
-function Ouro:CreateWindow(options)
+local function buildWindow(options)
     options = options or {}
     local opts = options
     local winW = (opts.Size and opts.Size.X.Offset > 0) and opts.Size.X.Offset or 760
@@ -777,13 +791,39 @@ function Ouro:CreateWindow(options)
     local topH = 48
     local sideW = 178
 
-    -- bersihkan instance lama dari library ini
+    -- bersihkan instance lama dari library ini (termasuk sisa eksekusi sebelumnya)
     if Lib.Gui then
         pcall(function()
             Lib.Gui:Destroy()
         end)
         Lib.Gui = nil
     end
+    local function scrubStale(container)
+        if not container then
+            return
+        end
+        pcall(function()
+            for _, ch in ipairs(container:GetChildren()) do
+                local n = ch.Name
+                if n == "OuroUI" or n == "OuroError" or n == "OuroLoading" then
+                    pcall(function()
+                        ch:Destroy()
+                    end)
+                end
+            end
+        end)
+    end
+    pcall(function()
+        if typeof(gethui) == "function" then
+            scrubStale(gethui())
+        end
+    end)
+    pcall(function()
+        scrubStale(game:GetService("CoreGui"))
+    end)
+    pcall(function()
+        scrubStale(Players.LocalPlayer:FindFirstChildOfClass("PlayerGui"))
+    end)
     for _, c in ipairs(Lib.Connections) do
         pcall(function()
             c:Disconnect()
@@ -878,6 +918,52 @@ function Ouro:CreateWindow(options)
     corner(loadFill, 2)
     new("UIGradient", { Color = ColorSequence.new(Theme.accent, Theme.accent2) }, loadFill)
     tween(loadFill, 0.85, { Size = UDim2.fromOffset(180, 3) }, Enum.EasingStyle.Quint)
+
+    -- ---------------------------------------------------- splash auto-dismiss
+    -- PENTING: penghilang splash didaftarkan SEKARANG (bukan di akhir fungsi).
+    -- Dengan begitu, kalau ada error di bagian mana pun setelah ini, splash
+    -- tetap hilang dan tidak membuat UI terlihat "mentok loading".
+    local splashGone = false
+    local function dismissSplash()
+        if splashGone then
+            return
+        end
+        splashGone = true
+        if loadScreen then
+            pcall(function()
+                loadScreen:Destroy()
+            end)
+        end
+    end
+
+    task.delay(0.9, function()
+        pcall(function()
+            tween(loadScreen, 0.22, { BackgroundTransparency = 1 })
+            for _, ch in ipairs(loadScreen:GetDescendants()) do
+                if ch:IsA("TextLabel") then
+                    tween(ch, 0.22, { TextTransparency = 1 })
+                elseif ch:IsA("Frame") then
+                    tween(ch, 0.22, { BackgroundTransparency = 1 })
+                end
+            end
+        end)
+        task.wait(0.25)
+        dismissSplash()
+    end)
+
+    -- jaring pengaman kalau task.delay tidak jalan di executor tertentu:
+    task.spawn(function()
+        local t0 = os.clock()
+        while not splashGone and (os.clock() - t0) < 3 do
+            local ok = pcall(function()
+                RunService.RenderStepped:Wait()
+            end)
+            if not ok then
+                break
+            end
+        end
+        dismissSplash()
+    end)
 
     -- ------------------------------------------------------------- container
     local shadow1 = new("Frame", {
@@ -1859,7 +1945,12 @@ function Ouro:CreateWindow(options)
     end
 
     if opts.Home then
-        homeTab = buildHome(opts.Home)
+        local okHome, resHome = pcall(buildHome, opts.Home)
+        if okHome then
+            homeTab = resHome
+        else
+            warn("[Ouro UI] Home gagal dibuat: " .. tostring(resHome))
+        end
     end
     window.HomeTab = homeTab
 
@@ -2085,25 +2176,8 @@ function Ouro:CreateWindow(options)
     end)
 
     -- ------------------------------------------------------------ splash fade
-    task.delay(0.9, function()
-        if not Lib.Alive then
-            return
-        end
-        pcall(function()
-            tween(loadScreen, 0.25, { BackgroundTransparency = 1 })
-            for _, ch in ipairs(loadScreen:GetDescendants()) do
-                if ch:IsA("TextLabel") then
-                    tween(ch, 0.25, { TextTransparency = 1 })
-                elseif ch:IsA("Frame") then
-                    tween(ch, 0.25, { BackgroundTransparency = 1 })
-                end
-            end
-        end)
-        task.wait(0.3)
-        pcall(function()
-            loadScreen:Destroy()
-        end)
-    end)
+    -- Penghilang splash sudah didaftarkan di atas (tepat setelah splash dibuat),
+    -- jadi error di bagian mana pun tidak bisa lagi membuat splash mentok.
 
     -- pilih tab pertama (Home kalau ada, kalau tidak tab API pertama)
     if not Lib.ActiveTab and #Lib.Tabs > 0 then
@@ -2111,6 +2185,118 @@ function Ouro:CreateWindow(options)
     end
 
     return window
+end
+
+--============================================================================
+-- PENANGKAP ERROR + ENTRY POINT
+-- Kalau CreateWindow gagal, errornya ditampilkan di layar (bukan cuma di
+-- console) supaya bisa langsung dilaporkan / diketahui penyebabnya.
+--============================================================================
+local function reportError(msg)
+    msg = tostring(msg or "error tidak diketahui")
+    Ouro.LastError = msg
+    pcall(function()
+        if type(getgenv) == "function" then
+            getgenv().OURO_LAST_ERROR = msg
+        end
+    end)
+    warn("[Ouro UI] " .. msg)
+
+    local gui = Lib.Gui
+    if not (gui and gui.Parent) then
+        local okNew, made = pcall(function()
+            local s = Instance.new("ScreenGui")
+            s.Name = "OuroError"
+            s.ResetOnSpawn = false
+            s.IgnoreGuiInset = true
+            s.DisplayOrder = 999
+            local okP = pcall(function()
+                s.Parent = (typeof(gethui) == "function" and gethui()) or game:GetService("CoreGui")
+            end)
+            if not okP then
+                pcall(function()
+                    s.Parent = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
+                end)
+            end
+            return s
+        end)
+        if okNew then
+            gui = made
+        end
+    end
+    if not (gui and gui.Parent) then
+        return
+    end
+
+    pcall(function()
+        local old = gui:FindFirstChild("OuroErrorCard")
+        if old then
+            old:Destroy()
+        end
+        local card = new("Frame", {
+            Name = "OuroErrorCard",
+            BackgroundColor3 = Theme.card,
+            BorderSizePixel = 0,
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromOffset(580, 300),
+            ZIndex = 3000,
+        }, gui)
+        corner(card, 12)
+        stroke(card, Theme.bad, 1, 0)
+        label(card, {
+            Text = "Ouro UI error - screenshot teks ini",
+            Font = FONT_BOLD,
+            TextSize = 13,
+            TextColor3 = Theme.bad,
+            Position = UDim2.fromOffset(14, 10),
+            Size = UDim2.new(1, -28, 0, 16),
+            ZIndex = 3001,
+        })
+        local box = new("ScrollingFrame", {
+            BackgroundTransparency = 1,
+            BorderSizePixel = 0,
+            Position = UDim2.fromOffset(14, 32),
+            Size = UDim2.new(1, -28, 1, -46),
+            CanvasSize = UDim2.new(0, 0, 0, 0),
+            AutomaticCanvasSize = Enum.AutomaticSize.Y,
+            ScrollingDirection = Enum.ScrollingDirection.Y,
+            ScrollBarThickness = 3,
+            ZIndex = 3001,
+        }, card)
+        local t = new("TextLabel", {
+            BackgroundTransparency = 1,
+            Font = FONT_MONO,
+            TextSize = 11,
+            TextColor3 = Theme.sub,
+            TextWrapped = true,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextYAlignment = Enum.TextYAlignment.Top,
+            Text = msg,
+            Size = UDim2.new(1, -8, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+            ZIndex = 3002,
+        }, box)
+        t.Name = "OuroErrorText"
+    end)
+end
+Ouro.ReportError = reportError
+
+-- entry point publik: bungkus buildWindow supaya error apa pun tertangkap
+function Ouro:CreateWindow(options)
+    local ok, res = xpcall(buildWindow, function(err)
+        local trace = ""
+        pcall(function()
+            trace = debug.traceback("", 2)
+        end)
+        return tostring(err) .. "\n\n" .. trace
+    end, options)
+    if ok then
+        Ouro.LastError = nil
+        return res
+    end
+    reportError(res)
+    error("[Ouro UI] " .. tostring(res), 0)
 end
 
 --============================================================================
