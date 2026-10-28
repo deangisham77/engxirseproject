@@ -2,7 +2,7 @@
 -- GalaxyVacuum_Airflow v26.9
 -- Game: Mine a Galaxy | Loot vacuum via ProximityPrompt hold (HoldLoot + swing loop game yang urus)
 -- Fitur: Main + Monitor + AutoSell + Misc(InfFuel/Noclip/Server) + Shop
--- UI: Airflow joustingmatch/-3 (Window > Tab > Groupbox > Toggle) | Live-reload safe
+-- UI: Airflow bobloscript/Robly_Airflow (Window > Tab > Groupbox > Toggle) | Live-reload safe
 
 -- =====================================================================
 -- 0. DEDUP LINTAS-COPY (ghost copy dari live-reload timeout)
@@ -40,7 +40,7 @@ local LootFolder: Folder = workspace:WaitForChild("Loot") :: Folder
 -- =====================================================================
 -- 2. CONSTANTS
 -- =====================================================================
-local VACUUM_RADIUS = 17 -- terbukti server terima 16.2m; tiap prompt MaxDist beda (15.9-16.6+), di bawah dibatasi per-prompt
+local VACUUM_RADIUS = 15.5 -- prompt live 15.5m (sample Ember Rock); per-prompt cap tetap batasi di bawah
 local TELE_RADIUS_DEF = 150
 local TICK_VACUUM = 0.4
 local TICK_TELE = 0.6
@@ -53,17 +53,19 @@ local TP_STEP = 55 -- teleport bertahap anti rubber-band
 local RETRY_COOLDOWN = 3 -- jangan sentuh loot gagal sebelum X detik
 local RETRY_COOLDOWN_FAST = 1
 local STARTER_PICKAXE = ItemData.STARTERS.Pickaxe
-local TIER_NAMES = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Empyrean", "Pulsar", "Quasar" }
--- warna label per rarity (fixed hex, tak ikut tema agar beda tiap tier jelas)
-local TIER_HEX = { "#CD945C", "#5FDC69", "#469BFF", "#B45FFF", "#FFAA2D", "#FF4646", "#B44DFF", "#4CE0E0", "#FFD84A" }
+-- sinkron LootCatalog.tiers live (11 tier, Quasar idx 9). QUASAR const = 9.
+local TIER_NAMES = { "Common", "Uncommon", "Rare", "Epic", "Legendary", "Mythic", "Empyrean", "Pulsar", "Quasar", "Singularity", "Infinity" }
+-- warna label per rarity dari LootCatalog live (fixed hex)
+local RARITY_COLORS_LIVE = { "#c8cdd7", "#6ee66e", "#5aaaff", "#b464ff", "#ffc83c", "#ff4678", "#3cdcb4", "#a0ebff", "#e650ff", "#ff8a1e", "#ffffff" }
+local TIER_HEX = RARITY_COLORS_LIVE
 
 -- =====================================================================
--- 3. STATE
+-- 3. CONFIG + RUNTIME
 -- =====================================================================
 local Cfg = {
 	vacuum = false,
 	teleVacuum = false,
-	monTiers = { [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true, [8] = true, [9] = true },
+	monTiers = { [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true, [8] = true, [9] = true, [10] = true, [11] = true },
 	monSort = "Value", -- "Value" | "Luck"
 	autoSell = false,
 	sellPct = 90, -- jual saat cargo% >= ini
@@ -72,7 +74,7 @@ local Cfg = {
 	antiAfk = true,
 	teleRadius = TELE_RADIUS_DEF,
 	aggro = true, -- permanen agresif (tanpa toggle): tick cepat + incar value tertinggi
-	vacTiers = { [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true, [8] = true, [9] = true },
+	vacTiers = { [1] = true, [2] = true, [3] = true, [4] = true, [5] = true, [6] = true, [7] = true, [8] = true, [9] = true, [10] = true, [11] = true },
 	shopBombs = { ["meteor_charge"] = true },
 	shopRadars = { ["pocket_pinger"] = true },
 	shopTick = 3, -- cek toko tiap N detik
@@ -666,9 +668,9 @@ local function teleVacuumTick()
 end
 
 -- =====================================================================
--- 7b. MONITOR TOP10 (adopsi Antarctica: filter tier, sort value/luck, klik TP)
+-- 7b. MONITOR TOP10 (ala Antarctica: dict rows + SetRows + Colors, klik TP)
 -- =====================================================================
-local MonRows: { BasePart? } = {} -- paralel urutan baris Table (Search/sort bawaan mati, index aman)
+local MonRows: { any } = {} -- paralel urutan baris Table (Search mati, index aman)
 local monAt = 0
 local monRefreshSoon = true
 local monTable: any = nil
@@ -691,12 +693,6 @@ local function fmtKg(w: number): string
 		return string.format("%.2ft", w / 1000)
 	end
 	return string.format("%.1fkg", w)
-end
-
-local function tierTag(tier: number): string
-	local hex = TIER_HEX[math.clamp(tier, 1, #TIER_HEX)] or "#FFFFFF"
-	local name = TIER_NAMES[math.clamp(tier, 1, #TIER_NAMES)] or ("T" .. tier)
-	return string.format('<font color="%s"><b>T%d %s</b></font>', hex, tier, name)
 end
 
 local function refreshMonitor()
@@ -727,31 +723,33 @@ local function refreshMonitor()
 			return a.value > b.value
 		end)
 	end
-	table.clear(MonRows)
-	local tblRows: { { string } } = {}
+	MonRows = {}
+	local trows: { any } = {}
 	for i = 1, math.min(10, #rows) do
 		local r = rows[i]
 		if r.m.Parent then
-			table.insert(MonRows, r.m)
-			table.insert(tblRows, {
-				tierTag(r.tier),
-				r.m.Name,
-				fmtMoney(r.value),
-				string.format("%.1f", r.luck),
-				fmtKg(r.kg),
-				string.format("%.0fm", r.d),
-			})
+			MonRows[i] = r
+			trows[i] = {
+				["#"] = i,
+				Tier = string.format("[T%d] %s", r.tier, TIER_NAMES[r.tier]),
+				Gem = r.m.Name,
+				Value = fmtMoney(r.value) .. " " .. fmtKg(r.kg),
+				Luck = string.format("+%.1f%%", r.luck),
+				Dist = string.format("%.0fm", r.d),
+				Colors = { Tier = TIER_HEX[math.clamp(r.tier, 1, #TIER_HEX)] or "#FFFFFF" },
+			}
 		end
 	end
 	if monTable then
 		pcall(function()
-			monTable:SetRows(tblRows)
+			monTable:SetRows(trows)
 		end)
 	end
 end
 
 local function clickRow(_row: any, i: number)
-	local t = MonRows[i]
+	local r = MonRows[i]
+	local t = r and r.m
 	if t and t.Parent then
 		teleportNear(t.Position)
 	else
@@ -772,7 +770,6 @@ local GearBuy = Remotes:WaitForChild("GearBuy")
 local Stock = require(Items:WaitForChild("Stock"))
 local BOMB_IDS = { "meteor_charge", "solar_wind", "comet_frost", "nova_flare", "ion_storm", "nebula_toxin", "chrono_rift", "supernova" }
 local RADAR_IDS = { "pocket_pinger", "dowsing_dish", "sonar_scope", "quantum_sensor", "star_chart_array", "omniscope" }
-local boughtMark: { [string]: boolean } = {} -- period..id -> sudah beli (khusus radar, anti spam)
 
 -- Cek syarat beli TANPA tembak remote (murah, boleh tiap tick).
 local function canBuyGear(id: string, auto: boolean): (boolean, string)
@@ -788,17 +785,6 @@ local function canBuyGear(id: string, auto: boolean): (boolean, string)
 	if left ~= nil and left <= 0 then
 		return false, "out of stock"
 	end
-	if auto and it.category ~= "Bomb" then
-		-- radar sisa >120s tak perlu dobel: lewati, top-up saat sisa <120s
-		local activeT = tonumber(LocalPlayer:GetAttribute("RadarTime_" .. id)) or 0
-		if activeT > 120 then
-			return false, "active"
-		end
-		local mark = tostring(Stock.period()) .. ":" .. id
-		if boughtMark[mark] then
-			return false, "already bought"
-		end
-	end
 	if (tonumber(LocalPlayer:GetAttribute("Coins")) or 0) < price then
 		return false, "need $" .. tostring(price)
 	end
@@ -810,7 +796,6 @@ local function buyGear(id: string, auto: boolean): (boolean, string)
 	if not okG then
 		return false, msgG
 	end
-	local it = ItemData.get(id)
 	local ok, res = pcall(function()
 		return GearBuy:InvokeServer(id)
 	end)
@@ -818,9 +803,6 @@ local function buyGear(id: string, auto: boolean): (boolean, string)
 		return false, "try again"
 	end
 	if res == nil or res == true then
-		if auto and it.category ~= "Bomb" then
-			boughtMark[tostring(Stock.period()) .. ":" .. id] = true
-		end
 		return true, "bought " .. id
 	end
 	return false, typeof(res) == "string" and res or "rejected"
@@ -877,10 +859,10 @@ local function doSell()
 end
 
 -- =====================================================================
--- 8. UI: AIRFLOW joustingmatch/-3 (Window > Tab > Groupbox > Toggle)
+-- 8. UI: AIRFLOW bobloscript/Robly_Airflow (Window > Tab > Groupbox > Toggle)
 -- =====================================================================
--- UI: AIRFLOW joustingmatch/-3 (jangan ganti URL tanpa cek probe Tab.* dulu)
-local AIRFLOW_URL = "https://raw.githubusercontent.com/joustingmatch/-3/refs/heads/main/Source.luau"
+-- UI: AIRFLOW bobloscript/Robly_Airflow (fork PookiePepelsss/Airflow-UI)
+local AIRFLOW_URL = "https://raw.githubusercontent.com/bobloscript/Robly_Airflow/main/Source.luau"
 local Airflow = loadstring(game:HttpGet(AIRFLOW_URL))()
 pcall(function()
 	Airflow:LoadFont({ Name = "ValleySans" })
@@ -896,6 +878,24 @@ local Window = Airflow:CreateWindow({
 	Backdrop = { Weather = "Sakura", Mode = "UI", Dim = false }, -- preset default: sakura di dalam window, tint mati
 })
 local MainTab = Window:CreateTab({ Name = "Vacuum", Icon = "magnet" })
+
+-- Monitor Top10: tabel full-width paling atas, filter di groupbox kanan bawah
+monTable = MainTab:CreateTable({
+	Name = "Top 10 (klik = TP)",
+	MaxRows = 10,
+	Search = false, -- mati agar index baris = MonRows (klik mapping aman)
+	Columns = {
+		{ Name = "#", Width = 0.08 },
+		{ Name = "Tier", Width = 0.26 },
+		{ Name = "Gem", Width = 0.24 },
+		{ Name = "Value", Width = 0.18 },
+		{ Name = "Luck", Width = 0.12 },
+		{ Name = "Dist", Width = 0.12 },
+	},
+	Rows = {},
+	Callback = clickRow,
+})
+
 local VacBox = MainTab:CreateGroupbox({ Name = "Main", Side = "Left" })
 local statusLabel: any = nil
 
@@ -908,7 +908,7 @@ vacWalkT = VacBox:CreateToggle({
 	Callback = function(v: boolean)
 		Cfg.vacuum = v
 		task.spawn(function()
-			while Cfg.vacuum and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
+			while Cfg.vacuum and isMine() do
 				if not Cfg.teleVacuum then -- teleport mode prioritas, vacuum pause biar tak double-hold
 					pcall(vacuumTick)
 				end
@@ -943,7 +943,7 @@ vacTeleT = VacBox:CreateToggle({
 	Callback = function(v: boolean)
 		Cfg.teleVacuum = v
 		task.spawn(function()
-			while Cfg.teleVacuum and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
+			while Cfg.teleVacuum and isMine() do
 				pcall(teleVacuumTick)
 				task.wait(effTickTele())
 			end
@@ -1022,11 +1022,49 @@ VacBox:CreateButton({
 	end,
 })
 
+VacBox:CreateButton({
+	Name = "Teleport to Anomaly",
+	Callback = function()
+		task.spawn(function()
+			pcall(function()
+				local A = game.ReplicatedStorage:FindFirstChild("Anomalies")
+				local list = A and A:GetChildren() or {}
+				if #list == 0 then
+					setStatus("anomaly: tak aktif")
+					return
+				end
+				-- pilih terdekat
+				local hrp = getHRP()
+				local myPos = hrp and hrp.Position or Vector3.zero
+				local best, bestD = nil, math.huge
+				for _, c in ipairs(list) do
+					local ctr = c:GetAttribute("Center")
+					if typeof(ctr) == "Vector3" then
+						local d = (ctr - myPos).Magnitude
+						if d < bestD then
+							bestD = d
+							best = c
+						end
+					end
+				end
+				if not best then
+					setStatus("anomaly: posisi tak terbaca")
+					return
+				end
+				local kind = tostring(best:GetAttribute("PlanetName") or best.Name)
+				setStatus("anomaly: TP " .. kind .. "...")
+				teleportNear(best:GetAttribute("Center"))
+				setStatus("anomaly: sampai (" .. kind .. ")")
+			end)
+		end)
+	end,
+})
+
 statusLabel = VacBox:CreateLabel({
 	Text = "idle",
 })
 task.spawn(function()
-	while isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
+	while isMine() do
 		pcall(function()
 			local txt = Run.status .. (Run.busy and " ..." or "")
 			if not (Cfg.vacuum or Cfg.teleVacuum) then
@@ -1063,7 +1101,7 @@ SellBox:CreateToggle({
 	Callback = function(v: boolean)
 		Cfg.autoSell = v
 		task.spawn(function()
-			while Cfg.autoSell and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
+			while Cfg.autoSell and isMine() do
 				pcall(function()
 					if Run.sellNow or cargoPct() >= Cfg.sellPct then
 						doSell()
@@ -1087,7 +1125,7 @@ SellBox:CreateButton({
 local function setInfFuel(on: boolean)
 	Cfg.infFuel = on
 	task.spawn(function()
-		while Cfg.infFuel and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
+		while Cfg.infFuel and isMine() do
 			pcall(function()
 				LocalPlayer:SetAttribute("FuelDrainMult", 0)
 			end)
@@ -1127,7 +1165,7 @@ local NoclipCache: { [BasePart]: boolean } = {}
 local function setNoclip(on: boolean)
 	Cfg.noclip = on
 	task.spawn(function()
-		while Cfg.noclip and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
+		while Cfg.noclip and isMine() do
 			pcall(function()
 				local char = LocalPlayer.Character
 				if char then
@@ -1155,7 +1193,8 @@ local function setNoclip(on: boolean)
 	end)
 end
 
-local MonBox = MainTab:CreateGroupbox({ Name = "Monitor Top10", Side = "Right" })
+-- Monitor filter di groupbox kolom kanan
+local MonBox = MainTab:CreateGroupbox({ Name = "Monitor Filter", Side = "Right" })
 MonBox:CreateDropdown({
 	Name = "Tier (multi)",
 	Options = TIER_NAMES,
@@ -1210,16 +1249,8 @@ MonBox:CreateButton({
 		monRefreshSoon = true
 	end,
 })
-monTable = MonBox:CreateTable({
-	Name = "Top loot (klik = TP)",
-	Columns = { "Tier", "Gem", "Value", "Luck", "Wt", "Dist" },
-	Rows = {},
-	MaxRows = 10,
-	Search = false, -- mati agar index baris = MonRows (klik mapping aman)
-	Callback = clickRow,
-})
 task.spawn(function()
-	while isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
+	while isMine() do
 		pcall(function()
 			if monRefreshSoon or os.clock() - monAt > 5 then
 				monAt = os.clock()
@@ -1252,14 +1283,26 @@ TeleBox:CreateStatusList({
 	end,
 })
 local telePlanetDD: any = nil
-telePlanetDD = TeleBox:CreateDropdown({
-	Name = "Planet",
-	Options = { "Zenith", "Maelstrom", "Tidal", "Cyclone" },
-	CurrentOption = "Zenith",
-	Flag = "GalaxyVacuum_TelePlanet",
-	Callback = function(_v: any)
-	end,
-})
+do
+	-- default dinamis dari planetList live (dulu hardcode Zenith dkk, basi)
+	local liveNames: { string } = {}
+	pcall(function()
+		for _, p in ipairs(planetList()) do
+			table.insert(liveNames, p.name)
+		end
+	end)
+	if #liveNames == 0 then
+		liveNames = { "Kepler", "Lumen", "Vela", "Andra" }
+	end
+	telePlanetDD = TeleBox:CreateDropdown({
+		Name = "Planet",
+		Options = liveNames,
+		CurrentOption = liveNames[1],
+		Flag = "GalaxyVacuum_TelePlanet",
+		Callback = function(_v: any)
+		end,
+	})
+end
 TeleBox:CreateButton({
 	Name = "Refresh Planets",
 	Callback = function()
@@ -1280,19 +1323,26 @@ TeleBox:CreateButton({
 	Callback = function()
 		task.spawn(function()
 			pcall(function()
-				local sel: any = "Zenith"
+				local firstLive = "Kepler"
+				pcall(function()
+					local list = planetList()
+					if #list > 0 then
+						firstLive = list[1].name
+					end
+				end)
+				local sel: any = firstLive
 				pcall(function()
 					sel = telePlanetDD:Get()
 				end)
 				if type(sel) == "table" then
-					sel = sel[1] or "Zenith"
+					sel = sel[1] or firstLive
 				end
 				if type(sel) == "number" then
 					local names: { string } = {}
 					for _, p in ipairs(planetList()) do
 						table.insert(names, p.name)
 					end
-					sel = names[sel] or "Zenith"
+					sel = names[sel] or firstLive
 				end
 				local _, msg = teleportToPlanet(tostring(sel))
 				setStatus("tp: " .. msg)
@@ -1353,10 +1403,9 @@ local function refreshShopLabels()
 	end)
 end
 
--- Hybrid wait: idle (stok habis / sudah beli / radar aktif) -> tidur sampai
--- restock (+2s) atau maxSecs (expired radar), bangun tiap 15s / periode ganti.
--- Coins kurang -> poll pendek.
-local function waitShopIdle(isOn: () -> boolean, maxSecs: number?)
+-- Hybrid wait: idle (stok habis) -> tidur sampai restock (+2s),
+-- bangun tiap 15s / periode ganti. Coins kurang -> poll pendek.
+local function waitShopIdle(isOn: () -> boolean)
 	local target: any = nil
 	pcall(function()
 		target = Stock.period()
@@ -1366,11 +1415,8 @@ local function waitShopIdle(isOn: () -> boolean, maxSecs: number?)
 		s = Stock.secondsLeft()
 	end)
 	local total = math.clamp((tonumber(s) or 0) + 2, 1, 602)
-	if maxSecs ~= nil then
-		total = math.clamp(math.min(total, tonumber(maxSecs) or total), 1, 602)
-	end
 	local slept = 0
-	while slept < total and isOn() and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
+	while slept < total and isOn() and isMine() do
 		task.wait(math.min(15, total - slept))
 		slept += 15
 		local now: any = nil
@@ -1385,37 +1431,34 @@ end
 
 -- Satu pass shop: scan kandidat TANPA gerak; kalau ada yang bisa dibeli,
 -- kunci Run.busy, TP ke stand (server cek jarak GearBuy), borong, balik.
--- Return: status + extra (detik top-up radar / nil).
--- useAuto=false untuk tombol Buy Now (paksa, lewati batas 1x-periode).
-local function shopPass(kind: string, useAuto: boolean): (string, number?)
+-- Bomb + radar sama: borong 1 jenis sampai gagal (stok/coins habis), max 50/pass.
+-- useAuto=false untuk tombol Buy Now (1x beli manual, tak borong).
+local function shopPass(kind: string, useAuto: boolean): string
 	local isBomb = kind == "bomb"
 	local sel = isBomb and Cfg.shopBombs or Cfg.shopRadars
 	local label = isBomb and bombLabel or radarLabel
 	local tag = isBomb and "bomb: " or "radar: "
 	local want: { string } = {}
 	local coinBlocked = false
-	local activeMin: number? = nil
 	for id in pairs(sel) do
 		local okC, msgC = canBuyGear(id, useAuto)
 		if okC then
 			table.insert(want, id)
 		elseif string.find(msgC, "need $", 1, true) then
 			coinBlocked = true
-		elseif msgC == "active" then
-			local t = (tonumber(LocalPlayer:GetAttribute("RadarTime_" .. id)) or 0) - 120
-			if activeMin == nil or t < (activeMin :: number) then
-				activeMin = t
-			end
 		end
 	end
+	-- murah dulu: coins tak nyangkut di item mahal saat stok banyak (deep dive: meteor 580 vs supernova 2.5jt)
+	table.sort(want, function(a, b)
+		local pa = (ItemData.get(a) and ItemData.get(a).price) or math.huge
+		local pb = (ItemData.get(b) and ItemData.get(b).price) or math.huge
+		return pa < pb
+	end)
 	if #want == 0 then
 		if coinBlocked then
-			return "coins", nil
+			return "coins"
 		end
-		if activeMin ~= nil then
-			return "active", activeMin
-		end
-		return "idle", nil
+		return "idle"
 	end
 	-- tunggu hold/TP lain selesai (max 5s), lalu kunci agar vacuum pause
 	local t0 = os.clock()
@@ -1423,11 +1466,10 @@ local function shopPass(kind: string, useAuto: boolean): (string, number?)
 		task.wait(0.2)
 	end
 	if Run.busy then
-		return "busy", nil
+		return "busy"
 	end
 	Run.busy = true
 	local back = getHRP() and getHRP().CFrame or nil
-	local status: string = "idle"
 	local ok, res = pcall(function()
 		local resInner: string = "idle"
 		local goal: Vector3? = nil
@@ -1447,8 +1489,8 @@ local function shopPass(kind: string, useAuto: boolean): (string, number?)
 			if not (((isBomb and Cfg.autoBomb) or ((not isBomb) and Cfg.autoRadar)) or not useAuto) then
 				break
 			end
-			if isBomb and useAuto then
-				-- borong 1 jenis sampai gagal, max 50/pass
+			if useAuto then
+				-- borong 1 jenis sampai gagal, max 50/pass (bomb + radar sama)
 				for _ = 1, 50 do
 					local okB, msgB = buyGear(id, true)
 					if label then
@@ -1490,12 +1532,12 @@ local function shopPass(kind: string, useAuto: boolean): (string, number?)
 	end
 	Run.busy = false
 	if not ok then
-		return "idle", nil
+		return "idle"
 	end
 	if res == "bought" or res == "coins" then
-		return res, nil
+		return res
 	end
-	return "idle", nil
+	return "idle"
 end
 refreshShopLabels()
 BombBox:CreateSlider({
@@ -1540,8 +1582,8 @@ BombBox:CreateToggle({
 	Callback = function(v: boolean)
 		Cfg.autoBomb = v
 		task.spawn(function()
-			while Cfg.autoBomb and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
-				local st, _ = shopPass("bomb", true)
+			while Cfg.autoBomb and isMine() do
+				local st = shopPass("bomb", true)
 				pcall(refreshShopLabels)
 				if st == "bought" or st == "coins" then
 					task.wait(Cfg.shopTick or 3)
@@ -1590,21 +1632,17 @@ RadarBox:CreateDropdown({
 })
 RadarBox:CreateToggle({
 	Name = "Auto Buy Radar",
-	Desc = "1x per stok per jenis (anti boros)",
+	Desc = "Borong sampai stok habis, terus tiap restock",
 	CurrentValue = false,
 	Flag = "GalaxyVacuum_AutoRadar",
 	Callback = function(v: boolean)
 		Cfg.autoRadar = v
 		task.spawn(function()
-			while Cfg.autoRadar and isMine() and (typeof(STATE) ~= "table" or STATE.alive()) do
-				local st, extra = shopPass("radar", true)
+			while Cfg.autoRadar and isMine() do
+				local st = shopPass("radar", true)
 				pcall(refreshShopLabels)
 				if st == "bought" or st == "coins" then
 					task.wait(Cfg.shopTick or 3)
-				elseif st == "active" then
-					waitShopIdle(function()
-						return Cfg.autoRadar
-					end, (extra or 0) + 2)
 				elseif st == "busy" then
 					task.wait(1)
 				else
@@ -1768,9 +1806,6 @@ local function unload()
 	pcall(function()
 		Window:Destroy()
 	end)
-end
-if typeof(STATE) == "table" and STATE.onCleanup then
-	STATE.onCleanup(unload)
 end
 getgenv().__GALAXY_VACUUM_UNLOAD = unload
 
