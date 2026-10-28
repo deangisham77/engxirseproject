@@ -1,42 +1,24 @@
--- Antarctica Hub (Alexandria UI): vacuum pickup + auto sell + auto dig 360°
--- Game: Mine Antarctica | Freed = bebas ambil (tak ada pemilik) | Nempel = wajib dig manual
--- Cara kerja: DroppedGems prioritas -> Freed, teleport stepped -> fire prompt (hold 0)
--- UI: https://github.com/joustingmatch/Alexandria (fork Obsidian, API kompatibel)
--- Debug: getgenv()._ANT_HUB_DBG() | Unload: getgenv()._ANT_HUB_UNLOAD()
+-- Antarctica Hub Airflow (Robly_Airflow): vacuum pickup + auto sell + auto dig 360 deg
+-- Sumber logic: ../antarctica-hub.lua (Alexandria). Migrasi lift-and-shift, logic tak diubah.
+-- Debug: getgenv()._ANT_HUB_AF_DBG() | Unload: getgenv()._ANT_HUB_AF_UNLOAD()
 
 if getgenv()._ANT_HUB_UNLOAD then
     pcall(getgenv()._ANT_HUB_UNLOAD)
     getgenv()._ANT_HUB_UNLOAD = nil
 end
-
+if getgenv()._ANT_HUB_AF_UNLOAD then
+    pcall(getgenv()._ANT_HUB_AF_UNLOAD)
+    getgenv()._ANT_HUB_AF_UNLOAD = nil
+end
 pcall(function()
     local hui = gethui and gethui() or game:GetService("CoreGui")
     for _, old in ipairs(hui:GetDescendants()) do
-        if old:IsA("ScreenGui") and old.Name == "Obsidian" then
+        if old:IsA("ScreenGui") and (old.Name == "Obsidian" or old.Name == "AntarcticaHubAF") then
             old:Destroy()
         end
     end
 end)
-
-local repo = "https://raw.githubusercontent.com/joustingmatch/Alexandria/main/"
-local function httpGet(url)
-    local ok, r = pcall(function() return game:HttpGet(url) end)
-    if ok and type(r) == "string" and #r > 0 and r:sub(1, 4) ~= "404:" then return r end
-    local rf = (request or http_request or (syn and syn.request) or (getgenv and getgenv().request))
-    if type(rf) == "function" then
-        local ok2, res = pcall(rf, { Url = url, Method = "GET" })
-        if ok2 and res then
-            if type(res) == "string" and #res > 0 then return res end
-            if type(res.Body) == "string" and #res.Body > 0 then return res.Body end
-        end
-    end
-    error("httpGet gagal: " .. tostring(url))
-end
-local Library = loadstring(httpGet(repo .. "Library.lua"))()
-local ThemeManager, SaveManager
-pcall(function() ThemeManager = loadstring(httpGet(repo .. "addons/ThemeManager.lua"))() end)
-pcall(function() SaveManager = loadstring(httpGet(repo .. "addons/SaveManager.lua"))() end)
-
+local Airflow = loadstring(game:HttpGet("https://raw.githubusercontent.com/bobloscript/Robly_Airflow/5a90ba011e33a808c5adbd81befabc01348bdc86/Source.luau"))()
 local Players = game:GetService("Players")
 local RS = game:GetService("ReplicatedStorage")
 local UIS = game:GetService("UserInputService")
@@ -268,9 +250,7 @@ local function bagPct()
     return used / cap * 100
 end
 
-local function notify(title, desc)
-    pcall(function() Library:Notify({ Title = title, Description = desc, Time = 5 }) end)
-end
+-- notify lama diganti afNotify (lihat blok UI Robly).
 
 local function firePrompt(pr)
     if not pr or not pr.Parent then
@@ -598,7 +578,7 @@ function Server.hop(prefer)
             end
         end
         local pick = pool[math.random(1, #pool)]
-        notify("Hop", string.format("-> %d/%d pemain", pick.playing, pick.maxPlayers))
+        afNotify("Hop", string.format("-> %d/%d pemain", pick.playing, pick.maxPlayers))
         print("[hub] hop ke " .. tostring(pick.id) .. " (" .. tostring(pick.playing) .. "/" .. tostring(pick.maxPlayers) .. ")")
         TeleportS:TeleportToPlaceInstance(game.PlaceId, pick.id, LP)
     end)
@@ -698,7 +678,7 @@ local function buyPickaxe(idx, manual)
     if LP.leaderstats.Coins.Value < coins then
         pcall(function() R("ShopRemotes","EquipPickaxe"):FireServer(idx) end)
         Stat.skipPick[idx] = nil
-        notify("Pickaxe", "Beli + equip: " .. info.name)
+        afNotify("Pickaxe", "Beli + equip: " .. info.name)
         print("[hub] beli pickaxe " .. info.name)
         return true
     end
@@ -732,7 +712,7 @@ local function buyBombs()
             _bb:FireServer(b.id, "cash")
             task.wait(2)
             if LP.leaderstats.Coins.Value < coins then
-                notify("Bomb", "Beli: " .. b.id)
+                afNotify("Bomb", "Beli: " .. b.id)
                 print("[hub] beli bomb " .. b.id)
                 return true
             end
@@ -766,7 +746,7 @@ local function buyRadars()
             _rb:FireServer(b.id) -- radar: 1 arg (bomb: 2 arg + "cash")
             task.wait(2)
             if LP.leaderstats.Coins.Value < coins then
-                notify("Radar", "Beli: " .. b.id)
+                afNotify("Radar", "Beli: " .. b.id)
                 print("[hub] beli radar " .. b.id)
                 return true
             end
@@ -943,7 +923,12 @@ local function resetCfg()
         end
     end
 end
-getgenv()._ANT_HUB_UNLOAD = function()
+getgenv()._ANT_HUB_AF_UNLOAD = function()
+    for _, el in pairs(Airflow.Flags) do
+        if type(el) == "table" and el.Value == true and el.Set then
+            pcall(function() el:Set(false) end)
+        end
+    end
     resetCfg()
     pcall(stopFly)
     pcall(restoreCollide)
@@ -960,8 +945,9 @@ getgenv()._ANT_HUB_UNLOAD = function()
             hum.WalkSpeed = 16
         end
     end)
-    pcall(function() Library:Unload() end)
-    print("[hub] unloaded")
+    pcall(function() Window:Destroy() end)
+    getgenv()._ANT_HUB_AF = nil
+    print("[hub-af] unloaded")
 end
 if RL_STATE then
     RL_STATE.onCleanup(function()
@@ -974,7 +960,7 @@ if RL_STATE then
         pcall(setNoRender, false)
         pcall(setJetpackInf, false)
         pcall(espClear)
-        pcall(function() Library:Unload() end)
+        pcall(function() Window:Destroy() end)
     end)
 end
 
@@ -1169,7 +1155,6 @@ task.spawn(function()
     setAfk(false)
     restoreCollide()
 end)
-
 local function fmtMoney(n)
     n = tonumber(n) or 0
     if n >= 1e9 then
@@ -1184,58 +1169,170 @@ local function fmtMoney(n)
     return "$" .. tostring(math.floor(n))
 end
 
-local Window = Library:CreateWindow({
-    Title = "Antarctica Hub",
-    Footer = "vacuum-only | RightShift = toggle UI",
-    NotifySide = "Right",
-    ToggleKeybind = Enum.KeyCode.RightShift,
-    ShowCustomCursor = true,
+-- ==================== UI (Robly_Airflow) ====================
+local Window = Airflow:CreateWindow({
+    Name = "AntarcticaHubAF",
+    LoadingSubtitle = "vacuum-only | RightShift = toggle UI",
+    ToggleUIKeybind = "RightShift",
+    ConfigurationSaving = { Enabled = true, FolderName = "AntarcticaHubAF" },
+    Home = {
+        Name = "Home",
+        Title = "Antarctica Hub",
+        Welcome = "Welcome back,",
+        Tier = false,
+        Stats = { "Players", "FPS", "Ping", "Session" },
+        HideName = false,
+        HideAvatar = false,
+        Features = true,
+        SupportedExecutors = { "Real", "Wave", "Volt", "Potassium" },
+    },
 })
 
-local Toggles = Library.Toggles
-local Options = Library.Options
+local function afNotify(title, desc)
+    pcall(function() Window:Notify({ Title = title, Content = desc, Type = "Success" }) end)
+end
 
--- ==================== UI ====================
-local MainTab = Window:AddTab({ Name = "Main", Icon = "gem", Description = "Vacuum + sell", SingleColumn = true })
-local ShopTab = Window:AddTab({ Name = "Shop", Icon = "shopping-cart", Description = "Auto upgrade", SingleColumn = true })
-local MiscTab = Window:AddTab({ Name = "Misc", Icon = "rocket", Description = "Movement", SingleColumn = true })
-local BRTab = Window:AddTab({ Name = "B&R", Icon = "mountain", Description = "Boulder + rune" })
-local ServerTab = Window:AddTab({ Name = "Server", Icon = "server", Description = "Players + hop" })
-local SettingsTab = Window:AddTab({ Name = "Setting", Icon = "settings", Description = "UI" })
+local MainTab = Window:CreateTab({ Name = "Main", Icon = "gem" })
 
-local FarmBox = MainTab:AddGroupbox({ Side = "Left", Name = "Vacuum" })
-FarmBox:AddToggle("Vacuum", { Text = "Auto vacuum (no dig)", Default = false })
-    :AddKeyPicker("VacuumKey", { Default = "P", NoUI = false, Text = "Vacuum key" })
-FarmBox:AddToggle("Teleport", { Text = "Teleport ke freed (radius maksimal)", Default = false })
-FarmBox:AddToggle("VacAggro", { Text = "Agresif (multi-pop + cepat)", Default = false })
-FarmBox:AddToggle("VacFar", { Text = "Jangkau jauh (auto-TP)", Default = false })
-FarmBox:AddDropdown("MinRarity", { Text = "Min rarity", Values = RARITY_LIST, Default = 1 })
+local MonFilterBox = MainTab:CreateGroupbox({ Name = "Monitor Filter", Side = "Right" })
+MonFilterBox:CreateDropdown({ Name = "Rarity", Options = RARITY_LIST, CurrentOption = { "Mythic" }, MultipleOptions = true, Flag = "MonRarity", Callback = function(v)
+    local list = {}
+    if type(v) == "table" then
+        for _, s in ipairs(v) do if RARITY_RANK[s] then table.insert(list, s) end end
+    elseif type(v) == "string" then list = { v } end
+    Cfg.monRar = list
+    Stat.monRefresh = true
+end })
+MonFilterBox:CreateDropdown({ Name = "Sort by", Options = { "Value", "Luck" }, CurrentOption = { "Value" }, Flag = "MonSort", Callback = function(v)
+    Cfg.monSort = type(v) == "table" and v[1] or v
+end })
+MonFilterBox:CreateButton({ Name = "Refresh", Callback = function() Stat.monRefresh = true end })
+local MonRows = {}
+local MonTbl = MainTab:CreateTable({
+    Name = "Top 10",
+    MaxRows = 10,
+    Search = false,
+    Columns = {
+        { Name = "#", Width = 0.08 },
+        { Name = "Crystal", Width = 0.4 },
+        { Name = "Value", Width = 0.2 },
+        { Name = "Luck", Width = 0.16 },
+        { Name = "Jarak", Width = 0.16 },
+    },
+    Rows = {},
+    Callback = function(_, i)
+        local s = MonRows[i]
+        local h = getHRP()
+        if s and s.m.Parent and s.pos and h then
+            local ok, err = pcall(function()
+                tpTo(h, CFrame.new(s.pos + Vector3.new(0, TUNE.tpLift, 0)))
+            end)
+            if ok then
+                print("[hub-af] tp ke " .. s.name)
+            else
+                afNotify("Monitor", "TP gagal: " .. tostring(err):sub(1, 60))
+            end
+        else
+            afNotify("Monitor", "Sudah hilang.")
+        end
+    end,
+})
 
-local DigBox = MainTab:AddGroupbox({ Side = "Left", Name = "Auto Dig 360°" })
-DigBox:AddToggle("AutoDig", { Text = "Auto dig sekeliling (glacier saja)", Default = false })
-DigBox:AddToggle("AutoDrill", { Text = "Auto drill sekeliling (matikan dig)", Default = false })
-DigBox:AddToggle("AutoSlam", { Text = "Auto void slam (tiap ready)", Default = false })
-DigBox:AddSlider("DigRadius", { Text = "Radius dig", Default = 8, Min = 6, Max = 20, Rounding = 0, Suffix = "st" })
-
-local SellBox = MainTab:AddGroupbox({ Side = "Left", Name = "Auto Sell" })
-SellBox:AddToggle("AutoSell", { Text = "Sell", Default = false })
-SellBox:AddSlider("SellPct", { Text = "Sell at", Default = 100, Min = 50, Max = 100, Rounding = 0, Suffix = "%" })
-SellBox:AddButton({ Text = "Sell Now", Func = function()
-    Stat.sellNow = true
+local FarmBox = MainTab:CreateGroupbox({ Name = "Vacuum", Side = "Left" })
+FarmBox:CreateToggle({ Name = "Auto vacuum (no dig)", Flag = "Vacuum", CurrentValue = false, Callback = function(v)
+    Cfg.vacuum = v
+    print("[hub-af] vacuum " .. (v and "ON" or "OFF"))
+end })
+FarmBox:CreateToggle({ Name = "Teleport ke freed", Flag = "VacuumTeleport", CurrentValue = false, Callback = function(v) Cfg.teleport = v end })
+FarmBox:CreateToggle({ Name = "Agresif", Flag = "VacAggro", CurrentValue = false, Callback = function(v) Cfg.vacAggro = v end })
+FarmBox:CreateToggle({ Name = "Jangkau jauh", Flag = "VacFar", CurrentValue = false, Callback = function(v) Cfg.vacFar = v end })
+FarmBox:CreateDropdown({ Name = "Min rarity", Options = RARITY_LIST, CurrentOption = { RARITY_LIST[1] }, Flag = "MinRarity", Callback = function(v)
+    local s = type(v) == "table" and v[1] or v
+    Cfg.minRarity = RARITY_RANK[s] or 1
+end })
+FarmBox:CreateKeybind({ Name = "Vacuum key", CurrentKeybind = "P", Flag = "VacuumKey", Callback = function()
+    local el = Airflow.Flags.Vacuum
+    if el then el:Set(not el.Value) end
 end })
 
-local EspBox = MainTab:AddGroupbox({ Side = "Left", Name = "ESP", Collapsed = true })
-EspBox:AddToggle("Esp", { Text = "ESP crystal", Default = false })
-EspBox:AddToggle("EspBoulder", { Text = "ESP boulder", Default = true })
-EspBox:AddToggle("EspGeode", { Text = "ESP geode core", Default = false })
-EspBox:AddDropdown("EspRar", { Text = "Rarity", Values = RARITY_LIST, Multi = true, Default = RARITY_LIST })
+local DigBox = MainTab:CreateGroupbox({ Name = "Auto Dig 360", Side = "Right", Collapsed = true })
+DigBox:CreateToggle({ Name = "Auto dig sekeliling", Flag = "AutoDig", CurrentValue = false, Callback = function(v)
+    Cfg.dig = v
+    if v and Cfg.drill and Airflow.Flags.AutoDrill then Airflow.Flags.AutoDrill:Set(false) end
+    Stat.digNoPick = false
+    print("[hub-af] autodig " .. (v and ("ON r=" .. tostring(Cfg.digRadius)) or "OFF"))
+end })
+DigBox:CreateToggle({ Name = "Auto drill sekeliling", Flag = "AutoDrill", CurrentValue = false, Callback = function(v)
+    Cfg.drill = v
+    if v and Cfg.dig and Airflow.Flags.AutoDig then Airflow.Flags.AutoDig:Set(false) end
+    print("[hub-af] autodrill " .. (v and "ON" or "OFF"))
+end })
+DigBox:CreateToggle({ Name = "Auto void slam", Flag = "AutoSlam", CurrentValue = false, Callback = function(v)
+    Cfg.slam = v
+    print("[hub-af] autoslam " .. (v and "ON" or "OFF"))
+end })
+DigBox:CreateSlider({ Name = "Radius dig", Range = { 6, 20 }, Increment = 1, CurrentValue = 8, Suffix = "st", Flag = "DigRadius", Callback = function(v)
+    Cfg.digRadius = math.clamp(math.floor(v), 6, 20)
+end })
 
--- slot teleport generik (dipakai Monitor + tab B&R)
+local SellBox = MainTab:CreateGroupbox({ Name = "Auto Sell", Side = "Right", Collapsed = true })
+SellBox:CreateToggle({ Name = "Sell", Flag = "AutoSell", CurrentValue = false, Callback = function(v) Cfg.autoSell = v end })
+SellBox:CreateSlider({ Name = "Sell at", Range = { 50, 100 }, Increment = 1, CurrentValue = 100, Suffix = "%", Flag = "SellPct", Callback = function(v)
+    Cfg.sellPct = math.clamp(math.floor(v), 50, 100)
+end })
+SellBox:CreateButton({ Name = "Sell Now", Callback = function() Stat.sellNow = true end })
+
+local EspBox = MainTab:CreateGroupbox({ Name = "ESP", Side = "Right", Collapsed = true })
+EspBox:CreateToggle({ Name = "ESP crystal", Flag = "Esp", CurrentValue = false, Callback = function(v)
+    Cfg.esp = v
+    if not v then
+        for m, e in pairs(espMarks) do
+            if not e.b and not e.g then
+                pcall(function() e.hl:Destroy() end)
+                pcall(function() e.gui:Destroy() end)
+                espMarks[m] = nil
+            end
+        end
+        if not Cfg.espBoulder and not Cfg.espGeode then espClear() end
+    end
+end })
+EspBox:CreateToggle({ Name = "ESP boulder", Flag = "EspBoulder", CurrentValue = true, Callback = function(v)
+    Cfg.espBoulder = v
+    if not v then
+        for m, e in pairs(espMarks) do
+            if e.b then
+                pcall(function() e.hl:Destroy() end)
+                pcall(function() e.gui:Destroy() end)
+                espMarks[m] = nil
+            end
+        end
+    end
+end })
+EspBox:CreateToggle({ Name = "ESP geode core", Flag = "EspGeode", CurrentValue = false, Callback = function(v)
+    Cfg.espGeode = v
+    if not v then
+        for m, e in pairs(espMarks) do
+            if e.g then
+                pcall(function() e.hl:Destroy() end)
+                pcall(function() e.gui:Destroy() end)
+                espMarks[m] = nil
+            end
+        end
+    end
+end })
+EspBox:CreateDropdown({ Name = "Rarity", Options = RARITY_LIST, CurrentOption = RARITY_LIST, MultipleOptions = true, Flag = "EspRar", Callback = function(v)
+    local list = {}
+    if type(v) == "table" then for _, s in ipairs(v) do table.insert(list, s) end elseif type(v) == "string" then list = { v } end
+    if #list == 0 then list = { "Common" } end
+    Cfg.espRar = list
+end })
+
+-- slot teleport generik: 10 button, SetText + SetVisible (handle Robly dukung keduanya)
 local function brSlots(box, n, tag)
     local slots = {}
     for i = 1, n do
         local idx = i
-        local btn = box:AddButton({ Text = "-", Func = function()
+        local btn = box:CreateButton({ Name = "-", Callback = function()
             local s = slots[idx]
             local h = getHRP()
             if s.target and s.target.Parent and s.pos and h then
@@ -1243,12 +1340,12 @@ local function brSlots(box, n, tag)
                     tpTo(h, CFrame.new(s.pos + Vector3.new(0, TUNE.tpLift, 0)))
                 end)
                 if ok then
-                    print("[hub] tp ke " .. s.name)
+                    print("[hub-af] tp ke " .. s.name)
                 else
-                    notify(tag, "TP gagal: " .. tostring(err):sub(1, 60))
+                    afNotify(tag, "TP gagal: " .. tostring(err):sub(1, 60))
                 end
             else
-                notify(tag, "Sudah hilang.")
+                afNotify(tag, "Sudah hilang.")
             end
         end })
         btn:SetVisible(false)
@@ -1257,545 +1354,235 @@ local function brSlots(box, n, tag)
     return slots
 end
 
-local MonitorBox = MainTab:AddGroupbox({ Side = "Right", Name = "Monitor Top 10" })
-MonitorBox:AddDropdown("MonRarity", { Text = "Rarity", Values = RARITY_LIST, Multi = true, Default = { "Mythic" } })
-MonitorBox:AddDropdown("MonSort", { Text = "Sort by", Values = { "Value", "Luck" }, Default = 1 })
-MonitorBox:AddButton({ Text = "Refresh", Func = function()
-    Stat.monRefresh = true
-end })
-MonitorBox:AddButton({ Text = "Select All Rarity", Func = function()
-    Cfg.monRar = { table.unpack(RARITY_LIST) }
-    pcall(function() Options.MonRarity:SetValue(Cfg.monRar) end)
-    Stat.monRefresh = true
-end })
-MonitorBox:AddButton({ Text = "Clear Rarity", Func = function()
-    Cfg.monRar = {}
-    pcall(function() Options.MonRarity:SetValue({}) end)
-    Stat.monRefresh = true
-end })
-local MonSlots = brSlots(MonitorBox, TUNE.monSlots, "Monitor")
+local ShopTab = Window:CreateTab({ Name = "Shop", Icon = "shopping-cart" })
+local ShopBox = ShopTab:CreateGroupbox({ Name = "Auto Upgrade", Side = "Left" })
+ShopBox:CreateToggle({ Name = "Warmth", Flag = "UpWarmth", CurrentValue = false, Callback = function(v) Cfg.upWarmth = v end })
+ShopBox:CreateToggle({ Name = "Carry", Flag = "UpCarry", CurrentValue = false, Callback = function(v) Cfg.upCarry = v end })
+ShopBox:CreateSlider({ Name = "Simpan coins", Range = { 0, 10000000 }, Increment = 1000, CurrentValue = 0, Flag = "Reserve", Callback = function(v) Cfg.reserve = math.floor(v) end })
+local UpgLabel = ShopBox:CreateStatus({ Name = "upgrade", Value = "-", Style = "Row" })
 
-local BoulderBox = BRTab:AddGroupbox({ Side = "Left", Name = "Boulder Top 10" })
-BoulderBox:AddButton({ Text = "Refresh", Func = function()
-    Stat.monRefresh = true
-end })
-BoulderBox:AddToggle("AutoBoulder", { Text = "Auto mine boulder", Default = false })
-local BoulderSlots = brSlots(BoulderBox, TUNE.monSlots, "B&R")
-
-local RuneBox = BRTab:AddGroupbox({ Side = "Right", Name = "Rune" })
-RuneBox:AddButton({ Text = "Refresh", Func = function()
-    Stat.monRefresh = true
-end })
-RuneBox:AddToggle("AutoRune", { Text = "Auto pickup rune", Default = false })
-RuneBox:AddDropdown("RuneSel", { Text = "Pickup filter", Values = RUNE_LIST, Multi = true, Default = RUNE_LIST })
-RuneBox:AddDropdown("RuneMonSel", { Text = "Monitor filter", Values = RUNE_LIST, Multi = true, Default = RUNE_LIST })
-RuneBox:AddToggle("AutoStorm", { Text = "Auto storm (cuaca event)", Default = false })
-RuneBox:AddButton({ Text = "Place Storm", Func = function()
-    Stat.stormManual = "place"
-end })
-RuneBox:AddButton({ Text = "Pickup Storm", Func = function()
-    Stat.stormManual = "take"
-end })
-local StormLabel = RuneBox:AddLabel("Storm: -", true)
-local RuneSlots = brSlots(RuneBox, TUNE.monSlots, "B&R")
-
-local ShopBox = ShopTab:AddGroupbox({ Side = "Left", Name = "Auto Upgrade" })
-ShopBox:AddToggle("UpWarmth", { Text = "Warmth", Default = false })
-ShopBox:AddToggle("UpCarry", { Text = "Carry", Default = false })
-ShopBox:AddSlider("Reserve", { Text = "Simpan coins", Default = 0, Min = 0, Max = 10000000, Rounding = 0 })
-local UpgLabel = ShopBox:AddLabel("upgrade: -", true)
-
-local PickBox = ShopTab:AddGroupbox({ Side = "Left", Name = "Pickaxe" })
+local PickBox = ShopTab:CreateGroupbox({ Name = "Pickaxe", Side = "Left" })
 local pickNames = {}
-local _pdl = D("PickaxeData")
-if _pdl then
-    for i, v in ipairs(_pdl) do
-        pickNames[i] = string.format("%d. %s (%s)", i, v.name, fmtMoney(v.price))
-    end
-end
-PickBox:AddDropdown("PickList", { Text = "Pickaxe", Values = pickNames, Default = 9 })
-PickBox:AddButton({ Text = "Buy", Func = function()
-    buyPickaxe(Cfg.pickSel, true)
-end })
-PickBox:AddButton({ Text = "Equip", Func = function()
-    pcall(function() R("ShopRemotes","EquipPickaxe"):FireServer(Cfg.pickSel) end)
-    print("[hub] equip pickaxe " .. Cfg.pickSel)
-end })
-
-local BombBox = ShopTab:AddGroupbox({ Side = "Right", Name = "Bomb" })
-local bombIds = {}
-local bombFirst = nil
-local _bdl = D("BombData")
-if _bdl and _bdl.List then
-    for _, v in ipairs(_bdl.List) do
-        local label = string.format("%s (%s)", v.id, fmtMoney(v.price))
-        table.insert(bombIds, label)
-        if not bombFirst then
-            bombFirst = label
+do
+    local _pdl = D("PickaxeData")
+    if _pdl then
+        for i, v in ipairs(_pdl) do
+            pickNames[i] = string.format("%d. %s (%s)", i, v.name, fmtMoney(v.price))
         end
     end
 end
-BombBox:AddDropdown("BombSel", { Text = "Bomb", Values = bombIds, Multi = true, Default = { bombFirst } })
-BombBox:AddToggle("AutoBomb", { Text = "Auto buy", Default = false })
-BombBox:AddButton({ Text = "Buy Now", Func = function()
-    buyBombs()
-end })
-
-local RadarBox = ShopTab:AddGroupbox({ Side = "Right", Name = "Radar" })
-local radarIds = {}
-local radarFirst = nil
-local _rdl = D("RadarData")
-if _rdl and _rdl.List then
-    for _, v in ipairs(_rdl.List) do
-        local label = string.format("%s (%s)", v.id, fmtMoney(v.price))
-        table.insert(radarIds, label)
-        if not radarFirst then
-            radarFirst = label
-        end
-    end
-end
-RadarBox:AddDropdown("RadarSel", { Text = "Radar", Values = radarIds, Multi = true, Default = { radarFirst } })
-RadarBox:AddToggle("AutoRadar", { Text = "Auto buy", Default = false })
-RadarBox:AddButton({ Text = "Buy Now", Func = function()
-    buyRadars()
-end })
-
-local MenuBox = SettingsTab:AddGroupbox({ Side = "Left", Name = "Menu" })
-MenuBox:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", { Default = "RightShift", NoUI = true, Text = "Menu keybind" })
-MenuBox:AddButton({ Text = "Unload", Func = function()
-    if getgenv()._ANT_HUB_UNLOAD then
-        pcall(getgenv()._ANT_HUB_UNLOAD)
-        getgenv()._ANT_HUB_UNLOAD = nil
-    end
-end })
-Library.ToggleKeybind = Options.MenuKeybind
-
-local DisplayBox = SettingsTab:AddGroupbox({ Side = "Right", Name = "Display" })
-DisplayBox:AddSlider("DPI", { Text = "DPI scale", Default = 100, Min = 50, Max = 150, Rounding = 0, Suffix = "%" })
-
-local SrvPlayers = ServerTab:AddGroupbox({ Side = "Left", Name = "Players" })
-SrvPlayers:AddDropdown("ServerPlayer", { Text = "Player", Values = Server.playerNames(), Default = 1, Searchable = true })
-SrvPlayers:AddButton({ Text = "Refresh Players", Func = function()
-    local vals = Server.playerNames()
-    pcall(function()
-        local dd = Options.ServerPlayer
-        if dd then
-            if dd.SetValues then
-                dd:SetValues(vals)
-            end
-            if dd.SetValue and vals[1] then
-                dd:SetValue(vals[1])
-            end
-        end
-    end)
-    notify("Players", tostring(#vals) .. " listed")
-end })
-SrvPlayers:AddButton({ Text = "Teleport to Player", Func = function()
-    local name = Options.ServerPlayer and Options.ServerPlayer.Value
-    local ok, err = Server.teleportTo(name)
-    notify("TP Player", ok and ("-> " .. tostring(name)) or tostring(err))
-end })
-
-local SrvAct = ServerTab:AddGroupbox({ Side = "Right", Name = "Server Actions" })
-SrvAct:AddButton({ Text = "Rejoin", Func = function()
-    local ok, err = Server.rejoin()
-    if not ok then
-        notify("Rejoin", tostring(err))
-    end
-end })
-SrvAct:AddButton({ Text = "Hop Server", Func = function()
-    local ok, err = Server.hop("full")
-    if not ok then
-        notify("Hop", tostring(err))
-    end
-end })
-SrvAct:AddButton({ Text = "Hop Server (Sepi)", Func = function()
-    local ok, err = Server.hop("low")
-    if not ok then
-        notify("Hop", tostring(err))
-    end
-end })
-SrvAct:AddButton({ Text = "Go Home", Func = function()
-    local ok, err = Server.goHome()
-    notify("Go Home", ok and "OK" or tostring(err))
-end })
-SrvAct:AddButton({ Text = "Teleport Peak", Func = function()
-    local ok, msg = Server.peak()
-    notify(ok and "Peak" or "Peak gagal", tostring(msg))
-end })
-SrvAct:AddButton({ Text = "Reset Character", Func = function()
-    local ok, err = Server.resetCharacter()
-    if not ok then
-        notify("Reset", tostring(err))
-    end
-end })
-SrvAct:AddButton({ Text = "Refresh (posisi balik)", Func = function()
-    local ok, err = Server.refresh()
-    notify("Refresh", ok and "Respawn..." or tostring(err))
-end })
-SrvAct:AddLabel("Refresh key"):AddKeyPicker("RefreshKey", { Default = "R", NoUI = false, Text = "Refresh key" })
-
-local SrvMet = ServerTab:AddGroupbox({ Side = "Left", Name = "Meteor" })
-local MeteorLabel = SrvMet:AddLabel("meteor: - (tak ada event)", true)
-SrvMet:AddButton({ Text = "Teleport to Impact", Func = function()
-    local h = getHRP()
-    if not h then
-        notify("Meteor", "No HRP.")
-        return
-    end
-    local okA, active = pcall(function() return R("MeteorRemotes","Active").Value end)
-    local okP, pos = pcall(function() return R("MeteorRemotes","ImpactPos").Value end)
-    if not okA or not active then
-        notify("Meteor", "Tak ada event aktif.")
-        return
-    end
-    if not okP or not pos then
-        notify("Meteor", "ImpactPos tak terbaca.")
-        return
-    end
-    local ok, err = pcall(function()
-        tpTo(h, CFrame.new(pos + Vector3.new(0, TUNE.tpLift, 0)))
-    end)
-    if ok then
-        print("[hub] tp meteor " .. tostring(pos))
-    else
-        notify("Meteor", "TP gagal: " .. tostring(err):sub(1, 60))
-    end
-end })
-
-local MoveBox = MiscTab:AddGroupbox({ Side = "Left", Name = "Movement" })
-MoveBox:AddToggle("Fly", { Text = "Fly (joystick/analog + ▲▼)", Default = false })
-MoveBox:AddSlider("FlySpeed", { Text = "Fly speed", Default = 50, Min = 10, Max = 150, Rounding = 0 })
-MoveBox:AddToggle("Noclip", { Text = "NoClip", Default = false })
-MoveBox:AddToggle("AntiAfk", { Text = "Anti-AFK", Default = false })
-MoveBox:AddToggle("AntiRagdoll", { Text = "Anti ragdoll", Default = false })
-MoveBox:AddToggle("Speed", { Text = "Speed booster", Default = false })
-MoveBox:AddSlider("SpeedVal", { Text = "Speed (risiko kick!)", Default = 32, Min = 16, Max = 120, Rounding = 0 })
-MoveBox:AddToggle("JetpackInf", { Text = "Jetpack unlimited", Default = false })
-
-local GfxBox = MiscTab:AddGroupbox({ Side = "Left", Name = "Graphic" })
-GfxBox:AddToggle("AntiLag", { Text = "Anti lag", Default = false })
-GfxBox:AddToggle("NoRender", { Text = "No render (layar hitam, farm jalan)", Default = false })
-
-pcall(function()
-    ThemeManager:SetLibrary(Library)
-    ThemeManager:SetFolder("AntarcticaHub")
-    ThemeManager:ApplyToTab(SettingsTab)
-    SaveManager:SetLibrary(Library)
-    SaveManager:SetFolder("AntarcticaHub")
-    SaveManager:SetIgnoreIndexes({ "MenuKeybind", "VacuumKey", "RefreshKey", "WindowLayout" })
-    SaveManager:BuildConfigSection(SettingsTab)
-    SaveManager:LoadAutoloadConfig()
-    -- selalu tengah: abaikan posisi window tersimpan di autoload config
-    pcall(function()
-        local mf = Window and Window.MainFrame
-        if mf then
-            mf.Position = UDim2.new(0.5, -mf.Size.X.Offset / 2, 0.5, -mf.Size.Y.Offset / 2)
-        end
-    end)
-end)
-
-Toggles.Vacuum:OnChanged(function(v)
-    Cfg.vacuum = v
-    print("[hub] vacuum " .. (v and "ON" or "OFF"))
-end)
-pcall(function()
-    Options.VacuumKey:OnClick(function()
-        if Toggles.Vacuum then
-            Toggles.Vacuum:SetValue(not Toggles.Vacuum.Value)
-        end
-    end)
-end)
-pcall(function()
-    Options.RefreshKey:OnClick(function()
-        local ok, err = Server.refresh()
-        notify("Refresh", ok and "Respawn..." or tostring(err))
-    end)
-end)
-Toggles.AutoDig:OnChanged(function(v)
-    Cfg.dig = v
-    if v then
-        if Cfg.drill and Toggles.AutoDrill then
-            Toggles.AutoDrill:SetValue(false)
-        end
-        Stat.digNoPick = false
-        print("[hub] autodig ON r=" .. tostring(Cfg.digRadius))
-    else
-        print("[hub] autodig OFF")
-    end
-end)
-Toggles.AutoDrill:OnChanged(function(v)
-    Cfg.drill = v
-    if v and Cfg.dig and Toggles.AutoDig then
-        Toggles.AutoDig:SetValue(false) -- drill ganti peran dig, jangan dobel fire
-    end
-    print("[hub] autodrill " .. (v and "ON" or "OFF"))
-end)
-Options.DigRadius:OnChanged(function(v) Cfg.digRadius = math.clamp(math.floor(v), 6, 20) end)
-Toggles.AutoSlam:OnChanged(function(v)
-    Cfg.slam = v
-    print("[hub] autoslam " .. (v and "ON" or "OFF"))
-end)
-Toggles.Teleport:OnChanged(function(v) Cfg.teleport = v end)
-Toggles.Esp:OnChanged(function(v)
-    Cfg.esp = v
-    if not v then
-        -- hapus crystal marks saja, boulder/geode biarin kalau togglenya masih on
-        for m,e in pairs(espMarks) do
-            if not e.b and not e.g then
-                pcall(function() e.hl:Destroy() end)
-                pcall(function() e.gui:Destroy() end)
-                espMarks[m]=nil
-            end
-        end
-        if not Cfg.espBoulder and not Cfg.espGeode then espClear() end
-    end
-end)
-Toggles.EspBoulder:OnChanged(function(v)
-    Cfg.espBoulder = v
-    if not v then
-        for m,e in pairs(espMarks) do
-            if e.b then
-                pcall(function() e.hl:Destroy() end)
-                pcall(function() e.gui:Destroy() end)
-                espMarks[m]=nil
-            end
-        end
-    end
-end)
-Toggles.EspGeode:OnChanged(function(v)
-    Cfg.espGeode = v
-    if not v then
-        for m,e in pairs(espMarks) do
-            if e.g then
-                pcall(function() e.hl:Destroy() end)
-                pcall(function() e.gui:Destroy() end)
-                espMarks[m]=nil
-            end
-        end
-    end
-end)
-Toggles.AutoBoulder:OnChanged(function(v)
-    Cfg.autoBoulder = v
-    if v then
-        print("[hub] auto boulder ON")
-    end
-end)
-Toggles.AutoRune:OnChanged(function(v)
-    Cfg.autoRune = v
-    if v then
-        print("[hub] auto rune ON")
-    end
-end)
-Options.RuneSel:OnChanged(function(v)
-    local list = {}
-    if type(v) == "table" then
-        for k, on in pairs(v) do
-            if on then
-                local name = type(k) == "number" and v[k] or k
-                table.insert(list, name)
-            end
-        end
-    elseif type(v) == "string" then
-        list = { v }
-    end
-    Cfg.runeSel = list
-end)
-Options.RuneMonSel:OnChanged(function(v)
-    local list = {}
-    if type(v) == "table" then
-        for k, on in pairs(v) do
-            if on then
-                local name = type(k) == "number" and v[k] or k
-                table.insert(list, name)
-            end
-        end
-    elseif type(v) == "string" then
-        list = { v }
-    end
-    Cfg.runeMonSel = list
-    Stat.monRefresh = true
-end)
-Toggles.AutoStorm:OnChanged(function(v)
-    Cfg.autoStorm = v
-    print("[hub] auto storm " .. (v and "ON" or "OFF"))
-end)
-Options.EspRar:OnChanged(function(v)
-    local list = {}
-    if type(v) == "table" then
-        for k, on in pairs(v) do
-            if on then
-                table.insert(list, type(k) == "number" and v[k] or k)
-            end
-        end
-    elseif type(v) == "string" then
-        list = { v }
-    end
-    if #list == 0 then
-        list = { "Common" }
-    end
-    Cfg.espRar = list
-end)
-Toggles.AutoSell:OnChanged(function(v) Cfg.autoSell = v end)
-Toggles.VacAggro:OnChanged(function(v) Cfg.vacAggro = v end)
-Toggles.VacFar:OnChanged(function(v) Cfg.vacFar = v end)
-Options.SellPct:OnChanged(function(v) Cfg.sellPct = math.clamp(math.floor(v), 50, 100) end)
-Toggles.Fly:OnChanged(function(v) Cfg.fly = v end)
-Toggles.UpWarmth:OnChanged(function(v) Cfg.upWarmth = v end)
-Toggles.UpCarry:OnChanged(function(v) Cfg.upCarry = v end)
-Toggles.AutoBomb:OnChanged(function(v) Cfg.autoBomb = v end)
-Toggles.AutoRadar:OnChanged(function(v) Cfg.autoRadar = v end)
-Options.RadarSel:OnChanged(function(v)
-    local list = {}
-    local function put(s)
-        local id = tostring(s):match("^(%S+)")
-        if id then
-            table.insert(list, id)
-        end
-    end
-    if type(v) == "table" then
-        for k, on in pairs(v) do
-            if on then
-                put(type(k) == "number" and v[k] or k)
-            end
-        end
-    elseif type(v) == "string" then
-        put(v)
-    end
-    Cfg.radarSel = list
-end)
-Options.PickList:OnChanged(function(v)
+PickBox:CreateDropdown({ Name = "Pickaxe", Options = pickNames, CurrentOption = { pickNames[9] }, Flag = "PickList", Callback = function(v)
+    local s = type(v) == "table" and v[1] or v
     local _pd = D("PickaxeData")
     local n = (_pd and #_pd) or 23
-    if type(v) == "number" then
-        Cfg.pickSel = math.clamp(math.floor(v), 1, n)
-    elseif type(v) == "string" then
-        Cfg.pickSel = math.clamp(tonumber(v:match("^(%d+)")) or 9, 1, n)
+    Cfg.pickSel = math.clamp(tonumber(tostring(s):match("^(%d+)")) or 9, 1, n)
+end })
+PickBox:CreateButton({ Name = "Buy", Callback = function() buyPickaxe(Cfg.pickSel, true) end })
+PickBox:CreateButton({ Name = "Equip", Callback = function()
+    pcall(function() R("ShopRemotes", "EquipPickaxe"):FireServer(Cfg.pickSel) end)
+    print("[hub-af] equip pickaxe " .. Cfg.pickSel)
+end })
+
+local BombBox = ShopTab:CreateGroupbox({ Name = "Bomb", Side = "Right" })
+local bombIds = {}
+do
+    local _bdl = D("BombData")
+    if _bdl and _bdl.List then
+        for _, v in ipairs(_bdl.List) do
+            table.insert(bombIds, string.format("%s (%s)", v.id, fmtMoney(v.price)))
+        end
     end
-end)
-Options.BombSel:OnChanged(function(v)
+end
+BombBox:CreateDropdown({ Name = "Bomb", Options = bombIds, CurrentOption = { bombIds[1] }, MultipleOptions = true, Flag = "BombSel", Callback = function(v)
     local list = {}
     local function put(s)
         local id = tostring(s):match("^(%S+)")
-        if id then
-            table.insert(list, id)
-        end
+        if id then table.insert(list, id) end
     end
-    if type(v) == "table" then
-        for k, on in pairs(v) do
-            if on then
-                put(type(k) == "number" and v[k] or k)
-            end
-        end
-    elseif type(v) == "string" then
-        put(v)
-    end
+    if type(v) == "table" then for _, s in ipairs(v) do put(s) end elseif type(v) == "string" then put(v) end
     Cfg.bombSel = list
-end)
-Options.Reserve:OnChanged(function(v) Cfg.reserve = math.floor(v) end)
-Toggles.Speed:OnChanged(function(v)
+end })
+BombBox:CreateToggle({ Name = "Auto buy", Flag = "AutoBomb", CurrentValue = false, Callback = function(v) Cfg.autoBomb = v end })
+BombBox:CreateButton({ Name = "Buy Now", Callback = function() buyBombs() end })
+
+local RadarBox = ShopTab:CreateGroupbox({ Name = "Radar", Side = "Right" })
+local radarIds = {}
+do
+    local _rdl = D("RadarData")
+    if _rdl and _rdl.List then
+        for _, v in ipairs(_rdl.List) do
+            table.insert(radarIds, string.format("%s (%s)", v.id, fmtMoney(v.price)))
+        end
+    end
+end
+RadarBox:CreateDropdown({ Name = "Radar", Options = radarIds, CurrentOption = { radarIds[1] }, MultipleOptions = true, Flag = "RadarSel", Callback = function(v)
+    local list = {}
+    local function put(s)
+        local id = tostring(s):match("^(%S+)")
+        if id then table.insert(list, id) end
+    end
+    if type(v) == "table" then for _, s in ipairs(v) do put(s) end elseif type(v) == "string" then put(v) end
+    Cfg.radarSel = list
+end })
+RadarBox:CreateToggle({ Name = "Auto buy", Flag = "AutoRadar", CurrentValue = false, Callback = function(v) Cfg.autoRadar = v end })
+RadarBox:CreateButton({ Name = "Buy Now", Callback = function() buyRadars() end })
+
+local MiscTab = Window:CreateTab({ Name = "Misc", Icon = "rocket" })
+local MoveBox = MiscTab:CreateGroupbox({ Name = "Movement", Side = "Left" })
+MoveBox:CreateToggle({ Name = "Fly (joystick + analog)", Flag = "Fly", CurrentValue = false, Callback = function(v) Cfg.fly = v end })
+MoveBox:CreateSlider({ Name = "Fly speed", Range = { 10, 150 }, Increment = 1, CurrentValue = 50, Flag = "FlySpeed", Callback = function(v)
+    Cfg.flySpeed = math.clamp(math.floor(v), 10, 150)
+end })
+MoveBox:CreateToggle({ Name = "NoClip", Flag = "Noclip", CurrentValue = false, Callback = function(v)
+    Cfg.noclip = v
+    if not v then restoreCollide() end
+end })
+MoveBox:CreateToggle({ Name = "Anti-AFK", Flag = "AntiAfk", CurrentValue = false, Callback = function(v) Cfg.antiAfk = v setAfk(v) end })
+MoveBox:CreateToggle({ Name = "Anti ragdoll", Flag = "AntiRagdoll", CurrentValue = false, Callback = function(v)
+    Cfg.antiRagdoll = v
+    if not v then setRagdoll(true) end
+end })
+MoveBox:CreateToggle({ Name = "Speed booster", Flag = "Speed", CurrentValue = false, Callback = function(v)
     Cfg.speed = v
     if not v then
         local char = LP.Character
         local hum = char and char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum.WalkSpeed = 16
-        end
+        if hum then hum.WalkSpeed = 16 end
     end
-end)
-Options.SpeedVal:OnChanged(function(v) Cfg.speedVal = math.clamp(math.floor(v), 16, 120) end)
-Toggles.Noclip:OnChanged(function(v)
-    Cfg.noclip = v
-    if not v then
-        restoreCollide()
-    end
-end)
-Toggles.AntiAfk:OnChanged(function(v) Cfg.antiAfk = v setAfk(v) end)
-Toggles.AntiRagdoll:OnChanged(function(v)
-    Cfg.antiRagdoll = v
-    if not v then
-        setRagdoll(true)
-    end
-end)
-Toggles.AntiLag:OnChanged(function(v)
-    Cfg.antiLag = v
-    setAntiLag(v)
-end)
-Toggles.NoRender:OnChanged(function(v)
-    Cfg.noRender = v
-    setNoRender(v)
-end)
-Toggles.JetpackInf:OnChanged(function(v)
+end })
+MoveBox:CreateSlider({ Name = "Speed (risiko kick!)", Range = { 16, 120 }, Increment = 1, CurrentValue = 32, Flag = "SpeedVal", Callback = function(v)
+    Cfg.speedVal = math.clamp(math.floor(v), 16, 120)
+end })
+MoveBox:CreateToggle({ Name = "Jetpack unlimited", Flag = "JetpackInf", CurrentValue = false, Callback = function(v)
     Cfg.jetpack = v
     setJetpackInf(v)
-end)
-Options.FlySpeed:OnChanged(function(v) Cfg.flySpeed = math.clamp(math.floor(v), 10, 150) end)
-Options.DPI:OnChanged(function(v)
-    pcall(function() Library:SetDPIScale(math.clamp(math.floor(v), 50, 150)) end)
-end)
-Options.MinRarity:OnChanged(function(v)
-    if type(v) == "number" then
-        Cfg.minRarity = math.clamp(math.floor(v), 1, #RARITY_LIST)
-    elseif type(v) == "string" then
-        Cfg.minRarity = RARITY_RANK[v] or 1
-    end
-end)
-Options.MonRarity:OnChanged(function(v)
+end })
+
+local GfxBox = MiscTab:CreateGroupbox({ Name = "Graphic", Side = "Left" })
+GfxBox:CreateToggle({ Name = "Anti lag", Flag = "AntiLag", CurrentValue = false, Callback = function(v)
+    Cfg.antiLag = v
+    setAntiLag(v)
+end })
+GfxBox:CreateToggle({ Name = "No render", Flag = "NoRender", CurrentValue = false, Callback = function(v)
+    Cfg.noRender = v
+    setNoRender(v)
+end })
+
+local BRTab = Window:CreateTab({ Name = "B&R", Icon = "mountain" })
+local BoulderBox = BRTab:CreateGroupbox({ Name = "Boulder Top 10", Side = "Left" })
+BoulderBox:CreateButton({ Name = "Refresh", Callback = function() Stat.monRefresh = true end })
+BoulderBox:CreateToggle({ Name = "Auto mine boulder", Flag = "AutoBoulder", CurrentValue = false, Callback = function(v)
+    Cfg.autoBoulder = v
+    if v then print("[hub-af] auto boulder ON") end
+end })
+local BoulderSlots = brSlots(BoulderBox, TUNE.monSlots, "B&R")
+
+local RuneBox = BRTab:CreateGroupbox({ Name = "Rune", Side = "Right" })
+RuneBox:CreateButton({ Name = "Refresh", Callback = function() Stat.monRefresh = true end })
+RuneBox:CreateToggle({ Name = "Auto pickup rune", Flag = "AutoRune", CurrentValue = false, Callback = function(v)
+    Cfg.autoRune = v
+    if v then print("[hub-af] auto rune ON") end
+end })
+RuneBox:CreateDropdown({ Name = "Pickup filter", Options = RUNE_LIST, CurrentOption = RUNE_LIST, MultipleOptions = true, Flag = "RuneSel", Callback = function(v)
     local list = {}
-    if type(v) == "table" then
-        for k, on in pairs(v) do
-            if on then
-                local name = type(k) == "number" and v[k] or k
-                if RARITY_RANK[name] then
-                    table.insert(list, name)
-                end
-            end
-        end
-    elseif type(v) == "number" then
-        -- migrasi save lama (single index)
-        list = { RARITY_LIST[math.clamp(math.floor(v), 1, #RARITY_LIST)] }
-    elseif type(v) == "string" then
-        list = { v }
-    end
-    Cfg.monRar = list
+    if type(v) == "table" then for _, s in ipairs(v) do table.insert(list, s) end elseif type(v) == "string" then list = { v } end
+    Cfg.runeSel = list
+end })
+RuneBox:CreateDropdown({ Name = "Monitor filter", Options = RUNE_LIST, CurrentOption = RUNE_LIST, MultipleOptions = true, Flag = "RuneMonSel", Callback = function(v)
+    local list = {}
+    if type(v) == "table" then for _, s in ipairs(v) do table.insert(list, s) end elseif type(v) == "string" then list = { v } end
+    Cfg.runeMonSel = list
     Stat.monRefresh = true
-end)
-Options.MonSort:OnChanged(function(v)
-    if type(v) == "string" then
-        Cfg.monSort = v
-    elseif type(v) == "number" then
-        Cfg.monSort = ({ "Value", "Luck" })[math.clamp(math.floor(v), 1, 2)]
-    end
-end)
+end })
+RuneBox:CreateToggle({ Name = "Auto storm", Flag = "AutoStorm", CurrentValue = false, Callback = function(v)
+    Cfg.autoStorm = v
+    print("[hub-af] auto storm " .. (v and "ON" or "OFF"))
+end })
+RuneBox:CreateButton({ Name = "Place Storm", Callback = function() Stat.stormManual = "place" end })
+RuneBox:CreateButton({ Name = "Pickup Storm", Callback = function() Stat.stormManual = "take" end })
+local StormLabel = RuneBox:CreateStatus({ Name = "Storm", Value = "-", Style = "Row" })
+local RuneSlots = brSlots(RuneBox, TUNE.monSlots, "B&R")
 
--- autoload fix: config di-restore SEBELUM OnChanged terdaftar -> UI tampil ON tapi Cfg tetap default.
--- Fire ulang semua toggle/option biar Cfg + efek samping sinkron dengan tampilan.
-pcall(function()
-    for _, name in ipairs({ "Vacuum", "Teleport", "AutoDig", "AutoDrill", "AutoSlam",
-        "AutoSell", "Esp", "EspBoulder", "EspGeode", "AutoBoulder", "AutoRune",
-        "AutoStorm", "UpWarmth", "UpCarry", "AutoBomb", "AutoRadar",
-        "Fly", "Noclip", "AntiAfk", "AntiRagdoll", "Speed", "AntiLag", "NoRender", "JetpackInf", "VacAggro", "VacFar" }) do
-        local t = Toggles[name]
-        if t and t.SetValue then
-            t:SetValue(t.Value and true or false)
-        end
+local ServerTab = Window:CreateTab({ Name = "Server", Icon = "server" })
+local SrvPlayers = ServerTab:CreateGroupbox({ Name = "Players", Side = "Left" })
+SrvPlayers:CreateDropdown({ Name = "Player", Options = Server.playerNames(), CurrentOption = { Server.playerNames()[1] }, Flag = "ServerPlayer", Searchable = true })
+SrvPlayers:CreateButton({ Name = "Refresh Players", Callback = function()
+    local vals = Server.playerNames()
+    local el = Airflow.Flags.ServerPlayer
+    if el then
+        pcall(function() el:SetOptions(vals) end)
+        pcall(function() el:Set({ vals[1] }) end)
     end
-    for _, name in ipairs({ "MinRarity", "MonRarity", "MonSort", "DigRadius", "SellPct",
-        "EspRar", "RuneSel", "RuneMonSel", "PickList", "BombSel",
-        "RadarSel", "Reserve", "SpeedVal", "FlySpeed", "DPI" }) do
-        local o = Options[name]
-        if o and o.SetValue then
-            o:SetValue(o.Value)
-        end
-    end
-    -- sabuk pengaman bila SetValue tak fire callback: paksa efek sekali jalan
-    setAfk(Cfg.antiAfk)
-    setAntiLag(Cfg.antiLag)
-    setNoRender(Cfg.noRender)
-    if Cfg.antiRagdoll then setRagdoll(false) else setRagdoll(true) end
-end)
+    afNotify("Players", tostring(#vals) .. " listed")
+end })
+SrvPlayers:CreateButton({ Name = "Teleport to Player", Callback = function()
+    local el = Airflow.Flags.ServerPlayer
+    local v = el and el:Get()
+    local name = type(v) == "table" and v[1] or v
+    local ok, err = Server.teleportTo(name)
+    afNotify("TP Player", ok and ("-> " .. tostring(name)) or tostring(err))
+end })
 
--- ==================== LOOPS ====================
+local SrvAct = ServerTab:CreateGroupbox({ Name = "Server Actions", Side = "Right" })
+SrvAct:CreateButton({ Name = "Rejoin", Callback = function()
+    local ok, err = Server.rejoin()
+    if not ok then afNotify("Rejoin", tostring(err)) end
+end })
+SrvAct:CreateButton({ Name = "Hop Server", Callback = function()
+    local ok, err = Server.hop("full")
+    if not ok then afNotify("Hop", tostring(err)) end
+end })
+SrvAct:CreateButton({ Name = "Hop Server (Sepi)", Callback = function()
+    local ok, err = Server.hop("low")
+    if not ok then afNotify("Hop", tostring(err)) end
+end })
+SrvAct:CreateButton({ Name = "Go Home", Callback = function()
+    local ok, err = Server.goHome()
+    afNotify("Go Home", ok and "OK" or tostring(err))
+end })
+SrvAct:CreateButton({ Name = "Teleport Peak", Callback = function()
+    local ok, msg = Server.peak()
+    afNotify(ok and "Peak" or "Peak gagal", tostring(msg))
+end })
+SrvAct:CreateButton({ Name = "Reset Character", Callback = function()
+    local ok, err = Server.resetCharacter()
+    if not ok then afNotify("Reset", tostring(err)) end
+end })
+SrvAct:CreateButton({ Name = "Refresh (posisi balik)", Callback = function()
+    local ok, err = Server.refresh()
+    afNotify("Refresh", ok and "Respawn..." or tostring(err))
+end })
+SrvAct:CreateKeybind({ Name = "Refresh key", CurrentKeybind = "R", Flag = "RefreshKey", Callback = function()
+    local ok, err = Server.refresh()
+    afNotify("Refresh", ok and "Respawn..." or tostring(err))
+end })
+
+local SrvMet = ServerTab:CreateGroupbox({ Name = "Meteor", Side = "Left" })
+local MeteorLabel = SrvMet:CreateStatus({ Name = "meteor", Value = "-", Style = "Row" })
+SrvMet:CreateButton({ Name = "Teleport to Impact", Callback = function()
+    local h = getHRP()
+    if not h then afNotify("Meteor", "No HRP.") return end
+    local okA, active = pcall(function() return R("MeteorRemotes", "Active").Value end)
+    local okP, pos = pcall(function() return R("MeteorRemotes", "ImpactPos").Value end)
+    if not okA or not active then afNotify("Meteor", "Tak ada event aktif.") return end
+    if not okP or not pos then afNotify("Meteor", "ImpactPos tak terbaca.") return end
+    local ok, err = pcall(function()
+        tpTo(h, CFrame.new(pos + Vector3.new(0, TUNE.tpLift, 0)))
+    end)
+    if ok then print("[hub-af] tp meteor " .. tostring(pos)) else afNotify("Meteor", "TP gagal: " .. tostring(err):sub(1, 60)) end
+end })
+
+local SettingsTab = Window:CreateTab({ Name = "Setting", Icon = "settings" })
+SettingsTab:CreateButton({ Name = "Unload", Callback = function()
+    if getgenv()._ANT_HUB_AF_UNLOAD then
+        pcall(getgenv()._ANT_HUB_AF_UNLOAD)
+        getgenv()._ANT_HUB_AF_UNLOAD = nil
+    end
+end })
+SettingsTab:CreateConfigManager({ Side = "Left" })
+SettingsTab:CreateThemeManager({ Side = "Right" })
+
+Window:LoadAutoload()
 local function doSell()
     local h = getHRP()
     if not h then
@@ -1816,7 +1603,7 @@ local function doSell()
     Stat.selling = false
     local c = tostring(LP.leaderstats.Coins.Value)
     print("[hub] sold, coins=" .. c)
-    notify("Sold", "Coins: " .. c)
+    afNotify("Sold", "Coins: " .. c)
 end
 
 -- cache UpgradeState server (level + harga). koneksi ikut teardown reload.
@@ -1867,7 +1654,7 @@ local function hookMeteor()
     if not _metEv then return end
     _metEv.Changed:Connect(function(v)
         if v then
-            notify("Meteor", "Incoming! TP dari tab Server.")
+            afNotify("Meteor", "Incoming! TP dari tab Server.")
             print("[hub] meteor incoming")
         else
             print("[hub] meteor end")
@@ -1878,7 +1665,7 @@ if RL_STATE then
     if _metEv then
         RL_STATE.connect(_metEv.Changed, function(v)
             if v then
-                notify("Meteor", "Incoming! TP dari tab Server.")
+                afNotify("Meteor", "Incoming! TP dari tab Server.")
                 print("[hub] meteor incoming")
             else
                 print("[hub] meteor end")
@@ -1986,15 +1773,6 @@ task.spawn(function()
     end
 end)
 
-getgenv()._ANT_HUB = { cfg = Cfg, stat = Stat, tune = TUNE, effLuck = effLuck }
-getgenv()._ANT_HUB_DBG = function()
-    return string.format("vacuum=%s teleport=%s autoSell=%s dig=%s r=%d minRar=%d monRar=%s monSort=%s tick=%ds lalu target=%s",
-        tostring(Cfg.vacuum), tostring(Cfg.teleport), tostring(Cfg.autoSell),
-        tostring(Cfg.dig), Cfg.digRadius,
-        Cfg.minRarity, table.concat(Cfg.monRar, "+"), tostring(Cfg.monSort),
-        math.floor(os.clock() - (Stat.lastTick or 0)), tostring(Stat.lastTarget or "-"))
-end
-
 local function runePos(m)
     local rm = m:FindFirstChild("RuneMesh", true)
     if rm then
@@ -2099,15 +1877,24 @@ local function refreshMonitor()
     else
         table.sort(rows, function(a, b) return a.value > b.value end)
     end
-    fillSlots(MonSlots, rows, function(i, r)
+    MonRows = {}
+    local trows = {}
+    for i = 1, math.min(#rows, TUNE.monSlots) do
+        local r = rows[i]
         local rar = r.m:GetAttribute("Rarity") or "Common"
         local badge = rar:sub(1, 1)
         local kg = r.kg >= 1000 and string.format("%.2ft", r.kg / 1000) or string.format("%.1fkg", r.kg)
-        return string.format('%d. <font color="%s">[%s] %s</font> %s +%s %s %.0fm', i,
-            RARITY_HEX[rar] or "#FFFFFF", badge,
-            r.m:GetAttribute("GemName") or r.m.Name, fmtMoney(r.value),
-            string.format("%.1f%%", r.luck), kg, r.d)
-    end)
+        MonRows[i] = r
+        trows[i] = {
+            ["#"] = i,
+            Crystal = string.format("[%s] %s", badge, r.m:GetAttribute("GemName") or r.m.Name),
+            Value = string.format("%s %s", fmtMoney(r.value), kg),
+            Luck = string.format("+%.1f%%", r.luck),
+            Jarak = string.format("%.0fm", r.d),
+            Colors = { Crystal = RARITY_HEX[rar] or "#FFFFFF" },
+        }
+    end
+    pcall(function() MonTbl:SetRows(trows) end)
 end
 
 task.spawn(function()
@@ -2372,7 +2159,7 @@ task.spawn(function()
             if not ensureDrill() then
                 if not Stat.drillNoTool then
                     Stat.drillNoTool = true
-                    notify("Drill", "Equip Plasma Drill dulu.")
+                    afNotify("Drill", "Equip Plasma Drill dulu.")
                 end
                 return
             end
@@ -2436,7 +2223,7 @@ task.spawn(function()
             if not ensurePickaxe() then
                 if not Stat.digNoPick then
                     Stat.digNoPick = true
-                    notify("Dig", "Tak ada pickaxe di tas.")
+                    afNotify("Dig", "Tak ada pickaxe di tas.")
                 end
                 return
             end
@@ -2486,7 +2273,7 @@ task.spawn(function()
             if not tool or not tool:FindFirstChild("ScytheEvent") then
                 if not Stat.slamNoTool then
                     Stat.slamNoTool = true
-                    notify("Slam", "Equip Void Hammer dulu.")
+                    afNotify("Slam", "Equip Void Hammer dulu.")
                 end
                 return
             end
@@ -2776,7 +2563,7 @@ task.spawn(function()
                 else
                     done, msg = stormTakeOnce()
                 end
-                notify("Storm", tostring(msg))
+                afNotify("Storm", tostring(msg))
                 print("[hub] storm manual " .. man .. ": " .. tostring(msg))
                 return
             end
@@ -2825,4 +2612,12 @@ pcall(function()
     end
 end)
 
-print("[hub] loaded (vacuum-only + drop orang)")
+getgenv()._ANT_HUB_AF = { cfg = Cfg, stat = Stat, tune = TUNE, effLuck = effLuck }
+getgenv()._ANT_HUB_AF_DBG = function()
+    return string.format("vacuum=%s teleport=%s autoSell=%s dig=%s r=%d minRar=%d monRar=%s monSort=%s tick=%ds lalu target=%s",
+        tostring(Cfg.vacuum), tostring(Cfg.teleport), tostring(Cfg.autoSell),
+        tostring(Cfg.dig), Cfg.digRadius,
+        Cfg.minRarity, table.concat(Cfg.monRar, "+"), tostring(Cfg.monSort),
+        math.floor(os.clock() - (Stat.lastTick or 0)), tostring(Stat.lastTarget or "-"))
+end
+print("[hub-af] loaded (vacuum-only + drop orang)")
