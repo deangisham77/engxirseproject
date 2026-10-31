@@ -50,7 +50,7 @@ local State = {
     AutoPick = false, Teleport = false, AutoSell = false,
     Rarities = {}, MinValue = 0, MaxDist = 400,
     ScanDelay = 0.4, MultiPop = 3, SellPct = 90,
-    Running = false, StatusText = "Idle", Picked = 0, Sold = 0,
+    Running = false, StatusText = "Idle", Picked = 0, Sold = 0, Aggro = false,
     AutoSwing = false, SwingDist = 25, Swung = 0, SwingRunning = false,
     SwingTP = true, swingTpAt = 0,
     MonRar = {}, MonSort = "Value", monRefresh = false, monAt = 0,
@@ -71,6 +71,33 @@ local tryAt = {}
 local function getHRP()
     local ch = LP.Character
     return ch and ch:FindFirstChild("HumanoidRootPart")
+end
+
+-- teleport anti rubber-band: jalan bertahap 8 stud / 0.15 dtk (~53 st/s, lolos validasi server)
+local function tpTo(h, targetPos, lift)
+    if not h or not h.Parent then return false end
+    lift = lift or 6
+    local t0 = os.clock()
+    while os.clock() - t0 < 30 do
+        local cur = h.Position
+        local goal = targetPos + Vector3.new(0, lift, 0)
+        local d = (goal - cur).Magnitude
+        if d <= 9 then
+            pcall(function() h.CFrame = CFrame.new(goal) end)
+            task.wait(0.3)
+            return ((h.Position - goal).Magnitude <= 14)
+        end
+        local step = cur + (goal - cur).Unit * 8
+        local ok = pcall(function() h.CFrame = CFrame.new(step) end)
+        if not ok then return false end
+        task.wait(0.15)
+        -- kena tarik balik = berhenti, biar tidak perang dengan server
+        if (h.Position - step).Magnitude > 20 then
+            task.wait(0.5)
+            return ((h.Position - goal).Magnitude <= 14)
+        end
+    end
+    return false
 end
 
 local function promptOf(m)
@@ -157,8 +184,8 @@ local function goSell()
     -- server kemungkinan validasi jarak: merapat ke NPC "Sell crops" dulu
     local pr = findPromptByAction("Sell crops")
     if not pr and State.sellPos then
-        -- area sell belum ke-stream: teleport ke posisi terakhir, tunggu stream, scan ulang
-        h.CFrame = CFrame.new(State.sellPos + Vector3.new(0, 6, 0))
+        -- area sell belum ke-stream: jalan ke posisi terakhir, tunggu stream, scan ulang
+        tpTo(h, State.sellPos, 6)
         task.wait(2.5)
         pr = findPromptByAction("Sell crops")
     end
@@ -171,7 +198,7 @@ local function goSell()
         if okP and pp then
             State.sellPos = pp -- ingat posisi NPC buat berikutnya
             if (pp - h.Position).Magnitude > 12 then
-                h.CFrame = CFrame.new(pp + Vector3.new(0, 6, 0))
+                tpTo(h, pp, 6)
                 task.wait(0.6)
             end
         end
@@ -184,13 +211,13 @@ local function goSell()
     local before = monedas()
     local ok = pcall(function() rem:FireServer("all") end)
     if not ok then
-        pcall(function() h.CFrame = backTo end)
+        tpTo(h, backTo.Position, 0)
         return false, "fire-gagal"
     end
     task.wait(2)
     local gained = monedas() - before
     closeSellDialog() -- buang dialog basi kalau ada
-    pcall(function() h.CFrame = backTo end)
+    tpTo(h, backTo.Position, 0)
     if gained > 0 then
         State.Sold += 1
         return true, ("sold +%d"):format(gained)
@@ -229,6 +256,13 @@ local function inOwnPlot(pos, pb)
     return pb and pos.X >= pb.x1 and pos.X <= pb.x2 and pos.Z >= pb.z1 and pos.Z <= pb.z2
 end
 
+-- drop milik orang lain (TakenBy = userId lain) tidak bisa diambil server
+local function isClaimed(m)
+    local ok, tb = pcall(function() return m:GetAttribute("TakenBy") end)
+    if not ok or tb == nil then return false end
+    return tostring(tb) ~= "" and tostring(tb) ~= "0" and tonumber(tb) ~= LP.UserId
+end
+
 local function pickOnce()
     local h = getHRP()
     if not h then return false, "no-char" end
@@ -244,7 +278,7 @@ local function pickOnce()
                     m:GetAttribute("Favorited")
             end)
             if okA and fav ~= true and State.Rarities[rar]
-                and (RARITY_RANK[rar] or 1) >= 1 and val >= State.MinValue then
+                and (RARITY_RANK[rar] or 1) >= 1 and val >= State.MinValue and not isClaimed(m) then
                 local okP, piv = pcall(function() return m:GetPivot().Position end)
                 if okP and piv.Magnitude > 1 and not inOwnPlot(piv, pb) then
                     local pr = promptOf(m)
@@ -262,11 +296,13 @@ local function pickOnce()
     if #cand == 0 then return false, "no-target" end
     table.sort(cand, function(a, b) return a.d < b.d end)
     local now = os.clock()
+    local maxN = State.Aggro and 12 or State.MultiPop
+    local throttle = State.Aggro and 0.3 or 1.0
     local fired = 0
     for _, c in ipairs(cand) do
-        if fired >= State.MultiPop then break end
+        if fired >= maxN then break end
         local uid = c.m:GetDebugId()
-        if now - (tryAt[uid] or 0) >= 1.0 and c.d <= c.range + 2 then
+        if now - (tryAt[uid] or 0) >= throttle and c.d <= c.range + 2 then
             tryAt[uid] = now
             if firePrompt(c.pr, 12) then fired += 1 end
         end
@@ -279,11 +315,12 @@ local function pickOnce()
     local best = cand[1]
     if not State.Teleport then return false, "far-" .. math.floor(best.d) end
     local uid = best.m:GetDebugId()
-    if now - (tryAt[uid] or 0) < 1.0 then return false, "retry" end
+    local tpThrottle = State.Aggro and 0.3 or 1.0
+    if now - (tryAt[uid] or 0) < tpThrottle then return false, "retry" end
     tryAt[uid] = now
     local okP, pos = pcall(function() return best.m:GetPivot().Position end)
     if not okP then return false, "no-pivot" end
-    h.CFrame = CFrame.new(pos + Vector3.new(0, 6, 0))
+    if not tpTo(h, pos, 6) then return false, "tp-gagal" end
     task.wait(0.5)
     if best.m.Parent == nil then return false, "target-gone" end
     firePrompt(best.pr, 12)
@@ -321,7 +358,7 @@ local function mainLoop()
             if not ok and (info == "no-target" or info == "no-dropitems") then
                 task.wait(1.5)
             else
-                task.wait(State.ScanDelay)
+                task.wait(State.Aggro and 0.15 or State.ScanDelay)
             end
         end
         State.Running = false State.StatusText = "Idle"
@@ -340,12 +377,41 @@ _G._cropMiscStop = function()
 end
 
 local VU = game:GetService("VirtualUser")
-LP.Idled:Connect(function()
+-- putus koneksi Idled lama biar tidak numpuk tiap execute
+if _G._cropAFKConn then
+    pcall(function() _G._cropAFKConn:Disconnect() end)
+    _G._cropAFKConn = nil
+end
+_G._cropAFKConn = LP.Idled:Connect(function()
     if not State.AntiAFK then return end
     pcall(function()
         VU:CaptureController()
         VU:ClickButton2(Vector2.new())
     end)
+end)
+-- lapis agresif: tiap 4 menit paksa input (klik + goyang kamera + lompat kecil)
+_G._cropAFKGen = (_G._cropAFKGen or 0) + 1
+local afkGen = _G._cropAFKGen
+task.spawn(function()
+    while _G._cropAFKGen == afkGen do
+        task.wait(240)
+        if _G._cropAFKGen ~= afkGen then break end
+        if not State.AntiAFK then continue end
+        pcall(function()
+            VU:CaptureController()
+            VU:ClickButton2(Vector2.new())
+            local cam = workspace.CurrentCamera
+            if cam then
+                cam.CFrame = cam.CFrame * CFrame.Angles(0, math.rad(3), 0)
+                task.wait(0.3)
+                cam.CFrame = cam.CFrame * CFrame.Angles(0, math.rad(-3), 0)
+            end
+            local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+            if hum and hum.FloorMaterial ~= Enum.Material.Air then
+                hum:Jump()
+            end
+        end)
+    end
 end)
 
 local function getHoe()
@@ -419,7 +485,7 @@ local function swingOnce()
             State.swingTpAt = os.clock()
             local okP, pos = pcall(function() return far:GetPivot().Position end)
             if okP then
-                h.CFrame = CFrame.new(pos + Vector3.new(0, 6, 4))
+                tpTo(h, pos, 6)
                 return false, ("tp-plot %dst"):format(fd)
             end
         end
@@ -473,7 +539,7 @@ MonFilterBox:CreateDropdown({
     end,
 })
 MonFilterBox:CreateDropdown({
-    Name = "Sort by", Options = { "Value", "Kg", "Jarak" }, CurrentOption = { "Value" },
+    Name = "Sort by", Options = { "Value", "Kg", "Jarak", "Luck" }, CurrentOption = { "Value" },
     Flag = "MonSort",
     Callback = function(v) State.MonSort = type(v) == "table" and v[1] or v end,
 })
@@ -484,7 +550,7 @@ local function monTp(i, rows)
     local s = rows[i]
     local h = getHRP()
     if s and s.m.Parent and s.pos and h then
-        pcall(function() h.CFrame = CFrame.new(s.pos + Vector3.new(0, 6, 0)) end)
+        tpTo(h, s.pos, 6)
         log("TP ke " .. s.name)
     else
         log("Drop sudah hilang.")
@@ -495,10 +561,11 @@ local MonTblWorld = Main:CreateTable({
     MaxRows = 10,
     Search = false,
     Columns = {
-        { Name = "#", Width = 0.08 },
-        { Name = "Crop", Width = 0.4 },
-        { Name = "Value", Width = 0.2 },
-        { Name = "Kg", Width = 0.16 },
+        { Name = "#", Width = 0.07 },
+        { Name = "Crop", Width = 0.33 },
+        { Name = "Value", Width = 0.17 },
+        { Name = "Kg", Width = 0.12 },
+        { Name = "Luck", Width = 0.13 },
         { Name = "Jarak", Width = 0.16 },
     },
     Rows = {},
@@ -516,6 +583,7 @@ local function monTrows(rows, store)
             Crop = string.format("[%s] %s", (r.rar or "?"):sub(1, 1), r.name),
             Value = tostring(math.floor(r.value)),
             Kg = string.format("%.1f", r.kg),
+            Luck = string.format("+%.1f%%", (r.luck or 0) * 100),
             Jarak = string.format("%.0fm", r.d),
             Colors = { Crop = RARITY_HEX[r.rar] or "#FFFFFF" },
         }
@@ -532,16 +600,16 @@ local function refreshMonitor()
     if di then
         for _, m in ipairs(di:GetChildren()) do
             if m:IsA("Model") then
-                local okA, rar, val, kg, gem, fav = pcall(function()
+                local okA, rar, val, kg, gem, fav, luck = pcall(function()
                     return m:GetAttribute("Rarity"), tonumber(m:GetAttribute("Value")) or 0,
                         tonumber(m:GetAttribute("Kg")) or 0, m:GetAttribute("GemName"),
-                        m:GetAttribute("Favorited")
+                        m:GetAttribute("Favorited"), tonumber(m:GetAttribute("Luck")) or 0
                 end)
-                if okA and fav ~= true and State.MonRar[rar] then
+                if okA and fav ~= true and State.MonRar[rar] and not isClaimed(m) then
                     local okP, pos = pcall(function() return m:GetPivot().Position end)
                     if okP and pos.Magnitude > 1 then
                         local e = { m = m, name = gem or m.Name, rar = rar,
-                            d = (pos - myPos).Magnitude, pos = pos, value = val, kg = kg }
+                            d = (pos - myPos).Magnitude, pos = pos, value = val, kg = kg, luck = luck }
                         if inOwnPlot(pos, pb) then
                             -- di plot sendiri: tidak bisa diambil, skip
                         else
@@ -557,6 +625,8 @@ local function refreshMonitor()
             table.sort(t, function(a, b) return a.kg > b.kg end)
         elseif State.MonSort == "Jarak" then
             table.sort(t, function(a, b) return a.d < b.d end)
+        elseif State.MonSort == "Luck" then
+            table.sort(t, function(a, b) return (a.luck or 0) > (b.luck or 0) end)
         else
             table.sort(t, function(a, b) return a.value > b.value end)
         end
@@ -623,6 +693,11 @@ Vac:CreateSlider({
     CurrentValue = 0.4, Flag = "ScanDelay",
     Callback = function(V) State.ScanDelay = V end,
 })
+Vac:CreateToggle({
+    Name = "Agresif", Flag = "Aggro", CurrentValue = false,
+    Desc = "12x fire/tick, jeda 0.15 dtk, throttle 0.3 dtk. Berisiko flag!",
+    Callback = function(On) State.Aggro = On end,
+})
 
 local Swing = Main:CreateGroupbox({ Name = "Auto Swing", Side = "Left" })
 Swing:CreateToggle({
@@ -653,8 +728,7 @@ Swing:CreateButton({
         if h and first then
             local okP, pos = pcall(function() return first:GetPivot().Position end)
             if okP then
-                h.CFrame = CFrame.new(pos + Vector3.new(0, 6, 4))
-                log("TP ke plot")
+                if tpTo(h, pos, 6) then log("TP ke plot") else log("TP gagal (ketarik)") end
             end
         else
             log("Plot tidak ketemu.")
@@ -699,7 +773,7 @@ Main:CreateGroupbox({ Name = "Info", Side = "Right" }):CreateLabel({
                         return m:GetAttribute("Rarity"), tonumber(m:GetAttribute("Value")) or 0,
                             m:GetAttribute("Favorited")
                     end)
-                    if okA and fav ~= true and State.Rarities[rar] and val >= State.MinValue then
+                    if okA and fav ~= true and State.Rarities[rar] and val >= State.MinValue and not isClaimed(m) then
                         n += 1
                     end
                 end
@@ -914,6 +988,62 @@ BB:CreateStatus({
     UpdateRate = 5,
 })
 BB:CreateLabel({ Text = "Status: -", Update = function() return "Status: " .. State.BuyInfo end, UpdateRate = 1 })
+
+local HOE_IDS = { "HierroOxidado", "PiedraAstillada", "Cobre", "HierroForjado", "AceroReforzado", "Titanio", "Esmeralda", "Escarcha", "Basalto", "Obsidiana", "Diamante", "Tormenta", "Carnivora", "GuadanaHueso", "ApexCelestial", "ColmilloEclipse", "GuadanaLava", "TronoNebular", "Vacio", "CoronaEstelar", "Horizonte" }
+local HOE_OPTS = { "HierroOxidado - 1", "PiedraAstillada - 120", "Cobre - 1.5K", "HierroForjado - 2.5K", "AceroReforzado - 10K", "Titanio - 15K", "Esmeralda - 23K", "Escarcha - 90K", "Basalto - 155K", "Obsidiana - 265K", "Tormenta - 860K", "Carnivora - 1.35M", "Diamante - 2.1M", "GuadanaHueso - 5.3M", "ApexCelestial - 8M", "ColmilloEclipse - 16M", "GuadanaLava - 31M", "TronoNebular - 42M", "Vacio - 57M", "CoronaEstelar - 70M", "Horizonte - 84M" }
+local function hoeIdOf(opt)
+    if type(opt) == "table" then opt = opt[1] end
+    local id = tostring(opt or ""):match("^(.-) %-")
+    return id or tostring(opt or "HierroForjado")
+end
+State.HoeSel = "HierroForjado"
+State.HoeInfo = "-"
+
+local HS = Buy:CreateGroupbox({ Name = "Beli Sabit", Side = "Right" })
+HS:CreateLabel({ Text = "Harga dari HoeConfig (1 - 84M). Pilih lalu Beli.", UpdateRate = 0 })
+HS:CreateDropdown({
+    Name = "Sabit", Options = HOE_OPTS, CurrentOption = { "HierroForjado - 2.5K" },
+    Searchable = true, Flag = "HoeSel",
+    Callback = function(v)
+        State.HoeSel = hoeIdOf(v)
+    end,
+})
+HS:CreateStatus({
+    Name = "Harga", Style = "Row", Pin = true,
+    Update = function()
+        local ok, mod = pcall(require, RS:FindFirstChild("HoeConfig"))
+        if not (ok and mod and mod.byId) then return "?" end
+        local s, r = pcall(function() return mod.byId(State.HoeSel) end)
+        if s and type(r) == "table" then
+            return ("%s | %s coins | pow %s"):format(tostring(r.name or State.HoeSel), tostring(r.price or "?"), tostring(r.power or "?"))
+        end
+        return "?"
+    end,
+    UpdateRate = 5,
+})
+HS:CreateButton({
+    Name = "Beli Sabit", Style = "Primary", Callback = function()
+        local remotes = RS:FindFirstChild("Remotes")
+        local buy = remotes and remotes:FindFirstChild("HoeBuy")
+        if not buy then State.HoeInfo = "no-remote" return end
+        local before = buyMonedas()
+        local ok = pcall(function() buy:FireServer(State.HoeSel) end)
+        task.wait(2)
+        local gained = buyMonedas() - before
+        State.HoeInfo = ok and (gained < 0 and ("beli OK (%d coins)"):format(-gained) or "cek tas (mungkin sudah punya / duit kurang)") or "fire-gagal"
+        log("Beli sabit: " .. State.HoeInfo)
+    end,
+})
+HS:CreateButton({
+    Name = "Equip Sabit", Callback = function()
+        local remotes = RS:FindFirstChild("Remotes")
+        local eq = remotes and remotes:FindFirstChild("HoeEquip")
+        if not eq then State.HoeInfo = "no-remote" return end
+        local ok = pcall(function() eq:FireServer(State.HoeSel) end)
+        State.HoeInfo = ok and "equip dikirim" or "equip-gagal"
+    end,
+})
+HS:CreateLabel({ Text = "Status: -", Update = function() return "Status: " .. State.HoeInfo end, UpdateRate = 1 })
 
 local Settings = Window:CreateTab({ Name = "Settings", Icon = "settings" })
 Settings:CreateConfigManager({ Side = "Left" })
